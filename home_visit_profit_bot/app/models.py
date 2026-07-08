@@ -64,12 +64,14 @@ class Visit:
     estimated_day_hourly_before: float | None = None
     estimated_day_hourly_after: float | None = None
     completed_at: str | None = None
+    clinic: str | None = None
 
 
 @dataclass(frozen=True)
 class AddVisitInput:
     address: str
     income: float
+    clinic: str
     route_km: float | None = None
     route_minutes: float | None = None
     district: str | None = None

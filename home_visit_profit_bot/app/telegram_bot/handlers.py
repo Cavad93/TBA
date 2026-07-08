@@ -28,6 +28,7 @@ from app.telegram_bot.keyboards import main_menu_keyboard
 from app.telegram_bot.messages import optimized_route_message, stats_period_message, summary_message
 from app.telegram_bot.conversations import (
     ADD_ADDRESS,
+    ADD_CLINIC,
     ADD_COORDS,
     ADD_DISTRICT,
     ADD_INCOME,
@@ -59,6 +60,7 @@ from app.telegram_bot.conversations import (
     NEW_START,
     NEW_START_COORDS,
     add_address,
+    add_clinic,
     add_coords,
     add_district,
     add_income,
@@ -173,7 +175,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Бот для расчёта рентабельности вызовов врача на дом.\n\n"
         "Главные команды:\n"
         "/newday — начать день\n"
-        "/add адрес | доход — добавить кандидат с авторасчётом маршрута\n"
+        "/add адрес | доход — добавить кандидат с авторасчётом маршрута, затем бот спросит клинику\n"
         "/accept или /reject — принять/отклонить последний кандидат\n"
         "/complete <номер> — завершить адрес\n"
         "/cancel_visit <номер> — отменить активный адрес\n"
@@ -798,6 +800,7 @@ def build_handlers() -> list:
         states={
             ADD_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_address)],
             ADD_INCOME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_income)],
+            ADD_CLINIC: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_clinic)],
             ADD_KM: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_km)],
             ADD_MINUTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_minutes)],
             ADD_DISTRICT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_district)],

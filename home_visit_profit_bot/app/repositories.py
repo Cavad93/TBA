@@ -59,6 +59,7 @@ def _visit_from_row(row: sqlite3.Row) -> Visit:
         order_number=row["order_number"],
         address=row["address"],
         normalized_address=row["normalized_address"],
+        clinic=row["clinic"],
         district=row["district"],
         is_base_district=bool(row["is_base_district"]),
         lat=row["lat"],
@@ -240,6 +241,7 @@ class VisitRepository:
         lat: float | None = None,
         lon: float | None = None,
         normalized_address: str | None = None,
+        clinic: str | None = None,
     ) -> Visit:
         self.connection.execute(
             "UPDATE visits SET status = 'rejected' WHERE work_day_id = ? AND status = 'candidate'",
@@ -248,14 +250,15 @@ class VisitRepository:
         cursor = self.connection.execute(
             """
             INSERT INTO visits(
-                work_day_id, status, address, normalized_address, district, is_base_district,
+                work_day_id, status, address, normalized_address, clinic, district, is_base_district,
                 lat, lon, income, estimated_extra_km, estimated_extra_minutes, created_at
-            ) VALUES (?, 'candidate', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, 'candidate', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 day_id,
                 address,
                 normalized_address or address,
+                clinic,
                 district,
                 int(is_base_district),
                 lat,

@@ -27,7 +27,7 @@ def test_location_update_notifies_after_dwell(tmp_path):
         settings.set("location_geofence_radius_m", "120")
         settings.set("location_dwell_minutes", "12")
         day = days.create("home", "home", 30, 20, 59.98, 30.37, 59.98, 30.37)
-        visit = visits.create_candidate(day.id, "test address", 1000, 0, 0, None, True, 59.984837, 30.370117)
+        visit = visits.create_candidate(day.id, "test address", 1000, 0, 0, None, True, 59.984837, 30.370117, clinic="Династия")
         visits.accept(visit.id)
 
         first = process_location_update(
@@ -100,7 +100,7 @@ def test_location_update_ignores_huge_gps_jump(tmp_path):
         samples = LocationSampleRepository(connection)
         location_state = WorkDayLocationRepository(connection)
         day = days.create("home", "home", 30, 20, 59.98, 30.37, 59.98, 30.37)
-        visit = visits.create_candidate(day.id, "test address", 1000, 0, 0, None, True, 59.984837, 30.370117)
+        visit = visits.create_candidate(day.id, "test address", 1000, 0, 0, None, True, 59.984837, 30.370117, clinic="Династия")
         visits.accept(visit.id)
 
         process_location_update(

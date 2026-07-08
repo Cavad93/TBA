@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS visits (
     order_number INTEGER,
     address TEXT NOT NULL,
     normalized_address TEXT,
+    clinic TEXT,
     district TEXT,
     is_base_district INTEGER DEFAULT 0,
     lat REAL,
@@ -203,6 +204,7 @@ def init_db(config: AppConfig) -> None:
 
 
 def _ensure_columns(connection: sqlite3.Connection) -> None:
+    _ensure_column(connection, "visits", "clinic", "TEXT")
     _ensure_column(connection, "work_days", "telemed_minutes", "REAL DEFAULT 0")
     _ensure_column(connection, "work_days", "planned_route_time_factor", "REAL DEFAULT 1.0")
     _ensure_column(connection, "work_days", "start_odometer", "REAL DEFAULT 0")

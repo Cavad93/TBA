@@ -22,6 +22,7 @@ def candidate_calculation_message(calculation: CandidateCalculation) -> str:
     required_tariff = _required_tariff_text(calculation)
     return (
         f"Адрес: {candidate.address}\n"
+        f"Клиника: {candidate.clinic or 'не указана'}\n"
         f"Найдено как: {found_as}\n"
         f"Координаты: {coordinates}\n"
         f"Район/локация: {candidate.district or 'не указан'} ({zone})\n"
@@ -124,7 +125,7 @@ def route_message(day: WorkDay, visits: list[Visit]) -> str:
     total_minutes = 0.0
     for visit in sorted(active_visits, key=lambda item: (item.order_number or item.id, item.id)):
         lines.append(
-            f"{visit.order_number or visit.id}. {visit.address} — {rub(visit.income)} — "
+            f"{visit.order_number or visit.id}. {_visit_label(visit)} — {rub(visit.income)} — "
             f"{visit.estimated_extra_km:.1f} км, {minutes_to_text(visit.estimated_extra_minutes)}"
         )
         total_km += visit.estimated_extra_km
@@ -164,14 +165,14 @@ def optimized_route_message(day: WorkDay, visits: list[Visit], route: RouteSumma
             if visit is None:
                 continue
             lines.append(
-                f"{order_number}. {visit.address} — {rub(visit.income)} — "
+                f"{order_number}. {_visit_label(visit)} — {rub(visit.income)} — "
                 f"{leg.km:.1f} км, {minutes_to_text(leg.minutes)}"
             )
             order_number += 1
     else:
         for visit in sorted(active_by_id.values(), key=lambda item: (item.order_number or item.id, item.id)):
             lines.append(
-                f"{visit.order_number or visit.id}. {visit.address} — {rub(visit.income)} — "
+                f"{visit.order_number or visit.id}. {_visit_label(visit)} — {rub(visit.income)} — "
                 f"{visit.estimated_extra_km:.1f} км, {minutes_to_text(visit.estimated_extra_minutes)}"
             )
     lines.extend(
@@ -191,6 +192,10 @@ def _current_route_label(day: WorkDay, visits: list[Visit], route: RouteSummary)
     if completed:
         return sorted(completed, key=lambda visit: visit.completed_at or "")[-1].address
     return day.start_address or "не указана"
+
+
+def _visit_label(visit: Visit) -> str:
+    return f"{visit.clinic}: {visit.address}" if visit.clinic else visit.address
 
 
 def summary_message(

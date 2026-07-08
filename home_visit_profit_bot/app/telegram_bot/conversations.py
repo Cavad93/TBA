@@ -33,7 +33,7 @@ from app.telegram_bot.safe_send import safe_reply_text
 from app.utils.text_utils import parse_float
 
 NEW_START, NEW_START_COORDS, NEW_FINISH, NEW_FINISH_COORDS, NEW_SPEED, NEW_SERVICE, NEW_ODOMETER = range(7)
-ADD_ADDRESS, ADD_INCOME, ADD_KM, ADD_MINUTES, ADD_DISTRICT, ADD_COORDS = range(10, 16)
+ADD_ADDRESS, ADD_INCOME, ADD_CLINIC, ADD_KM, ADD_MINUTES, ADD_DISTRICT, ADD_COORDS = range(10, 17)
 (
     END_KM,
     END_ODOMETER,
@@ -235,6 +235,9 @@ async def newday_odometer(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return ConversationHandler.END
 
 
+CLINIC_OPTIONS = ("Династия", "ПСК", "ВИТАМЕД", "ДНД")
+
+
 def parse_add_payload(text: str) -> dict[str, object]:
     payload = text.partition(" ")[2].strip()
     parts = [part.strip() for part in payload.split("|")] if payload else []
@@ -244,11 +247,17 @@ def parse_add_payload(text: str) -> dict[str, object]:
     if len(parts) >= 2 and parts[1]:
         data["income"] = parse_float(parts[1])
     if len(parts) >= 3 and parts[2]:
-        data["route_km"] = parse_float(parts[2])
+        clinic = _normalize_clinic(parts[2])
+        if clinic is not None:
+            data["clinic"] = clinic
+        else:
+            data["route_km"] = parse_float(parts[2])
     if len(parts) >= 4 and parts[3]:
         data["route_minutes"] = parse_float(parts[3])
     if len(parts) >= 5 and parts[4]:
         data["district"] = parts[4]
+    if len(parts) >= 6 and parts[5]:
+        data["clinic"] = _normalize_clinic(parts[5]) or parts[5]
     return data
 
 
@@ -257,8 +266,8 @@ async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         data = parse_add_payload(update.effective_message.text)
     except ValueError:
         await update.effective_message.reply_text(
-            "Формат: /add адрес | доход | км | минуты | район\n"
-            "Теперь км и минуты можно не указывать: /add Мурино, Воронцовский 5 | 2500"
+            "Формат: /add адрес | доход | км | минуты | район | клиника\n"
+            "Теперь км, минуты, район и клинику можно не указывать: /add Мурино, Воронцовский 5 | 2500"
         )
         return ConversationHandler.END
     context.user_data["add"] = data
@@ -279,6 +288,15 @@ async def add_income(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     except ValueError:
         await update.effective_message.reply_text("Доход должен быть числом. Попробуйте ещё раз.")
         return ADD_INCOME
+    return await _continue_add(update, context)
+
+
+async def add_clinic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    clinic = _normalize_clinic(update.effective_message.text)
+    if clinic is None:
+        await update.effective_message.reply_text(_clinic_question("Не понял клинику. Выберите из списка:"))
+        return ADD_CLINIC
+    context.user_data["add"]["clinic"] = clinic
     return await _continue_add(update, context)
 
 
@@ -329,6 +347,14 @@ async def _continue_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     if float(data["income"]) <= 0:
         await update.effective_message.reply_text("Доход должен быть больше 0.")
         return ADD_INCOME
+    if "clinic" not in data:
+        await update.effective_message.reply_text(_clinic_question("От какой клиники вызов?"))
+        return ADD_CLINIC
+    clinic = _normalize_clinic(str(data["clinic"]))
+    if clinic is None:
+        await update.effective_message.reply_text(_clinic_question("Не понял клинику. Выберите из списка:"))
+        return ADD_CLINIC
+    data["clinic"] = clinic
     if "route_km" in data and float(data["route_km"]) < 0:
         await update.effective_message.reply_text("Километры не могут быть отрицательными.")
         return ADD_KM
@@ -384,6 +410,7 @@ async def _finish_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         day_id=day.id,
         address=data.address,
         income=data.income,
+        clinic=data.clinic,
         route_km=data.route_km or 0,
         route_minutes=data.route_minutes or 0,
         district=district,
@@ -406,6 +433,7 @@ async def _finish_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         context.user_data["add"] = {
             "address": data.address,
             "income": data.income,
+            "clinic": data.clinic,
             "district": data.district,
             "lat": geo.lat,
             "lon": geo.lon,
@@ -429,6 +457,24 @@ async def _finish_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         context.user_data["last_candidate_id"] = candidate.id
     context.user_data.pop("add", None)
     return ConversationHandler.END
+
+
+def _normalize_clinic(value: str) -> str | None:
+    normalized = value.strip().lower().replace("ё", "е")
+    if not normalized:
+        return None
+    by_number = {str(index): clinic for index, clinic in enumerate(CLINIC_OPTIONS, start=1)}
+    if normalized in by_number:
+        return by_number[normalized]
+    for clinic in CLINIC_OPTIONS:
+        if normalized == clinic.lower().replace("ё", "е"):
+            return clinic
+    return None
+
+
+def _clinic_question(title: str) -> str:
+    options = "\n".join(f"{index}) {clinic}" for index, clinic in enumerate(CLINIC_OPTIONS, start=1))
+    return f"{title}\n{options}\n\nМожно ответить цифрой или названием."
 
 
 def _fill_point_from_settings(data: dict, point_key: str, setting_prefix: str) -> bool:

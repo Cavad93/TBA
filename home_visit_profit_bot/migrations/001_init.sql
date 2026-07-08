@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS visits (
     order_number INTEGER,
     address TEXT NOT NULL,
     normalized_address TEXT,
+    clinic TEXT,
     district TEXT,
     is_base_district INTEGER DEFAULT 0,
     lat REAL,
