@@ -1,0 +1,47 @@
+bot:
+  timezone: "Europe/Moscow"
+  language: "ru"
+
+finance:
+  min_hourly_income: 600
+  currency: "RUB"
+
+car:
+  car_cost_per_km: 17.05
+  amortization_factor: 0.8
+  fuel_price_per_liter: 70
+  fuel_consumption_l_per_100km: 10
+
+defaults:
+  avg_speed_kmh: 30
+  service_minutes: 20
+  telemed_minutes: 3
+  route_time_factor: 1.0
+
+route:
+  always_return_to_finish: true
+  optimize_after_each_accept: true
+
+geo:
+  default_city: "Санкт-Петербург"
+  default_region: "Ленинградская область"
+  nominatim_url: "https://nominatim.openstreetmap.org"
+  user_agent: "home-visit-profit-bot/1.0"
+  base_districts:
+    - "Приморский"
+    - "Выборгский"
+    - "Калининский"
+
+routing:
+  osrm_url: "https://router.project-osrm.org"
+  request_timeout_seconds: 10
+  fallback_to_estimate: true
+  straight_line_factor: 1.35
+
+location_api:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8088
+  geofence_radius_m: 120
+  dwell_minutes: 12
+  notification_cooldown_minutes: 60
