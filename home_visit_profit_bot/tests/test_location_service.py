@@ -11,7 +11,7 @@ from app.repositories import (
     WorkDayLocationRepository,
     WorkDayRepository,
 )
-from app.services.location_service import process_location_update
+from app.services.location_service import calculate_location_day_estimate, process_location_update
 
 
 def test_location_update_notifies_after_dwell(tmp_path):
@@ -130,6 +130,89 @@ def test_location_update_ignores_huge_gps_jump(tmp_path):
 
     assert not jump.sample_valid
     assert jump.avg_speed_kmh == 0
+
+
+def test_gps_route_estimate_counts_slow_traffic_outside_visit_stops(tmp_path):
+    config = _config(tmp_path)
+    init_db(config)
+    with connect(config.database_path) as connection:
+        days = WorkDayRepository(connection)
+        visits = VisitRepository(connection)
+        events = LocationEventRepository(connection)
+        samples = LocationSampleRepository(connection)
+        location_state = WorkDayLocationRepository(connection)
+        day = days.create("home", "home", 30, 20, 59.98, 30.37, 59.98, 30.37)
+        visit = visits.create_candidate(day.id, "test address", 1000, 0, 0, None, True, 59.984837, 30.370117, clinic="Династия")
+        visits.accept(visit.id)
+        start = datetime(2026, 7, 8, 10, 0, 0)
+        _add_gps_minute_samples(samples, day.id, start, minutes=25, speed_kmh=5)
+        events.mark_inside(
+            work_day_id=day.id,
+            visit_id=visit.id,
+            seen_at=(start + timedelta(minutes=5)).isoformat(timespec="seconds"),
+            distance_m=20,
+            accuracy_m=10,
+        )
+        events.mark_inside(
+            work_day_id=day.id,
+            visit_id=visit.id,
+            seen_at=(start + timedelta(minutes=20)).isoformat(timespec="seconds"),
+            distance_m=20,
+            accuracy_m=10,
+        )
+
+        estimate = calculate_location_day_estimate(
+            day=day,
+            samples=samples,
+            location_state=location_state,
+            events=events,
+        )
+
+    assert estimate.total_work_minutes == 25
+    assert estimate.service_minutes == 15
+    assert estimate.route_minutes == 10
+
+
+def test_gps_route_estimate_uses_moving_time_without_detected_visits(tmp_path):
+    config = _config(tmp_path)
+    init_db(config)
+    with connect(config.database_path) as connection:
+        days = WorkDayRepository(connection)
+        events = LocationEventRepository(connection)
+        samples = LocationSampleRepository(connection)
+        location_state = WorkDayLocationRepository(connection)
+        day = days.create("home", "home", 30, 20, 59.98, 30.37, 59.98, 30.37)
+        start = datetime(2026, 7, 8, 10, 0, 0)
+        _add_gps_minute_samples(samples, day.id, start, minutes=25, speed_kmh=5)
+
+        estimate = calculate_location_day_estimate(
+            day=day,
+            samples=samples,
+            location_state=location_state,
+            events=events,
+        )
+
+    assert estimate.total_work_minutes == 25
+    assert estimate.detected_visits_count == 0
+    assert estimate.route_minutes == 0
+
+
+def _add_gps_minute_samples(samples: LocationSampleRepository, work_day_id: int, start: datetime, *, minutes: int, speed_kmh: float) -> None:
+    for minute in range(minutes + 1):
+        captured_at = start + timedelta(minutes=minute)
+        samples.add(
+            work_day_id=work_day_id,
+            lat=59.98,
+            lon=30.37,
+            accuracy_m=20,
+            provider="test",
+            captured_at=captured_at.isoformat(timespec="seconds"),
+            received_at=captured_at.isoformat(timespec="seconds"),
+            distance_from_prev_m=speed_kmh * 1000 / 60 if minute else 0,
+            seconds_from_prev=60 if minute else 0,
+            speed_kmh=speed_kmh if minute else 0,
+            is_valid=True,
+        )
 
 
 def _config(tmp_path):

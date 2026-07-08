@@ -179,8 +179,14 @@ def calculate_location_day_estimate(
     gps_started_at = str(state["gps_started_at"]) if state and state["gps_started_at"] else first_sample_at
     gps_finished_at = str(state["gps_finished_at"]) if state and state["gps_finished_at"] else last_sample_at
     total_work_minutes = _minutes_between(gps_started_at, gps_finished_at)
-    route_minutes = samples.route_minutes_between(day.id, gps_started_at, gps_finished_at, MOVING_SPEED_KMH)
     service_minutes, detected_count = _service_minutes_from_events(events, day.id)
+    moving_route_minutes = samples.route_minutes_between(day.id, gps_started_at, gps_finished_at, MOVING_SPEED_KMH)
+    route_minutes = moving_route_minutes
+    if detected_count:
+        route_minutes = max(
+            moving_route_minutes,
+            _route_minutes_excluding_visit_stops(samples, events, day.id, gps_started_at, gps_finished_at),
+        )
     avg_service = service_minutes / detected_count if detected_count else 0.0
     return LocationDayEstimate(
         total_work_minutes=total_work_minutes,
@@ -286,6 +292,109 @@ def _service_minutes_from_events(events: LocationEventRepository, work_day_id: i
             total += minutes
             count += 1
     return total, count
+
+
+def _route_minutes_excluding_visit_stops(
+    samples: LocationSampleRepository,
+    events: LocationEventRepository,
+    work_day_id: int,
+    start_at: str | None,
+    end_at: str | None,
+) -> float:
+    start_dt = _parse_datetime(start_at)
+    end_dt = _parse_datetime(end_at)
+    if start_dt is None or end_dt is None or end_dt <= start_dt:
+        return 0.0
+    stop_intervals = _visit_stop_intervals(events, work_day_id, start_dt, end_dt)
+    rows = samples.connection.execute(
+        """
+        SELECT captured_at, seconds_from_prev
+        FROM location_samples
+        WHERE work_day_id = ?
+          AND is_valid = 1
+          AND seconds_from_prev > 0
+          AND seconds_from_prev <= 180
+          AND captured_at >= ?
+          AND captured_at <= ?
+        ORDER BY captured_at ASC, id ASC
+        """,
+        (work_day_id, start_dt.isoformat(timespec="seconds"), end_dt.isoformat(timespec="seconds")),
+    ).fetchall()
+    route_seconds = 0.0
+    for row in rows:
+        segment_end = _parse_datetime(str(row["captured_at"]))
+        if segment_end is None:
+            continue
+        segment_seconds = float(row["seconds_from_prev"] or 0)
+        segment_start = segment_end - timedelta(seconds=segment_seconds)
+        segment_start = max(segment_start, start_dt)
+        segment_end = min(segment_end, end_dt)
+        if segment_end <= segment_start:
+            continue
+        seconds = (segment_end - segment_start).total_seconds()
+        seconds -= _overlap_seconds(segment_start, segment_end, stop_intervals)
+        route_seconds += max(0.0, seconds)
+    return route_seconds / 60
+
+
+def _visit_stop_intervals(
+    events: LocationEventRepository,
+    work_day_id: int,
+    start_dt: datetime,
+    end_dt: datetime,
+) -> list[tuple[datetime, datetime]]:
+    rows = events.connection.execute(
+        """
+        SELECT first_seen_at, last_seen_at
+        FROM visit_location_events
+        WHERE work_day_id = ?
+        ORDER BY first_seen_at ASC
+        """,
+        (work_day_id,),
+    ).fetchall()
+    intervals: list[tuple[datetime, datetime]] = []
+    for row in rows:
+        first_seen = _parse_datetime(row["first_seen_at"])
+        last_seen = _parse_datetime(row["last_seen_at"])
+        if first_seen is None or last_seen is None or last_seen <= first_seen:
+            continue
+        interval_start = max(first_seen, start_dt)
+        interval_end = min(last_seen, end_dt)
+        if interval_end > interval_start:
+            intervals.append((interval_start, interval_end))
+    return _merge_intervals(intervals)
+
+
+def _merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
+    if not intervals:
+        return []
+    intervals = sorted(intervals)
+    merged = [intervals[0]]
+    for current_start, current_end in intervals[1:]:
+        previous_start, previous_end = merged[-1]
+        if current_start <= previous_end:
+            merged[-1] = (previous_start, max(previous_end, current_end))
+        else:
+            merged.append((current_start, current_end))
+    return merged
+
+
+def _overlap_seconds(
+    segment_start: datetime,
+    segment_end: datetime,
+    intervals: list[tuple[datetime, datetime]],
+) -> float:
+    overlap = 0.0
+    for interval_start, interval_end in intervals:
+        if interval_end <= segment_start:
+            continue
+        if interval_start >= segment_end:
+            break
+        overlap_start = max(segment_start, interval_start)
+        overlap_end = min(segment_end, interval_end)
+        if overlap_end > overlap_start:
+            overlap += (overlap_end - overlap_start).total_seconds()
+    return overlap
 
 
 def _minutes_between(start: str | None, end: str | None) -> float:
