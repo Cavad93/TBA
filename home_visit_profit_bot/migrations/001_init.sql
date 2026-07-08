@@ -76,6 +76,16 @@ CREATE TABLE IF NOT EXISTS expenses (
     FOREIGN KEY(work_day_id) REFERENCES work_days(id)
 );
 
+CREATE TABLE IF NOT EXISTS telemed_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_day_id INTEGER NOT NULL,
+    clinic TEXT NOT NULL,
+    income REAL NOT NULL,
+    minutes REAL NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(work_day_id) REFERENCES work_days(id)
+);
+
 CREATE TABLE IF NOT EXISTS address_cache (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     input_text TEXT NOT NULL UNIQUE,

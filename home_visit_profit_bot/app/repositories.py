@@ -704,6 +704,44 @@ class ExpenseRepository:
         self.connection.commit()
 
 
+class TelemedRepository:
+    def __init__(self, connection: sqlite3.Connection):
+        self.connection = connection
+
+    def add(self, day_id: int, clinic: str, income: float, minutes: float) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO telemed_entries(work_day_id, clinic, income, minutes, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (day_id, clinic, income, minutes, now_iso()),
+        )
+        self.connection.commit()
+
+    def list_for_day(self, day_id: int) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            "SELECT * FROM telemed_entries WHERE work_day_id = ? ORDER BY id",
+            (day_id,),
+        ).fetchall()
+
+    def aggregate_between(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            """
+            SELECT
+                clinic,
+                COALESCE(SUM(income), 0) AS telemed_income,
+                COALESCE(SUM(minutes), 0) AS telemed_minutes,
+                COUNT(*) AS telemed_count
+            FROM telemed_entries
+            JOIN work_days ON work_days.id = telemed_entries.work_day_id
+            WHERE work_days.date >= ? AND work_days.date < ?
+            GROUP BY clinic
+            ORDER BY clinic
+            """,
+            (start_date, end_date),
+        ).fetchall()
+
+
 class DailyStatsRepository:
     def __init__(self, connection: sqlite3.Connection):
         self.connection = connection
@@ -824,6 +862,26 @@ class DailyStatsRepository:
         result["start_date"] = start_date
         result["end_date"] = end_date
         return result
+
+    def clinic_visit_totals_between(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            """
+            SELECT
+                COALESCE(NULLIF(visits.clinic, ''), 'Без клиники') AS clinic,
+                COUNT(*) AS visits_count,
+                COALESCE(SUM(visits.income), 0) AS visit_income,
+                COALESCE(SUM(visits.estimated_extra_minutes), 0) AS route_minutes,
+                COALESCE(SUM(daily_stats.actual_service_minutes_per_visit), 0) AS service_minutes
+            FROM visits
+            JOIN work_days ON work_days.id = visits.work_day_id
+            LEFT JOIN daily_stats ON daily_stats.work_day_id = work_days.id
+            WHERE work_days.date >= ? AND work_days.date < ?
+              AND visits.status = 'completed'
+            GROUP BY COALESCE(NULLIF(visits.clinic, ''), 'Без клиники')
+            ORDER BY clinic
+            """,
+            (start_date, end_date),
+        ).fetchall()
 
 
 class AddressCacheRepository:

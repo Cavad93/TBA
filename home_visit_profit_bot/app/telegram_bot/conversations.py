@@ -11,6 +11,7 @@ from app.repositories import (
     LocationEventRepository,
     LocationSampleRepository,
     SettingsRepository,
+    TelemedRepository,
     VisitRepository,
     WorkDayLocationRepository,
     WorkDayRepository,
@@ -23,6 +24,7 @@ from app.services.geocoding_service import (
     manual_geocoding_result,
     parse_coordinates,
 )
+from app.services.clinic_report_service import build_active_clinic_breakdown
 from app.services.profitability_service import calculate_candidate_impact
 from app.services.routing_service import RoutingError
 from app.services.location_service import calculate_location_day_estimate
@@ -566,6 +568,7 @@ async def endday_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         await update.effective_message.reply_text("Сейчас нет активного рабочего дня. Сначала выполните /newday.")
         return ConversationHandler.END
     context.user_data["endday"] = {
+        "existing_telemed_income": day.telemed_income,
         "existing_telemed_minutes": day.telemed_minutes,
         "start_odometer": day.start_odometer,
         "default_fuel_consumption": rolling.fuel_consumption_l_per_100km if rolling else 10,
@@ -792,16 +795,23 @@ async def end_fuel_consumption(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.effective_message.reply_text("Расход должен быть больше 0.")
             return END_FUEL_CONSUMPTION
         context.user_data["endday"]["fuel_consumption_l_per_100km"] = consumption
-    await update.effective_message.reply_text("Сколько получили телемедициной?")
+    existing = float(context.user_data["endday"].get("existing_telemed_income", 0) or 0)
+    await update.effective_message.reply_text(
+        f"Сколько получили телемедициной? Напишите '-' чтобы оставить уже учтённые {existing:.0f} ₽."
+    )
     return END_TELEMED
 
 
 async def end_telemed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    try:
-        value = parse_float(update.effective_message.text)
-    except ValueError:
-        await update.effective_message.reply_text("Введите число.")
-        return END_TELEMED
+    text = update.effective_message.text.strip()
+    if text == "-":
+        value = float(context.user_data["endday"].get("existing_telemed_income", 0) or 0)
+    else:
+        try:
+            value = parse_float(text)
+        except ValueError:
+            await update.effective_message.reply_text("Введите число или '-'.")
+            return END_TELEMED
     if value < 0:
         await update.effective_message.reply_text("Значение не может быть отрицательным.")
         return END_TELEMED
@@ -904,6 +914,7 @@ async def end_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.effective_message.reply_text("Введите число.")
         return END_OTHER
     data_dict = dict(context.user_data["endday"])
+    data_dict.pop("existing_telemed_income", None)
     data_dict.pop("existing_telemed_minutes", None)
     data_dict.pop("gps_total_work_minutes", None)
     data_dict.pop("gps_route_minutes", None)
@@ -925,6 +936,14 @@ async def end_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             "Проверьте километры, скорость или время смены."
         )
         return ConversationHandler.END
+    clinic_breakdown = build_active_clinic_breakdown(
+        visits=visits.list_for_day(day.id, ("completed",)),
+        telemed_entries=TelemedRepository(connection).list_for_day(day.id),
+        service_minutes_per_visit=stats.actual_service_minutes_per_visit,
+        total_expenses=stats.total_expenses,
+        total_telemed_income=stats.telemed_income,
+        total_telemed_minutes=stats.total_work_minutes - stats.total_route_minutes - stats.total_service_minutes,
+    )
     rolling = calculate_rolling_averages(stats_repo, settings)
     if stats.fuel_purchase_expenses > 0 and rolling.fuel_cost_per_km > 0:
         settings.set("car_cost_per_km", f"{rolling.fuel_cost_per_km:.4f}")
@@ -936,7 +955,7 @@ async def end_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         settings.set("last_odometer_reading", f"{stats.end_odometer:.4f}")
     connection.close()
     await update.effective_message.reply_text(
-        daily_stats_message(stats)
+        daily_stats_message(stats, clinic_breakdown)
         + f"\n\nНовое среднее за 7 дней:\n- скорость: {rolling.avg_speed_kmh:.1f} км/ч\n"
         + f"- время на адресе: {rolling.service_minutes:.1f} мин\n"
         + f"- поправка OSRM по времени: x{rolling.route_time_factor:.2f}\n"
@@ -951,5 +970,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.pop("newday", None)
     context.user_data.pop("add", None)
     context.user_data.pop("endday", None)
+    context.user_data.pop("telemed", None)
     await update.effective_message.reply_text("Ок, диалог отменён.")
     return ConversationHandler.END

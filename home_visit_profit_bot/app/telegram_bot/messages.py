@@ -203,6 +203,7 @@ def summary_message(
     visits: list[Visit],
     fuel_cost_per_km: float,
     amortization_factor: float,
+    clinic_breakdown: list | None = None,
 ) -> str:
     active_visits = [visit for visit in visits if visit.status in {"accepted", "completed"}]
     km = sum(visit.estimated_extra_km for visit in active_visits)
@@ -223,7 +224,7 @@ def summary_message(
     net_profit = total_income - total_expenses
     total_minutes = minutes + service_minutes + day.telemed_minutes
     hourly = net_profit / (total_minutes / 60) if total_minutes > 0 else 0
-    return (
+    text = (
         "Сводка активного дня:\n"
         f"Адресов принято/завершено: {len(active_visits)}\n"
         f"Выручка по вызовам: {rub(visit_income)}\n"
@@ -244,9 +245,12 @@ def summary_message(
         f"Время по плану: {minutes_to_text(total_minutes)}\n"
         f"Чистый доход/час: {rub_per_hour(hourly)}"
     )
+    if clinic_breakdown:
+        text += "\n\n" + clinic_breakdown_message(clinic_breakdown)
+    return text
 
 
-def daily_stats_message(stats: DailyStats) -> str:
+def daily_stats_message(stats: DailyStats, clinic_breakdown: list | None = None) -> str:
     total_compensation = (
         stats.fuel_compensation
         + stats.parking_compensation
@@ -258,7 +262,7 @@ def daily_stats_message(stats: DailyStats) -> str:
         if stats.fuel_consumption_l_per_100km > 0
         else "нет данных по литрам"
     )
-    return (
+    text = (
         "Итог дня:\n"
         f"Адресов завершено: {stats.completed_visits_count}\n"
         f"Рабочее расстояние: {stats.actual_km:.1f} км\n"
@@ -295,9 +299,12 @@ def daily_stats_message(stats: DailyStats) -> str:
         f"Фактическая средняя скорость: {stats.actual_avg_speed_kmh:.1f} км/ч\n"
         f"Фактическое среднее время на адресе: {minutes_to_text(stats.actual_service_minutes_per_visit)}"
     )
+    if clinic_breakdown:
+        text += "\n\n" + clinic_breakdown_message(clinic_breakdown)
+    return text
 
 
-def stats_period_message(title: str, stats: dict) -> str:
+def stats_period_message(title: str, stats: dict, clinic_breakdown: list | None = None) -> str:
     days_count = int(stats.get("days_count") or 0)
     if days_count == 0:
         return f"{title}\n\nДанных за этот период пока нет."
@@ -330,7 +337,7 @@ def stats_period_message(title: str, stats: dict) -> str:
         + float(stats.get("clinic_compensation") or 0)
     )
 
-    return (
+    text = (
         f"{title}\n\n"
         f"Рабочих дней: {days_count}\n"
         f"Адресов: {visits}\n"
@@ -369,3 +376,32 @@ def stats_period_message(title: str, stats: dict) -> str:
         f"Средняя дистанция на адрес: {km_per_visit:.1f} км\n"
         f"Средняя поправка OSRM: x{float(stats.get('avg_route_time_factor') or 0):.2f}"
     )
+    if clinic_breakdown:
+        text += "\n\n" + clinic_breakdown_message(clinic_breakdown)
+    return text
+
+
+def clinic_breakdown_message(items: list) -> str:
+    gross_total = sum(float(item.gross_income) for item in items)
+    net_total = sum(float(item.net_income) for item in items)
+    minutes_total = sum(float(item.work_minutes) for item in items)
+    hourly_total = net_total / (minutes_total / 60) if minutes_total > 0 else 0
+    lines = [
+        "По клиникам:",
+        f"Итого грязный доход: {rub(gross_total)}",
+        f"Итого чистый доход: {rub(net_total)}",
+        f"Итого чистый доход/час: {rub_per_hour(hourly_total)}",
+    ]
+    for item in items:
+        details = []
+        if item.visits_count:
+            details.append(f"адресов: {item.visits_count}")
+        if item.telemed_income:
+            details.append(f"телемед: {rub(item.telemed_income)} / {minutes_to_text(item.telemed_minutes)}")
+        suffix = f" ({', '.join(details)})" if details else ""
+        lines.append(
+            f"- {item.clinic}: грязный {rub(item.gross_income)}, "
+            f"чистый {rub(item.net_income)}, {rub_per_hour(item.net_hourly_income)}, "
+            f"время {minutes_to_text(item.work_minutes)}{suffix}"
+        )
+    return "\n".join(lines)

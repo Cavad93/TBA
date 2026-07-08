@@ -18,13 +18,15 @@ from app.repositories import (
     DailyStatsRepository,
     ExpenseRepository,
     SettingsRepository,
+    TelemedRepository,
     VisitRepository,
     WorkDayRepository,
 )
 from app.services.geocoding_service import GeocodingError, geocode_address, parse_coordinates
 from app.services.phrase_service import clinic_phrase
+from app.services.clinic_report_service import build_active_clinic_breakdown, build_period_clinic_breakdown
 from app.services.profitability_service import calculate_candidate_impact, calculate_remaining_route_summary
-from app.telegram_bot.keyboards import main_menu_keyboard
+from app.telegram_bot.keyboards import main_menu_keyboard, telemed_clinic_keyboard
 from app.telegram_bot.messages import optimized_route_message, stats_period_message, summary_message
 from app.telegram_bot.conversations import (
     ADD_ADDRESS,
@@ -101,6 +103,8 @@ from app.utils.text_utils import parse_amount_command, parse_float
 
 
 FINISH_ADDRESS, FINISH_COORDS = range(100, 102)
+TELEMED_AMOUNT, TELEMED_CLINIC = range(200, 202)
+TELEMED_CLINICS = {"пск": "ПСК", "днд": "ДНД"}
 
 
 def _repos(context: ContextTypes.DEFAULT_TYPE):
@@ -176,6 +180,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Главные команды:\n"
         "/newday — начать день\n"
         "/add адрес | доход — добавить кандидат с авторасчётом маршрута, затем бот спросит клинику\n"
+        "/telemed — добавить телемедицину с выбором ПСК/ДНД\n"
         "/accept или /reject — принять/отклонить последний кандидат\n"
         "/complete <номер> — завершить адрес\n"
         "/cancel_visit <номер> — отменить активный адрес\n"
@@ -487,11 +492,35 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         connection.close()
         await update.effective_message.reply_text("Сейчас нет активного рабочего дня. Сначала выполните /newday.")
         return
+    day_visits = visits.list_for_day(day.id)
+    active_visits = [visit for visit in day_visits if visit.status in {"accepted", "completed"}]
+    telemed_entries = TelemedRepository(connection).list_for_day(day.id)
+    fuel_cost_per_km = settings.get_float("car_cost_per_km", 17.05)
+    amortization_factor = settings.get_float("amortization_factor", 0.8)
+    km = sum(visit.estimated_extra_km for visit in active_visits)
+    fuel_expenses = day.fuel_expenses if day.fuel_expenses > 0 else km * fuel_cost_per_km
+    total_expenses = (
+        fuel_expenses
+        + fuel_expenses * amortization_factor
+        + day.parking_expenses
+        + day.food_expenses
+        + day.toll_expenses
+        + day.other_expenses
+    )
+    clinic_breakdown = build_active_clinic_breakdown(
+        visits=active_visits,
+        telemed_entries=telemed_entries,
+        service_minutes_per_visit=day.planned_service_minutes,
+        total_expenses=total_expenses,
+        total_telemed_income=day.telemed_income,
+        total_telemed_minutes=day.telemed_minutes,
+    )
     message = summary_message(
         day,
-        visits.list_for_day(day.id),
-        settings.get_float("car_cost_per_km", 17.05),
-        settings.get_float("amortization_factor", 0.8),
+        day_visits,
+        fuel_cost_per_km,
+        amortization_factor,
+        clinic_breakdown,
     )
     connection.close()
     await update.effective_message.reply_text(message)
@@ -507,8 +536,13 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     connection = connect(config.database_path)
     repo = DailyStatsRepository(connection)
     aggregate = repo.aggregate_between(start_date, end_date)
+    clinic_breakdown = build_period_clinic_breakdown(
+        visit_totals=repo.clinic_visit_totals_between(start_date, end_date),
+        telemed_totals=TelemedRepository(connection).aggregate_between(start_date, end_date),
+        total_expenses=float(aggregate.get("total_expenses") or 0),
+    )
     connection.close()
-    await update.effective_message.reply_text(stats_period_message(title, aggregate))
+    await update.effective_message.reply_text(stats_period_message(title, aggregate, clinic_breakdown))
 
 
 async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -645,41 +679,128 @@ async def money_command(update: Update, context: ContextTypes.DEFAULT_TYPE, fiel
     await update.effective_message.reply_text(f"{label}: {rub(amount)}")
 
 
-async def telemed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def telemed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     parts = update.effective_message.text.split()
-    if len(parts) < 2 or len(parts) > 3:
-        await update.effective_message.reply_text("Формат: /telemed <доход> [минуты]. Например: /telemed 700")
-        return
+    if len(parts) == 1:
+        context.user_data["telemed"] = {}
+        await update.effective_message.reply_text("Сколько получили телемедициной? Введите сумму.")
+        return TELEMED_AMOUNT
     try:
         amount = parse_float(parts[1])
-        minutes = parse_float(parts[2]) if len(parts) == 3 else None
     except ValueError:
-        await update.effective_message.reply_text("Доход и минуты должны быть числами.")
-        return
+        await update.effective_message.reply_text("Доход должен быть числом.")
+        return ConversationHandler.END
     if amount <= 0:
         await update.effective_message.reply_text("Доход должен быть больше 0.")
-        return
+        return ConversationHandler.END
+    minutes = None
+    clinic = None
+    if len(parts) >= 3:
+        try:
+            minutes = parse_float(parts[2])
+            if len(parts) >= 4:
+                clinic = _normalize_telemed_clinic(parts[3])
+        except ValueError:
+            clinic = _normalize_telemed_clinic(parts[2])
+    if len(parts) > 4 or clinic is None and len(parts) >= 4:
+        await update.effective_message.reply_text("Формат: /telemed <доход> [минуты] [ПСК|ДНД].")
+        return ConversationHandler.END
     connection, settings, days, _, _ = _repos(context)
     day = days.active()
     if day is None:
         connection.close()
         await update.effective_message.reply_text("Сейчас нет активного рабочего дня. Сначала выполните /newday.")
-        return
+        return ConversationHandler.END
     telemed_minutes = minutes if minutes is not None else settings.get_float("default_telemed_minutes", 3)
     if telemed_minutes < 0:
         connection.close()
         await update.effective_message.reply_text("Минуты не могут быть отрицательными.")
+        return ConversationHandler.END
+    if clinic is None:
+        connection.close()
+        context.user_data["telemed"] = {"amount": amount, "minutes": telemed_minutes}
+        await update.effective_message.reply_text(
+            "От какой клиники телемедицина?",
+            reply_markup=telemed_clinic_keyboard(),
+        )
+        return TELEMED_CLINIC
+    await _save_telemed(update, context, amount, telemed_minutes, clinic)
+    return ConversationHandler.END
+
+
+async def telemed_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    try:
+        amount = parse_float(update.effective_message.text)
+    except ValueError:
+        await update.effective_message.reply_text("Введите сумму числом.")
+        return TELEMED_AMOUNT
+    if amount <= 0:
+        await update.effective_message.reply_text("Сумма должна быть больше 0.")
+        return TELEMED_AMOUNT
+    connection, settings, days, _, _ = _repos(context)
+    day = days.active()
+    if day is None:
+        connection.close()
+        await update.effective_message.reply_text("Сейчас нет активного рабочего дня. Сначала выполните /newday.", reply_markup=main_menu_keyboard())
+        return ConversationHandler.END
+    minutes = settings.get_float("default_telemed_minutes", 3)
+    connection.close()
+    context.user_data["telemed"] = {"amount": amount, "minutes": minutes}
+    await update.effective_message.reply_text(
+        "От какой клиники телемедицина?",
+        reply_markup=telemed_clinic_keyboard(),
+    )
+    return TELEMED_CLINIC
+
+
+async def telemed_clinic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    clinic = _normalize_telemed_clinic(update.effective_message.text)
+    if clinic is None:
+        await update.effective_message.reply_text("Выберите ПСК или ДНД.", reply_markup=telemed_clinic_keyboard())
+        return TELEMED_CLINIC
+    data = context.user_data.get("telemed", {})
+    await _save_telemed(
+        update,
+        context,
+        float(data.get("amount", 0)),
+        float(data.get("minutes", 0)),
+        clinic,
+    )
+    context.user_data.pop("telemed", None)
+    return ConversationHandler.END
+
+
+async def _save_telemed(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    amount: float,
+    telemed_minutes: float,
+    clinic: str,
+) -> None:
+    connection, _, days, _, _ = _repos(context)
+    day = days.active()
+    if day is None:
+        connection.close()
+        await update.effective_message.reply_text("Сейчас нет активного рабочего дня. Сначала выполните /newday.", reply_markup=main_menu_keyboard())
         return
     days.add_money(day.id, "telemed_income", amount)
     days.add_money(day.id, "telemed_minutes", telemed_minutes)
+    TelemedRepository(connection).add(day.id, clinic, amount, telemed_minutes)
     updated = days.get(day.id)
     connection.close()
     total_income = updated.telemed_income if updated else day.telemed_income + amount
     total_minutes = updated.telemed_minutes if updated else day.telemed_minutes + telemed_minutes
     await update.effective_message.reply_text(
-        f"Телемедицина добавлена: {rub(amount)} / {telemed_minutes:.0f} мин.\n"
-        f"Итого за день: {rub(total_income)} / {total_minutes:.0f} мин."
+        f"Телемедицина добавлена: {clinic}, {rub(amount)} / {telemed_minutes:.0f} мин.\n"
+        f"Итого за день: {rub(total_income)} / {total_minutes:.0f} мин.",
+        reply_markup=main_menu_keyboard(),
     )
+
+
+def _normalize_telemed_clinic(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return TELEMED_CLINICS.get(value.strip().lower().replace("ё", "е"))
 
 
 async def parking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -846,12 +967,24 @@ def build_handlers() -> list:
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
+    telemed_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("telemed", telemed),
+            MessageHandler(filters.Regex("^Телемедицина$"), telemed),
+        ],
+        states={
+            TELEMED_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, telemed_amount)],
+            TELEMED_CLINIC: [MessageHandler(filters.TEXT & ~filters.COMMAND, telemed_clinic)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
     return [
         CommandHandler("start", start),
         newday_conv,
         add_conv,
         endday_conv,
         finish_conv,
+        telemed_conv,
         CommandHandler("accept", accept),
         CommandHandler("reject", reject),
         CommandHandler("complete", complete),
@@ -874,7 +1007,6 @@ def build_handlers() -> list:
         CommandHandler("set_straight_line_factor", set_straight_line_factor),
         CommandHandler("set_route_time_factor", set_route_time_factor),
         CommandHandler("set_routing_fallback", set_routing_fallback),
-        CommandHandler("telemed", telemed),
         CommandHandler("parking", parking),
         CommandHandler("food", food),
         CommandHandler("compensation", compensation),

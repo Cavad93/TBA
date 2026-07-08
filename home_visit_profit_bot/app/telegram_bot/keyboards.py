@@ -7,6 +7,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("Начать день"), KeyboardButton("Добавить адрес")],
+            [KeyboardButton("Телемедицина")],
             [KeyboardButton("Принять"), KeyboardButton("Отклонить")],
             [KeyboardButton("Маршрут"), KeyboardButton("Завершить адрес")],
             [KeyboardButton("Отменить адрес"), KeyboardButton("Изменить финиш")],
@@ -15,6 +16,15 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
         input_field_placeholder="Выберите действие",
+    )
+
+
+def telemed_clinic_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton("ПСК"), KeyboardButton("ДНД")]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+        input_field_placeholder="Выберите клинику",
     )
 
 
