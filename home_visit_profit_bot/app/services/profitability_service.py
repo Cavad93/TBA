@@ -141,6 +141,9 @@ def calculate_candidate_impact(
     fuel_cost_per_km = settings_repo.get_float("car_cost_per_km", 17.05)
     amortization_factor = settings_repo.get_float("amortization_factor", 0.8)
     min_hourly = settings_repo.get_float("min_hourly_income", 600)
+    min_marginal_hourly = settings_repo.get_float("min_marginal_hourly_income", min_hourly)
+    outside_min_hourly = settings_repo.get_float("outside_zone_min_hourly_income", min_hourly)
+    outside_min_extra = settings_repo.get_float("outside_zone_min_extra_payment", 0)
     service_minutes = day.planned_service_minutes
     existing_visits = visit_repo.list_for_day(day.id, ("accepted", "completed"))
 
@@ -163,22 +166,36 @@ def calculate_candidate_impact(
     marginal_hourly = _safe_hourly(marginal_profit, extra_total_minutes)
 
     existing_base_count = sum(1 for visit in existing_visits if visit.is_base_district)
+    target_day_hourly = _target_day_hourly(
+        candidate=candidate,
+        before_hourly=before_hourly,
+        min_hourly=min_hourly,
+        outside_min_hourly=outside_min_hourly,
+    )
     decision, reason = make_decision(
         before_hourly=before_hourly,
         after_hourly=after_hourly,
         candidate=candidate,
         existing_base_count=existing_base_count,
         min_hourly=min_hourly,
+        outside_min_hourly=outside_min_hourly,
+        outside_min_extra=outside_min_extra,
     )
-    required_candidate_income, required_extra_payment = calculate_required_tariff(
+    tariff = calculate_required_tariff(
         day=day,
         candidate=candidate,
         existing_visits=existing_visits,
         after_minutes=after_minutes,
         after_km=after_route.total_km,
+        extra_total_minutes=extra_total_minutes,
+        extra_car_cost=extra_car_cost,
+        before_hourly=before_hourly,
         fuel_cost_per_km=fuel_cost_per_km,
         amortization_factor=amortization_factor,
         min_hourly=min_hourly,
+        min_marginal_hourly=min_marginal_hourly,
+        outside_min_hourly=outside_min_hourly,
+        outside_min_extra=outside_min_extra,
     )
     visit_repo.update_estimates(candidate.id, marginal_profit, marginal_hourly, before_hourly, after_hourly)
     visit_repo.update_route_estimate(candidate.id, max(0.0, extra_km), max(0.0, extra_drive_minutes))
@@ -199,8 +216,14 @@ def calculate_candidate_impact(
         marginal_hourly=marginal_hourly,
         decision=decision,
         reason=reason,
-        required_candidate_income=required_candidate_income,
-        required_extra_payment=required_extra_payment,
+        required_candidate_income=tariff["required_candidate_income"],
+        required_extra_payment=tariff["required_extra_payment"],
+        required_extra_for_min_hourly=tariff["required_extra_for_min_hourly"],
+        required_extra_for_keep_hourly=tariff["required_extra_for_keep_hourly"],
+        required_extra_for_marginal_hourly=tariff["required_extra_for_marginal_hourly"],
+        required_extra_for_outside_zone=tariff["required_extra_for_outside_zone"],
+        target_day_hourly=target_day_hourly,
+        target_marginal_hourly=min_marginal_hourly,
     )
 
 
@@ -210,21 +233,35 @@ def make_decision(
     candidate: Visit,
     existing_base_count: int,
     min_hourly: float,
+    outside_min_hourly: float | None = None,
+    outside_min_extra: float = 0.0,
 ) -> tuple[str, str]:
-    if not candidate.is_base_district and existing_base_count < 5:
+    outside_min_hourly = min_hourly if outside_min_hourly is None else outside_min_hourly
+    if not candidate.is_base_district:
+        target = max(before_hourly, outside_min_hourly)
+        if after_hourly >= target and outside_min_extra <= 0:
+            if existing_base_count < 5:
+                return (
+                    "МОЖНО БРАТЬ",
+                    "Адрес вне базовой зоны, но он не снижает чистую доходность за час. Базовых адресов пока меньше 5 — проверьте маршрут внимательно.",
+                )
+            return (
+                "МОЖНО БРАТЬ",
+                "Адрес вне базовой зоны, но чистая доходность за час не снижается.",
+            )
+        if after_hourly >= target:
+            return (
+                "ТОЛЬКО С НАДБАВКОЙ",
+                "Адрес вне базовой зоны проходит по часу, но для вне зоны задана минимальная надбавка.",
+            )
         return (
             "ТОЛЬКО СО СПЕЦТАРИФОМ",
-            "Адрес вне базовой зоны, а базовых адресов сегодня пока меньше 5.",
+            "Адрес вне базовой зоны снижает чистую доходность за час.",
         )
     if after_hourly > before_hourly:
         return (
             "ОДНОЗНАЧНО ДА",
             "Добавление адреса повышает среднюю доходность за час.",
-        )
-    if not candidate.is_base_district:
-        return (
-            "ТОЛЬКО СО СПЕЦТАРИФОМ",
-            "Адрес вне базовой зоны.",
         )
     if after_hourly >= min_hourly:
         return (
@@ -243,16 +280,79 @@ def calculate_required_tariff(
     existing_visits: list[Visit],
     after_minutes: float,
     after_km: float,
+    extra_total_minutes: float,
+    extra_car_cost: float,
+    before_hourly: float,
     fuel_cost_per_km: float,
     amortization_factor: float,
     min_hourly: float,
-) -> tuple[float, float]:
+    min_marginal_hourly: float | None = None,
+    outside_min_hourly: float | None = None,
+    outside_min_extra: float = 0.0,
+) -> dict[str, float]:
     income_without_candidate = calculate_day_income(day, existing_visits)
-    required_total_net_profit = min_hourly * (after_minutes / 60)
     known_expenses = calculate_known_expenses(day, after_km, fuel_cost_per_km, amortization_factor)
-    required_candidate_income = required_total_net_profit + known_expenses - income_without_candidate
-    required_extra_payment = max(0.0, required_candidate_income - candidate.income)
-    return max(0.0, required_candidate_income), required_extra_payment
+    min_marginal_hourly = min_hourly if min_marginal_hourly is None else min_marginal_hourly
+    outside_min_hourly = min_hourly if outside_min_hourly is None else outside_min_hourly
+
+    min_hourly_income = _required_income_for_day_hourly(
+        target_hourly=min_hourly,
+        after_minutes=after_minutes,
+        known_expenses=known_expenses,
+        income_without_candidate=income_without_candidate,
+    )
+    keep_hourly_income = 0.0
+    if not candidate.is_base_district:
+        keep_hourly_income = _required_income_for_day_hourly(
+            target_hourly=max(before_hourly, outside_min_hourly),
+            after_minutes=after_minutes,
+            known_expenses=known_expenses,
+            income_without_candidate=income_without_candidate,
+        )
+    marginal_income = max(0.0, min_marginal_hourly * (extra_total_minutes / 60) + extra_car_cost)
+    outside_extra = outside_min_extra if not candidate.is_base_district else 0.0
+
+    required_extra_for_min_hourly = max(0.0, min_hourly_income - candidate.income)
+    required_extra_for_keep_hourly = max(0.0, keep_hourly_income - candidate.income)
+    required_extra_for_marginal_hourly = max(0.0, marginal_income - candidate.income)
+    required_extra_for_outside_zone = max(0.0, outside_extra)
+    required_extra_payment = max(
+        required_extra_for_min_hourly,
+        required_extra_for_keep_hourly,
+        required_extra_for_marginal_hourly,
+        required_extra_for_outside_zone,
+    )
+    return {
+        "required_candidate_income": max(0.0, candidate.income + required_extra_payment),
+        "required_extra_payment": required_extra_payment,
+        "required_extra_for_min_hourly": required_extra_for_min_hourly,
+        "required_extra_for_keep_hourly": required_extra_for_keep_hourly,
+        "required_extra_for_marginal_hourly": required_extra_for_marginal_hourly,
+        "required_extra_for_outside_zone": required_extra_for_outside_zone,
+    }
+
+
+def _required_income_for_day_hourly(
+    *,
+    target_hourly: float,
+    after_minutes: float,
+    known_expenses: float,
+    income_without_candidate: float,
+) -> float:
+    required_total_net_profit = target_hourly * (after_minutes / 60)
+    return max(0.0, required_total_net_profit + known_expenses - income_without_candidate)
+
+
+def _target_day_hourly(
+    *,
+    candidate: Visit,
+    before_hourly: float,
+    min_hourly: float,
+    outside_min_hourly: float,
+) -> float:
+    if candidate.is_base_district:
+        return min_hourly
+    return max(before_hourly, outside_min_hourly)
 
 
 def _current_point(day: WorkDay, completed: list[Visit]) -> Point | None:

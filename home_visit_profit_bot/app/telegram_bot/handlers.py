@@ -558,6 +558,9 @@ async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ("Расход топлива", f"{values.get('fuel_consumption_l_per_100km', '10')} л/100 км"),
         ("Амортизация", f"x{values.get('amortization_factor', '0.8')} от топлива"),
         ("Минимум", f"{values.get('min_hourly_income', '600')} ₽/час"),
+        ("Минимум адреса", f"{values.get('min_marginal_hourly_income', '600')} ₽/час"),
+        ("Минимум вне зоны", f"{values.get('outside_zone_min_hourly_income', '600')} ₽/час"),
+        ("Надбавка вне зоны", f"{values.get('outside_zone_min_extra_payment', '0')} ₽"),
         ("Скорость по умолчанию", f"{values.get('default_avg_speed_kmh', '30')} км/ч"),
         ("Время на адресе", f"{values.get('default_service_minutes', '20')} мин"),
         ("Телемедицина по умолчанию", f"{values.get('default_telemed_minutes', '3')} мин"),
@@ -609,6 +612,18 @@ async def set_fuel_consumption(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def set_min_hourly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await set_numeric_setting(update, context, "min_hourly_income", "Минимальная доходность обновлена")
+
+
+async def set_min_marginal_hourly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await set_numeric_setting(update, context, "min_marginal_hourly_income", "Минимальная доходность адреса обновлена")
+
+
+async def set_outside_min_hourly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await set_numeric_setting(update, context, "outside_zone_min_hourly_income", "Минимальная доходность вне зоны обновлена")
+
+
+async def set_outside_extra(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await set_numeric_setting(update, context, "outside_zone_min_extra_payment", "Минимальная надбавка вне зоны обновлена")
 
 
 async def set_text_setting(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str, label: str) -> None:
@@ -999,6 +1014,9 @@ def build_handlers() -> list:
         CommandHandler("set_fuel_price", set_fuel_price),
         CommandHandler("set_fuel_consumption", set_fuel_consumption),
         CommandHandler("set_min_hourly", set_min_hourly),
+        CommandHandler("set_min_marginal_hourly", set_min_marginal_hourly),
+        CommandHandler("set_outside_min_hourly", set_outside_min_hourly),
+        CommandHandler("set_outside_extra", set_outside_extra),
         CommandHandler("set_home", set_home),
         CommandHandler("set_default_start", set_default_start),
         CommandHandler("set_default_finish", set_default_finish),

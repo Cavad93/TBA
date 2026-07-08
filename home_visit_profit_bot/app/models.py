@@ -124,6 +124,12 @@ class CandidateCalculation:
     reason: str
     required_candidate_income: float
     required_extra_payment: float
+    required_extra_for_min_hourly: float = 0.0
+    required_extra_for_keep_hourly: float = 0.0
+    required_extra_for_marginal_hourly: float = 0.0
+    required_extra_for_outside_zone: float = 0.0
+    target_day_hourly: float = 0.0
+    target_marginal_hourly: float = 0.0
 
 
 @dataclass(frozen=True)

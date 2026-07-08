@@ -108,11 +108,26 @@ def _find_leg(route: RouteSummary, from_label: str, to_label: str):
 
 def _required_tariff_text(calculation: CandidateCalculation) -> str:
     if calculation.required_extra_payment <= 0:
-        return "Доплата/спецтариф: не нужна, текущий тариф уже проходит минимальный порог."
-    return (
-        f"Минимальный доход для рентабельности: {rub(calculation.required_candidate_income)}\n"
-        f"Нужна доплата/спецтариф: +{rub(calculation.required_extra_payment)}"
-    )
+        return (
+            "Доплата/спецтариф: не нужна.\n"
+            f"- цель по дню: {rub_per_hour(calculation.target_day_hourly)}\n"
+            f"- цель по самому адресу: {rub_per_hour(calculation.target_marginal_hourly)}"
+        )
+    lines = [
+        f"Минимальный доход для рентабельности: {rub(calculation.required_candidate_income)}",
+        f"Нужна доплата/спецтариф: +{rub(calculation.required_extra_payment)}",
+        "Почему такая доплата:",
+        f"- чтобы день был не ниже минимума: +{rub(calculation.required_extra_for_min_hourly)}",
+    ]
+    if not calculation.candidate.is_base_district:
+        lines.append(
+            f"- чтобы вне зоны не снизить текущий час: +{rub(calculation.required_extra_for_keep_hourly)}"
+        )
+        lines.append(f"- минимальная надбавка вне зоны: +{rub(calculation.required_extra_for_outside_zone)}")
+    lines.append(f"- чтобы сам адрес дал минимум в час: +{rub(calculation.required_extra_for_marginal_hourly)}")
+    lines.append(f"Цель по дню: {rub_per_hour(calculation.target_day_hourly)}")
+    lines.append(f"Цель по самому адресу: {rub_per_hour(calculation.target_marginal_hourly)}")
+    return "\n".join(lines)
 
 
 def route_message(day: WorkDay, visits: list[Visit]) -> str:
