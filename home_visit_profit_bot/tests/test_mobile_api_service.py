@@ -12,7 +12,7 @@ def test_mobile_sync_creates_day_and_is_idempotent(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         service = MobileApiService(connection)
         event = {
             "event_id": "event-day-1",
@@ -37,7 +37,7 @@ def test_mobile_sync_logs_duplicate_payload_conflict(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         service = MobileApiService(connection)
         first = service.process_sync_event(
             _event(
@@ -69,7 +69,7 @@ def test_mobile_sync_saves_work_items_and_aggregates(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         service = MobileApiService(connection)
         service.process_sync_event(
             _event(
@@ -180,7 +180,7 @@ def test_mobile_sync_rejects_wrong_telemed_clinic(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         service = MobileApiService(connection)
         service.process_sync_event(_event("event-day", "day_started", "work_day", "client-day", {"id": "client-day"}))
 
@@ -206,7 +206,7 @@ def test_mobile_sync_closes_day_with_end_odometer(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         service = MobileApiService(connection)
         service.process_sync_event(
             _event(
@@ -237,7 +237,7 @@ def test_mobile_sync_full_day_close_creates_stats_and_fatigue_feedback(tmp_path)
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         service = MobileApiService(connection)
         service.process_sync_event(
             _event(

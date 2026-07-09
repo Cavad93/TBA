@@ -147,7 +147,7 @@ def _handler_factory(config: AppConfig):
                 self._json_response({"error": "bad_request"}, HTTPStatus.BAD_REQUEST)
                 return
 
-            with connect(config.database_path) as connection:
+            with connect(config) as connection:
                 settings = SettingsRepository(connection)
                 days = WorkDayRepository(connection)
                 visits = VisitRepository(connection)
@@ -187,7 +187,7 @@ def _handler_factory(config: AppConfig):
             if not _is_authorized(self, config.location_api.api_key):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
-            with connect(config.database_path) as connection:
+            with connect(config) as connection:
                 day = WorkDayRepository(connection).active()
                 self._json_response({"ok": True, "day": _day_payload(day)})
 
@@ -200,7 +200,7 @@ def _handler_factory(config: AppConfig):
             except json.JSONDecodeError:
                 self._json_response({"error": "bad_request"}, HTTPStatus.BAD_REQUEST)
                 return
-            with connect(config.database_path) as connection:
+            with connect(config) as connection:
                 settings = SettingsRepository(connection)
                 day = WorkDayRepository(connection).create(
                     start_address=str(payload.get("start_address") or settings.get("default_start_address", "Дом") or "Дом"),
@@ -219,7 +219,7 @@ def _handler_factory(config: AppConfig):
             if not _is_authorized(self, config.location_api.api_key):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
-            with connect(config.database_path) as connection:
+            with connect(config) as connection:
                 day = WorkDayRepository(connection).active()
                 if day is None:
                     self._json_response({"ok": False, "reason": "no_active_day"})
@@ -250,7 +250,7 @@ def _handler_factory(config: AppConfig):
             if not _is_authorized(self, config.location_api.api_key):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
-            with connect(config.database_path) as connection:
+            with connect(config) as connection:
                 days = WorkDayRepository(connection)
                 day = days.active()
                 if day is None:
@@ -270,7 +270,7 @@ def _handler_factory(config: AppConfig):
                 return
             try:
                 payload = self._read_json()
-                with connect(config.database_path) as connection:
+                with connect(config) as connection:
                     result = MobileApiService(connection).process_sync_event(payload)
             except (ValueError, TypeError, json.JSONDecodeError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
@@ -292,7 +292,7 @@ def _handler_factory(config: AppConfig):
             if not _is_authorized(self, config.location_api.api_key):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
-            with connect(config.database_path) as connection:
+            with connect(config) as connection:
                 result = SettingsService(connection).read()
             self._json_response(result)
 
@@ -302,7 +302,7 @@ def _handler_factory(config: AppConfig):
                 return
             try:
                 payload = self._read_json()
-                with connect(config.database_path) as connection:
+                with connect(config) as connection:
                     result = SettingsService(connection).update(payload)
             except (ValueError, TypeError, json.JSONDecodeError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
@@ -319,7 +319,7 @@ def _handler_factory(config: AppConfig):
             except ValueError:
                 self._json_response({"error": "bad_request", "detail": "limit must be an integer"}, HTTPStatus.BAD_REQUEST)
                 return
-            with connect(config.database_path) as connection:
+            with connect(config) as connection:
                 conflicts = MobileApiService(connection).conflicts(limit)
             self._json_response({"ok": True, "conflicts": conflicts})
 
@@ -329,7 +329,7 @@ def _handler_factory(config: AppConfig):
                 return
             try:
                 payload = self._read_json()
-                with connect(config.database_path) as connection:
+                with connect(config) as connection:
                     result = MobileVisitService(connection).create_candidate(payload)
             except (ValueError, TypeError, json.JSONDecodeError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
@@ -344,7 +344,7 @@ def _handler_factory(config: AppConfig):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
-                with connect(config.database_path) as connection:
+                with connect(config) as connection:
                     service = MobileVisitService(connection)
                     if action == "accept":
                         payload = service.accept_candidate(visit_id)
@@ -364,7 +364,7 @@ def _handler_factory(config: AppConfig):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
-                with connect(config.database_path) as connection:
+                with connect(config) as connection:
                     payload = MobileVisitService(connection).active_route()
             except ValueError as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
@@ -377,7 +377,7 @@ def _handler_factory(config: AppConfig):
                 return
             try:
                 payload = self._read_json()
-                with connect(config.database_path) as connection:
+                with connect(config) as connection:
                     result = MobileVisitService(connection).update_finish(payload)
             except (KeyError, ValueError, TypeError, json.JSONDecodeError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
@@ -389,7 +389,7 @@ def _handler_factory(config: AppConfig):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
-                with connect(config.database_path) as connection:
+                with connect(config) as connection:
                     payload = MobileVisitService(connection).current_gps_hint()
             except ValueError as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
@@ -402,7 +402,7 @@ def _handler_factory(config: AppConfig):
                 return
             query = parse_qs(urlparse(self.path).query)
             clinic = (query.get("clinic") or [None])[0]
-            with connect(config.database_path) as connection:
+            with connect(config) as connection:
                 payload = MobileReportService(connection).active_summary(clinic)
             self._json_response(payload)
 
@@ -415,7 +415,7 @@ def _handler_factory(config: AppConfig):
             value = (query.get("date") or [None])[0]
             clinic = (query.get("clinic") or [None])[0]
             try:
-                with connect(config.database_path) as connection:
+                with connect(config) as connection:
                     payload = MobileReportService(connection).stats_summary(period, value, clinic)
             except (TypeError, ValueError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
@@ -426,7 +426,7 @@ def _handler_factory(config: AppConfig):
             if not _is_authorized(self, config.location_api.api_key):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
-            with connect(config.database_path) as connection:
+            with connect(config) as connection:
                 payload = MobileFatigueService(connection).summary()
             self._json_response(payload)
 
@@ -437,7 +437,7 @@ def _handler_factory(config: AppConfig):
             query = parse_qs(urlparse(self.path).query)
             try:
                 days = int((query.get("days") or ["28"])[0])
-                with connect(config.database_path) as connection:
+                with connect(config) as connection:
                     payload = MobileFatigueService(connection).correlation(days)
             except (TypeError, ValueError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
@@ -451,7 +451,7 @@ def _handler_factory(config: AppConfig):
             query = parse_qs(urlparse(self.path).query)
             try:
                 days = int((query.get("days") or ["30"])[0])
-                with connect(config.database_path) as connection:
+                with connect(config) as connection:
                     payload = MobileFatigueService(connection).trend(days)
             except (TypeError, ValueError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
@@ -462,7 +462,7 @@ def _handler_factory(config: AppConfig):
             if not _is_authorized(self, config.location_api.api_key):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
-            with connect(config.database_path) as connection:
+            with connect(config) as connection:
                 payload = MobileFatigueService(connection).cbi_form()
             self._json_response(payload)
 
@@ -472,7 +472,7 @@ def _handler_factory(config: AppConfig):
                 return
             try:
                 payload = self._read_json()
-                with connect(config.database_path) as connection:
+                with connect(config) as connection:
                     result = MobileFatigueService(connection).save_feedback(payload)
             except (TypeError, ValueError, json.JSONDecodeError, KeyError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
@@ -486,7 +486,7 @@ def _handler_factory(config: AppConfig):
             try:
                 payload = self._read_json()
                 answers = list(payload.get("answers") or [])
-                with connect(config.database_path) as connection:
+                with connect(config) as connection:
                     result = MobileFatigueService(connection).save_cbi(answers)
             except (TypeError, ValueError, json.JSONDecodeError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
@@ -500,7 +500,7 @@ def _handler_factory(config: AppConfig):
             try:
                 payload = self._read_json()
                 label = str(payload.get("label") or "")
-                with connect(config.database_path) as connection:
+                with connect(config) as connection:
                     result = MobileVisitService(connection).set_stop_label(visit_id, label)
             except (ValueError, TypeError, json.JSONDecodeError, KeyError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
@@ -527,7 +527,7 @@ def _handler_factory(config: AppConfig):
                 self._json_response({"error": "bad_request"}, HTTPStatus.BAD_REQUEST)
                 return
 
-            with connect(config.database_path) as connection:
+            with connect(config) as connection:
                 day = WorkDayRepository(connection).active()
                 if day is None:
                     self._json_response({"ok": False, "reason": "no_active_day"})

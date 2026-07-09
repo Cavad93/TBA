@@ -85,6 +85,9 @@ class AppConfig:
     geo: GeoConfig
     routing: RoutingConfig
     location_api: LocationApiConfig
+    # Если задан DATABASE_URL (postgresql://...), backend работает на PostgreSQL;
+    # иначе — на SQLite по database_path (по умолчанию для тестов и локальной разработки).
+    database_url: str | None = None
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -100,10 +103,12 @@ def load_config(project_dir: Path | None = None) -> AppConfig:
     database_path = Path(os.getenv("DATABASE_PATH", str(project_dir / "data.sqlite3")))
     if not database_path.is_absolute():
         database_path = project_dir / database_path
+    database_url = os.getenv("DATABASE_URL") or None
 
     return AppConfig(
         project_dir=project_dir,
         database_path=database_path,
+        database_url=database_url,
         finance=FinanceConfig(
             min_hourly_income=float(raw.get("finance", {}).get("min_hourly_income", 600)),
             currency=str(raw.get("finance", {}).get("currency", "RUB")),

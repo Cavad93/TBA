@@ -26,7 +26,7 @@ class FakeSettings:
 def test_long_gps_stops_treat_first_two_as_pause_and_third_as_heavy(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         days = WorkDayRepository(connection)
         visits = VisitRepository(connection)
         events = LocationEventRepository(connection)
@@ -149,7 +149,7 @@ def test_fatigue_can_be_disabled() -> None:
 def test_daily_stats_persists_fatigue_fields(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         days = WorkDayRepository(connection)
         repo = DailyStatsRepository(connection)
         day = days.create("home", "home", 30, 20)

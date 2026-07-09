@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import sqlite3
-from pathlib import Path
+import re
 
 from app.config import AppConfig
+from app.database import Database, connect
 
 
 SCHEMA = """
@@ -307,24 +307,45 @@ CREATE TABLE IF NOT EXISTS mobile_sync_conflicts (
 """
 
 
-def connect(database_path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(database_path)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    return connection
+def _to_postgres_ddl(schema: str) -> str:
+    """Перевести SQLite-DDL в PostgreSQL-DDL.
+
+    Отличия: нет PRAGMA; автоинкремент → IDENTITY; целочисленные типы → BIGINT
+    (чтобы совпадали типы PK и внешних ключей); REAL → DOUBLE PRECISION.
+    Остальное (TEXT, UNIQUE, FOREIGN KEY, DEFAULT, ON CONFLICT) переносимо.
+    """
+    ddl = schema.replace("PRAGMA foreign_keys = ON;", "")
+    ddl = ddl.replace(
+        "INTEGER PRIMARY KEY AUTOINCREMENT",
+        "BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY",
+    )
+    ddl = re.sub(r"\bINTEGER\b", "BIGINT", ddl)
+    ddl = re.sub(r"\bREAL\b", "DOUBLE PRECISION", ddl)
+    return ddl
+
+
+def _split_statements(ddl: str) -> list[str]:
+    # В нашей схеме нет `;` внутри строковых литералов — простое разбиение безопасно.
+    return [statement.strip() for statement in ddl.split(";") if statement.strip()]
 
 
 def init_db(config: AppConfig) -> None:
-    config.database_path.parent.mkdir(parents=True, exist_ok=True)
-    with connect(config.database_path) as connection:
-        connection.executescript(SCHEMA)
-        _ensure_columns(connection)
-        _seed_settings(connection, config)
+    if not config.database_url:
+        config.database_path.parent.mkdir(parents=True, exist_ok=True)
+    with connect(config) as db:
+        _apply_schema(db)
+        _ensure_columns(db)
+        _seed_settings(db, config)
 
 
-def _ensure_columns(connection: sqlite3.Connection) -> None:
-    connection.execute(
-        """
+def _apply_schema(db: Database) -> None:
+    schema = _to_postgres_ddl(SCHEMA) if db.dialect == "postgres" else SCHEMA
+    for statement in _split_statements(schema):
+        db.execute(statement)
+
+
+def _ensure_columns(db: Database) -> None:
+    conflicts_ddl = """
         CREATE TABLE IF NOT EXISTS mobile_sync_conflicts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_event_id TEXT,
@@ -339,82 +360,86 @@ def _ensure_columns(connection: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL
         )
         """
-    )
-    _ensure_column(connection, "visits", "clinic", "TEXT")
-    _ensure_column(connection, "work_days", "telemed_minutes", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "office_income", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "office_minutes", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "planned_route_time_factor", "REAL DEFAULT 1.0")
-    _ensure_column(connection, "work_days", "start_odometer", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "end_odometer", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "odometer_km", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "personal_km", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "fuel_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "fuel_liters", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "food_meal_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "coffee_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "drinks_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "fuel_compensation", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "parking_compensation", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "toll_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "toll_compensation", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "sleep_hours", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "sleep_quality", "REAL DEFAULT 0")
-    _ensure_column(connection, "work_days", "break_hours_before", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "planned_route_minutes", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "actual_route_time_factor", "REAL DEFAULT 1.0")
-    _ensure_column(connection, "daily_stats", "start_odometer", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "end_odometer", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "odometer_km", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "personal_km", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "visit_income", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "telemed_income", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "office_income", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "office_minutes", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "fuel_compensation", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "parking_compensation", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "clinic_compensation", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "fuel_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "fuel_purchase_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "fuel_used_liters", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "fuel_liters", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "fuel_price_per_liter", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "fuel_cost_per_km", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "fuel_consumption_l_per_100km", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "fuel_liters_per_100km", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "amortization_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "parking_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "food_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "food_meal_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "coffee_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "drinks_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "toll_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "toll_compensation", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "other_expenses", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "fatigue_score", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "fatigue_weekly_average", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "fatigue_long_stop_count", "INTEGER DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "fatigue_pause_minutes", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "fatigue_heavy_visit_count", "INTEGER DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "recovery_debt", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "sleep_hours", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "sleep_quality", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "break_hours_before", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "circadian_risk_minutes", "REAL DEFAULT 0")
-    _ensure_column(connection, "daily_stats", "burnout_score", "REAL DEFAULT 0")
-    _ensure_column(connection, "visit_location_events", "fatigue_label", "TEXT")
+    db.execute(_to_postgres_ddl(conflicts_ddl) if db.dialect == "postgres" else conflicts_ddl)
+    _ensure_column(db, "visits", "clinic", "TEXT")
+    _ensure_column(db, "work_days", "telemed_minutes", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "office_income", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "office_minutes", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "planned_route_time_factor", "REAL DEFAULT 1.0")
+    _ensure_column(db, "work_days", "start_odometer", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "end_odometer", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "odometer_km", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "personal_km", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "fuel_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "fuel_liters", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "food_meal_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "coffee_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "drinks_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "fuel_compensation", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "parking_compensation", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "toll_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "toll_compensation", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "sleep_hours", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "sleep_quality", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "break_hours_before", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "planned_route_minutes", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "actual_route_time_factor", "REAL DEFAULT 1.0")
+    _ensure_column(db, "daily_stats", "start_odometer", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "end_odometer", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "odometer_km", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "personal_km", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "visit_income", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "telemed_income", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "office_income", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "office_minutes", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "fuel_compensation", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "parking_compensation", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "clinic_compensation", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "fuel_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "fuel_purchase_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "fuel_used_liters", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "fuel_liters", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "fuel_price_per_liter", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "fuel_cost_per_km", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "fuel_consumption_l_per_100km", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "fuel_liters_per_100km", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "amortization_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "parking_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "food_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "food_meal_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "coffee_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "drinks_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "toll_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "toll_compensation", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "other_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "fatigue_score", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "fatigue_weekly_average", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "fatigue_long_stop_count", "INTEGER DEFAULT 0")
+    _ensure_column(db, "daily_stats", "fatigue_pause_minutes", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "fatigue_heavy_visit_count", "INTEGER DEFAULT 0")
+    _ensure_column(db, "daily_stats", "recovery_debt", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "sleep_hours", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "sleep_quality", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "break_hours_before", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "circadian_risk_minutes", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "burnout_score", "REAL DEFAULT 0")
+    _ensure_column(db, "visit_location_events", "fatigue_label", "TEXT")
 
 
-def _ensure_column(connection: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+def _ensure_column(db: Database, table: str, column: str, definition: str) -> None:
+    if db.dialect == "postgres":
+        pg_def = re.sub(r"\bREAL\b", "DOUBLE PRECISION", re.sub(r"\bINTEGER\b", "BIGINT", definition))
+        db.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {pg_def}")
+        return
     columns = {
         row["name"]
-        for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        for row in db.execute(f"PRAGMA table_info({table})").fetchall()
     }
     if column not in columns:
-        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
-def _seed_settings(connection: sqlite3.Connection, config: AppConfig) -> None:
+def _seed_settings(db: Database, config: AppConfig) -> None:
     defaults = {
         "home_address": "Дом",
         "default_start_address": "Дом",
@@ -451,7 +476,7 @@ def _seed_settings(connection: sqlite3.Connection, config: AppConfig) -> None:
         "location_dwell_minutes": str(config.location_api.dwell_minutes),
         "location_notification_cooldown_minutes": str(config.location_api.notification_cooldown_minutes),
     }
-    connection.executemany(
-        "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)",
+    db.executemany(
+        "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING",
         defaults.items(),
     )

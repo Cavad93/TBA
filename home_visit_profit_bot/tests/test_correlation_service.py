@@ -21,7 +21,7 @@ from app.services.correlation_service import (
 def test_correlation_report_detects_driving_signal(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         days = WorkDayRepository(connection)
         stats = DailyStatsRepository(connection)
         driving = DrivingBehaviorRepository(connection)
@@ -76,7 +76,7 @@ def test_correlation_report_detects_driving_signal(tmp_path) -> None:
 def test_learning_weights_are_clamped_and_adjustment_is_limited(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         days = WorkDayRepository(connection)
         stats = DailyStatsRepository(connection)
         driving = DrivingBehaviorRepository(connection)

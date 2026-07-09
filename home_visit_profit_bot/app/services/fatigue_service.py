@@ -279,10 +279,10 @@ def fatigue_level(score: float) -> str:
 
 def _stop_loads_from_gps(events: LocationEventRepository, work_day_id: int) -> list[VisitStopLoad]:
     rows = events.connection.execute(
-        """
+        f"""
         SELECT visit_id,
                fatigue_label,
-               (julianday(last_seen_at) - julianday(first_seen_at)) * 24 * 60 AS minutes
+               {events.connection.minutes_between("last_seen_at", "first_seen_at")} AS minutes
         FROM visit_location_events
         WHERE work_day_id = ?
         ORDER BY first_seen_at ASC

@@ -52,7 +52,7 @@ def _field(result: dict, key: str) -> dict:
 def test_read_returns_defaults_on_empty_db(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         result = SettingsService(connection).read()
 
     assert result["ok"] is True
@@ -68,7 +68,7 @@ def test_read_returns_defaults_on_empty_db(tmp_path) -> None:
 def test_update_writes_all_types_and_reads_back(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         service = SettingsService(connection)
         result = service.update(
             {
@@ -100,7 +100,7 @@ def test_update_writes_all_types_and_reads_back(tmp_path) -> None:
 def test_update_accepts_values_wrapper_and_ignores_unknown(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         result = SettingsService(connection).update(
             {"values": {"fuel_price_per_liter": 72, "totally_unknown": 5}}
         )
@@ -113,7 +113,7 @@ def test_update_accepts_values_wrapper_and_ignores_unknown(tmp_path) -> None:
 def test_update_rejects_invalid_values(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         service = SettingsService(connection)
         with pytest.raises(ValueError):
             service.update({"min_hourly_income": "не число"})
@@ -128,7 +128,7 @@ def test_update_rejects_invalid_values(tmp_path) -> None:
 def test_clinic_helpers_follow_settings(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         settings = SettingsRepository(connection)
         assert allowed_clinics(settings) == set(SEEDED_CLINICS)
         assert allowed_telemed_clinics(settings) == set(SEEDED_TELEMED_CLINICS)
@@ -150,7 +150,7 @@ def test_settings_saved_sync_event_applies_and_is_idempotent(tmp_path) -> None:
         "entity_id": "settings",
         "payload": {"values": {"min_hourly_income": 900}},
     }
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         service = MobileApiService(connection)
         first = service.process_sync_event(event)
         second = service.process_sync_event(event)

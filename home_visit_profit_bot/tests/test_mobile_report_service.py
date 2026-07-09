@@ -10,7 +10,7 @@ def test_active_mobile_report_includes_clinic_breakdown(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         days = WorkDayRepository(connection)
         visits = VisitRepository(connection)
         day = days.create("Дом", "Дом", 30, 20)
@@ -51,7 +51,7 @@ def test_active_mobile_report_clinic_filter_narrows_to_one_clinic(tmp_path) -> N
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         days = WorkDayRepository(connection)
         visits = VisitRepository(connection)
         day = days.create("Дом", "Дом", 30, 20)

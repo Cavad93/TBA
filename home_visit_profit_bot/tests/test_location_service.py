@@ -17,7 +17,7 @@ from app.services.location_service import calculate_location_day_estimate, proce
 def test_location_update_notifies_after_dwell(tmp_path):
     config = _config(tmp_path)
     init_db(config)
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         settings = SettingsRepository(connection)
         days = WorkDayRepository(connection)
         visits = VisitRepository(connection)
@@ -64,7 +64,7 @@ def test_location_update_notifies_after_dwell(tmp_path):
 def test_location_update_ignores_closed_day(tmp_path):
     config = _config(tmp_path)
     init_db(config)
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         settings = SettingsRepository(connection)
         days = WorkDayRepository(connection)
         visits = VisitRepository(connection)
@@ -92,7 +92,7 @@ def test_location_update_ignores_closed_day(tmp_path):
 def test_location_update_ignores_huge_gps_jump(tmp_path):
     config = _config(tmp_path)
     init_db(config)
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         settings = SettingsRepository(connection)
         days = WorkDayRepository(connection)
         visits = VisitRepository(connection)
@@ -135,7 +135,7 @@ def test_location_update_ignores_huge_gps_jump(tmp_path):
 def test_gps_route_estimate_counts_slow_traffic_outside_visit_stops(tmp_path):
     config = _config(tmp_path)
     init_db(config)
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         days = WorkDayRepository(connection)
         visits = VisitRepository(connection)
         events = LocationEventRepository(connection)
@@ -176,7 +176,7 @@ def test_gps_route_estimate_counts_slow_traffic_outside_visit_stops(tmp_path):
 def test_gps_route_estimate_uses_moving_time_without_detected_visits(tmp_path):
     config = _config(tmp_path)
     init_db(config)
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         days = WorkDayRepository(connection)
         events = LocationEventRepository(connection)
         samples = LocationSampleRepository(connection)

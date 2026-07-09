@@ -164,7 +164,7 @@ class WorkDayRepository:
         break_hours_before: float = 0.0,
     ) -> WorkDay:
         self.connection.execute("UPDATE work_days SET status = 'closed', ended_at = ? WHERE status = 'active'", (now_iso(),))
-        cursor = self.connection.execute(
+        new_id = self.connection.insert(
             """
             INSERT INTO work_days(
                 date, status, start_address, start_lat, start_lon,
@@ -192,7 +192,7 @@ class WorkDayRepository:
             ),
         )
         self.connection.commit()
-        created = self.get(int(cursor.lastrowid))
+        created = self.get(int(new_id))
         if created is None:
             raise RuntimeError("Не удалось создать рабочий день")
         return created
@@ -298,7 +298,7 @@ class VisitRepository:
             "UPDATE visits SET status = 'rejected' WHERE work_day_id = ? AND status = 'candidate'",
             (day_id,),
         )
-        cursor = self.connection.execute(
+        new_id = self.connection.insert(
             """
             INSERT INTO visits(
                 work_day_id, status, address, normalized_address, clinic, district, is_base_district,
@@ -321,7 +321,7 @@ class VisitRepository:
             ),
         )
         self.connection.commit()
-        return self.get(int(cursor.lastrowid))
+        return self.get(int(new_id))
 
     def get(self, visit_id: int) -> Visit:
         row = self.connection.execute("SELECT * FROM visits WHERE id = ?", (visit_id,)).fetchone()
@@ -560,8 +560,8 @@ class LocationEventRepository:
 
     def duration_minutes(self, visit_id: int) -> float:
         row = self.connection.execute(
-            """
-            SELECT (julianday(last_seen_at) - julianday(first_seen_at)) * 24 * 60 AS minutes
+            f"""
+            SELECT {self.connection.minutes_between("last_seen_at", "first_seen_at")} AS minutes
             FROM visit_location_events
             WHERE visit_id = ?
             """,
@@ -711,8 +711,9 @@ class WorkDayLocationRepository:
     def ensure(self, work_day_id: int, updated_at: str) -> sqlite3.Row:
         self.connection.execute(
             """
-            INSERT OR IGNORE INTO work_day_location_state(work_day_id, updated_at)
+            INSERT INTO work_day_location_state(work_day_id, updated_at)
             VALUES (?, ?)
+            ON CONFLICT(work_day_id) DO NOTHING
             """,
             (work_day_id, updated_at),
         )

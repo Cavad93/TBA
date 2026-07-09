@@ -11,20 +11,20 @@ def test_mobile_cbi_saves_score_and_settings(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         result = MobileFatigueService(connection).save_cbi([4, 3, 2, 1, 0, 2, 4])
-        settings = SettingsRepository(connection)
+        latest_cbi = SettingsRepository(connection).get_float("latest_cbi_score", 0)
 
     assert result["ok"] is True
     assert result["score"] == round(16 / (4 * len(CBI_QUESTIONS)) * 100, 1)
-    assert settings.get_float("latest_cbi_score", 0) == result["score"]
+    assert latest_cbi == result["score"]
 
 
 def test_mobile_feedback_uses_latest_closed_day(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         day = WorkDayRepository(connection).create("Дом", "Дом", 30, 20)
         WorkDayRepository(connection).close(day.id, {"actual_km": 10})
         DailyStatsRepository(connection).create(
@@ -63,7 +63,7 @@ def test_mobile_correlation_report_payload(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         days = WorkDayRepository(connection)
         stats = DailyStatsRepository(connection)
         driving = DrivingBehaviorRepository(connection)
@@ -107,7 +107,7 @@ def test_mobile_fatigue_trend_returns_chronological_points(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         days = WorkDayRepository(connection)
         stats = DailyStatsRepository(connection)
         for index in range(3):

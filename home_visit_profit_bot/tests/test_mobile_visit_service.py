@@ -10,7 +10,7 @@ def test_mobile_candidate_manual_route_can_be_accepted_and_completed(tmp_path) -
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         days = WorkDayRepository(connection)
         day = days.create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
         service = MobileVisitService(connection)
@@ -48,7 +48,7 @@ def test_mobile_candidate_can_be_cancelled_after_accept(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
         service = MobileVisitService(connection)
         result = service.create_candidate(
@@ -74,7 +74,7 @@ def test_mobile_active_route_returns_order_and_legs(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
         service = MobileVisitService(connection)
         first = service.create_candidate(
@@ -102,7 +102,7 @@ def test_mobile_stop_label_updates_gps_location_event(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         day = WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
         service = MobileVisitService(connection)
         result = service.create_candidate(
@@ -137,7 +137,7 @@ def test_mobile_stop_label_reports_missing_gps_stop(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
         service = MobileVisitService(connection)
         result = service.create_candidate(
@@ -162,7 +162,7 @@ def test_mobile_current_gps_hint_reports_dwell_and_completion_readiness(tmp_path
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         day = WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
         service = MobileVisitService(connection)
         result = service.create_candidate(
@@ -206,7 +206,7 @@ def test_mobile_current_gps_hint_reports_missing_stop(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
         service = MobileVisitService(connection)
         result = service.create_candidate(
@@ -232,7 +232,7 @@ def test_mobile_candidate_needs_manual_route_when_auto_route_has_no_points(tmp_p
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         WorkDayRepository(connection).create("Дом", "Дом", 30, 20)
         result = MobileVisitService(connection).create_candidate(
             {
@@ -254,7 +254,7 @@ def test_mobile_candidate_rejects_invalid_clinic(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         WorkDayRepository(connection).create("Дом", "Дом", 30, 20)
         service = MobileVisitService(connection)
 
@@ -282,7 +282,7 @@ def test_mobile_update_finish_changes_active_day_finish_with_coords(tmp_path) ->
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         days = WorkDayRepository(connection)
         day = days.create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
         service = MobileVisitService(connection)
@@ -305,7 +305,7 @@ def test_mobile_update_finish_requires_active_day(tmp_path) -> None:
     config = _config(tmp_path)
     init_db(config)
 
-    with connect(config.database_path) as connection:
+    with connect(config) as connection:
         service = MobileVisitService(connection)
         try:
             service.update_finish({"finish_address": "Куда-то", "lat": 59.8, "lon": 30.2})
