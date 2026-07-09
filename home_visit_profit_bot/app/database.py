@@ -39,9 +39,12 @@ class Database:
         self.dialect = dialect
 
     def _sql(self, sql: str) -> str:
-        # В коде плейсхолдеры `?` (стиль SQLite). psycopg ожидает `%s`.
-        # В запросах проекта символа `%` нет, поэтому замена безопасна.
-        return sql.replace("?", "%s") if self.dialect == "postgres" else sql
+        # В коде плейсхолдеры `?` (стиль SQLite). psycopg ожидает `%s`, а литеральный
+        # `%` (напр. в LIKE) требует экранирования `%%`. Экранируем `%` ДО подстановки
+        # `?`→`%s`, иначе испортим введённые `%s`.
+        if self.dialect == "postgres":
+            return sql.replace("%", "%%").replace("?", "%s")
+        return sql
 
     def execute(self, sql: str, params: Sequence[Any] = ()) -> Any:
         cursor = self._raw.cursor()
