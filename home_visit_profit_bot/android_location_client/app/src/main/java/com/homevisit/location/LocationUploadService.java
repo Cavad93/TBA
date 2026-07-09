@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
@@ -22,6 +23,9 @@ import android.hardware.SensorManager;
 
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -38,6 +42,8 @@ public class LocationUploadService extends Service implements LocationListener, 
 
     private static final int NOTIFICATION_ID = 7001;
     private static final String CHANNEL_ID = "location_upload";
+    private static final int ALERT_NOTIFICATION_ID = 7002;
+    private static final String ALERT_CHANNEL_ID = "location_alerts";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private LocationManager locationManager;
@@ -244,7 +250,10 @@ public class LocationUploadService extends Service implements LocationListener, 
                 try (OutputStream outputStream = connection.getOutputStream()) {
                     outputStream.write(body);
                 }
-                connection.getResponseCode();
+                int code = connection.getResponseCode();
+                if (code >= 200 && code < 300) {
+                    handleLocationResponse(readResponse(connection));
+                }
                 sendDrivingAggregateSync(serverUrl, apiKey);
             } catch (Exception ignored) {
             } finally {
@@ -316,6 +325,64 @@ public class LocationUploadService extends Service implements LocationListener, 
                 connection.disconnect();
             }
         }
+    }
+
+    private String readResponse(HttpURLConnection connection) {
+        try (InputStream stream = connection.getInputStream();
+             BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            StringBuilder builder = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                builder.append(line);
+            }
+            return builder.toString();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private void handleLocationResponse(String responseText) {
+        if (responseText == null || responseText.isEmpty()) {
+            return;
+        }
+        try {
+            JSONObject response = new JSONObject(responseText);
+            if (!response.optBoolean("ready_to_complete", false)) {
+                return;
+            }
+            double distance = response.optDouble("distance_m", 0);
+            String text = distance > 0
+                    ? String.format(Locale.US, "Вы рядом с адресом (%.0f м). Можно закрыть по GPS.", distance)
+                    : "Вы рядом с адресом. Можно закрыть по GPS.";
+            showArrivalNotification(text);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void showArrivalNotification(String text) {
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager == null) {
+            return;
+        }
+        Intent openIntent = new Intent(this, MainActivity.class);
+        openIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent pending = PendingIntent.getActivity(
+                this,
+                0,
+                openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? new Notification.Builder(this, ALERT_CHANNEL_ID)
+                : new Notification.Builder(this);
+        Notification notification = builder
+                .setContentTitle("Закрыть адрес по GPS?")
+                .setContentText(text)
+                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                .setAutoCancel(true)
+                .setContentIntent(pending)
+                .build();
+        manager.notify(ALERT_NOTIFICATION_ID, notification);
     }
 
     private String normalizeLocationUrl(String value) {
@@ -461,9 +528,16 @@ public class LocationUploadService extends Service implements LocationListener, 
                 "GPS upload",
                 NotificationManager.IMPORTANCE_LOW
         );
+        NotificationChannel alertChannel = new NotificationChannel(
+                ALERT_CHANNEL_ID,
+                "Подсказки по адресам",
+                NotificationManager.IMPORTANCE_HIGH
+        );
+        alertChannel.setDescription("Уведомления, когда вы дошли до адреса и можно закрыть его по GPS");
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager != null) {
             manager.createNotificationChannel(channel);
+            manager.createNotificationChannel(alertChannel);
         }
     }
 }
