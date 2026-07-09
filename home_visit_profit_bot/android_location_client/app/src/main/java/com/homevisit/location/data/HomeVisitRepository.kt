@@ -502,10 +502,8 @@ class HomeVisitRepository private constructor(
     }
 
     suspend fun fetchActiveRoute(serverUrl: String, apiKey: String): ServerRouteSnapshot? = withContext(Dispatchers.IO) {
-        val response = getJson(normalizeApiUrl(serverUrl, "/api/route/active"), apiKey) ?: return@withContext null
-        if (!response.optBoolean("ok", false)) {
-            return@withContext null
-        }
+        val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/route/active"), apiKey, "cache_route_active")
+            ?: return@withContext null
         parseServerRoute(response.optJSONObject("route"))
     }
 
@@ -524,20 +522,15 @@ class HomeVisitRepository private constructor(
 
     suspend fun fetchActiveReport(serverUrl: String, apiKey: String, clinic: String? = null): ReportSnapshot? = withContext(Dispatchers.IO) {
         val path = "/api/reports/summary" + clinicQuery(clinic, first = true)
-        val response = getJson(normalizeApiUrl(serverUrl, path), apiKey) ?: return@withContext null
-        if (!response.optBoolean("ok", false)) {
-            return@withContext null
-        }
+        val key = "cache_report_active" + (clinic?.let { "_$it" } ?: "")
+        val response = cachedGetJson(normalizeApiUrl(serverUrl, path), apiKey, key) ?: return@withContext null
         parseReportSnapshot(response)
     }
 
     suspend fun fetchStatsReport(serverUrl: String, apiKey: String, period: ReportPeriod, clinic: String? = null): ReportSnapshot? = withContext(Dispatchers.IO) {
         val path = "/api/reports/stats?period=${period.apiValue}" + clinicQuery(clinic, first = false)
-        val response = getJson(normalizeApiUrl(serverUrl, path), apiKey)
-            ?: return@withContext null
-        if (!response.optBoolean("ok", false)) {
-            return@withContext null
-        }
+        val key = "cache_report_stats_${period.apiValue}" + (clinic?.let { "_$it" } ?: "")
+        val response = cachedGetJson(normalizeApiUrl(serverUrl, path), apiKey, key) ?: return@withContext null
         parseReportSnapshot(response)
     }
 
@@ -548,10 +541,8 @@ class HomeVisitRepository private constructor(
     }
 
     suspend fun fetchFatigueSummary(serverUrl: String, apiKey: String): FatigueSnapshot? = withContext(Dispatchers.IO) {
-        val response = getJson(normalizeApiUrl(serverUrl, "/api/fatigue/summary"), apiKey) ?: return@withContext null
-        if (!response.optBoolean("ok", false)) {
-            return@withContext null
-        }
+        val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/fatigue/summary"), apiKey, "cache_fatigue_summary")
+            ?: return@withContext null
         parseFatigueSnapshot(response)
     }
 
@@ -678,18 +669,14 @@ class HomeVisitRepository private constructor(
     }
 
     suspend fun fetchFatigueCorrelation(serverUrl: String, apiKey: String, days: Int): FatigueCorrelationReport? = withContext(Dispatchers.IO) {
-        val response = getJson(normalizeApiUrl(serverUrl, "/api/fatigue/corr?days=$days"), apiKey) ?: return@withContext null
-        if (!response.optBoolean("ok", false)) {
-            return@withContext null
-        }
+        val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/fatigue/corr?days=$days"), apiKey, "cache_fatigue_corr_$days")
+            ?: return@withContext null
         parseFatigueCorrelationReport(response)
     }
 
     suspend fun fetchFatigueTrend(serverUrl: String, apiKey: String, days: Int): FatigueTrendReport? = withContext(Dispatchers.IO) {
-        val response = getJson(normalizeApiUrl(serverUrl, "/api/fatigue/trend?days=$days"), apiKey) ?: return@withContext null
-        if (!response.optBoolean("ok", false)) {
-            return@withContext null
-        }
+        val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/fatigue/trend?days=$days"), apiKey, "cache_fatigue_trend_$days")
+            ?: return@withContext null
         val pointsJson = response.optJSONArray("points") ?: return@withContext FatigueTrendReport(response.optInt("days", days), emptyList())
         val points = (0 until pointsJson.length()).mapNotNull { index ->
             val obj = pointsJson.optJSONObject(index) ?: return@mapNotNull null
@@ -970,6 +957,25 @@ class HomeVisitRepository private constructor(
             null
         } finally {
             connection?.disconnect()
+        }
+    }
+
+    /**
+     * GET c offline-кэшем: при успешном ответе (`ok=true`) кэширует его в Room и
+     * возвращает; при сети/ошибке — отдаёт последний закэшированный ответ,
+     * помечая его `_from_cache=true`.
+     */
+    private suspend fun cachedGetJson(url: String, apiKey: String, cacheKey: String): JSONObject? {
+        val response = getJson(url, apiKey)
+        if (response != null && response.optBoolean("ok", false)) {
+            dao.saveSetting(SettingEntity(key = cacheKey, value = response.toString(), updatedAtEpochMillis = now()))
+            return response
+        }
+        val cached = dao.getSetting(cacheKey)?.value ?: return null
+        return try {
+            JSONObject(cached).put("_from_cache", true)
+        } catch (_: Exception) {
+            null
         }
     }
 
