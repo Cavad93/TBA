@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
@@ -10,6 +12,7 @@ from app.repositories import (
     DailyStatsRepository,
     LocationEventRepository,
     LocationSampleRepository,
+    OfficeRepository,
     SettingsRepository,
     TelemedRepository,
     VisitRepository,
@@ -29,12 +32,22 @@ from app.services.profitability_service import calculate_candidate_impact
 from app.services.routing_service import RoutingError
 from app.services.location_service import calculate_location_day_estimate
 from app.services.stats_service import calculate_rolling_averages, finalize_day
-from app.telegram_bot.keyboards import candidate_keyboard
+from app.telegram_bot.keyboards import candidate_keyboard, fatigue_feedback_keyboard
 from app.telegram_bot.messages import candidate_calculation_message, daily_stats_message
 from app.telegram_bot.safe_send import safe_reply_text
 from app.utils.text_utils import parse_float
 
-NEW_START, NEW_START_COORDS, NEW_FINISH, NEW_FINISH_COORDS, NEW_SPEED, NEW_SERVICE, NEW_ODOMETER = range(7)
+(
+    NEW_START,
+    NEW_START_COORDS,
+    NEW_FINISH,
+    NEW_FINISH_COORDS,
+    NEW_SPEED,
+    NEW_SERVICE,
+    NEW_ODOMETER,
+    NEW_SLEEP,
+    NEW_SLEEP_QUALITY,
+) = range(9)
 ADD_ADDRESS, ADD_INCOME, ADD_CLINIC, ADD_KM, ADD_MINUTES, ADD_DISTRICT, ADD_COORDS = range(10, 17)
 (
     END_KM,
@@ -48,6 +61,8 @@ ADD_ADDRESS, ADD_INCOME, ADD_CLINIC, ADD_KM, ADD_MINUTES, ADD_DISTRICT, ADD_COOR
     END_TELEMED,
     END_TELEMED_MINUTES,
     END_FOOD,
+    END_COFFEE,
+    END_DRINKS,
     END_PARKING,
     END_PARKING_COMP,
     END_FUEL_COMP,
@@ -55,7 +70,7 @@ ADD_ADDRESS, ADD_INCOME, ADD_CLINIC, ADD_KM, ADD_MINUTES, ADD_DISTRICT, ADD_COOR
     END_TOLL_COMP,
     END_COMP,
     END_OTHER,
-) = range(20, 38)
+) = range(20, 40)
 
 
 def _repos(context: ContextTypes.DEFAULT_TYPE):
@@ -71,9 +86,11 @@ def _repos(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def newday_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    connection, settings, _, _, stats = _repos(context)
+    connection, settings, days, _, stats = _repos(context)
     with connection:
         rolling = calculate_rolling_averages(stats, settings)
+        last_closed = days.latest_closed()
+        break_hours = _hours_between(last_closed.ended_at if last_closed else None, datetime.now().isoformat(timespec="seconds"))
         context.user_data["newday"] = {
             "speed": rolling.avg_speed_kmh,
             "service": rolling.service_minutes,
@@ -85,10 +102,57 @@ async def newday_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             "default_finish_lat": _optional_float(settings.get("default_finish_lat")),
             "default_finish_lon": _optional_float(settings.get("default_finish_lon")),
             "last_odometer": _optional_float(settings.get("last_odometer_reading")),
+            "break_hours_before": break_hours,
+            "cbi_due": _is_cbi_due(settings.get("latest_cbi_date")),
         }
     connection.close()
+    cbi_text = (
+        "\nCBI/выгорание давно не обновлялся. После создания дня можно нажать `CBI/выгорание` или выполнить /cbi."
+        if context.user_data["newday"].get("cbi_due")
+        else ""
+    )
     await update.effective_message.reply_text(
         f"Начинаем новый рабочий день.\n"
+        f"Перерыв между сменами: {context.user_data['newday']['break_hours_before']:.1f} ч.\n"
+        "Сколько часов спали перед сменой? Можно написать 6.5 или '-' если не хотите учитывать."
+        f"{cbi_text}"
+    )
+    return NEW_SLEEP
+
+
+async def newday_sleep(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    value = update.effective_message.text.strip()
+    if value == "-":
+        context.user_data["newday"]["sleep_hours"] = 0.0
+    else:
+        try:
+            sleep_hours = parse_float(value)
+        except ValueError:
+            await update.effective_message.reply_text("Введите часы сна числом, например 6.5, или '-'.")
+            return NEW_SLEEP
+        if sleep_hours < 0 or sleep_hours > 18:
+            await update.effective_message.reply_text("Похоже на ошибку. Введите часы сна от 0 до 18.")
+            return NEW_SLEEP
+        context.user_data["newday"]["sleep_hours"] = sleep_hours
+    await update.effective_message.reply_text("Качество сна по ощущениям? 1 = плохо, 5 = отлично. Можно '-'.")
+    return NEW_SLEEP_QUALITY
+
+
+async def newday_sleep_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    value = update.effective_message.text.strip()
+    if value == "-":
+        context.user_data["newday"]["sleep_quality"] = 0.0
+    else:
+        try:
+            quality = parse_float(value)
+        except ValueError:
+            await update.effective_message.reply_text("Введите число от 1 до 5 или '-'.")
+            return NEW_SLEEP_QUALITY
+        if quality < 1 or quality > 5:
+            await update.effective_message.reply_text("Качество сна должно быть от 1 до 5.")
+            return NEW_SLEEP_QUALITY
+        context.user_data["newday"]["sleep_quality"] = quality
+    await update.effective_message.reply_text(
         f"Стартовая точка сегодня? По умолчанию: {context.user_data['newday']['default_start']}.\n"
         f"Напишите адрес или '-' для значения по умолчанию."
     )
@@ -220,6 +284,9 @@ async def newday_odometer(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         data.get("finish_lon"),
         route_time_factor=data["route_time_factor"],
         start_odometer=data["start_odometer"],
+        sleep_hours=float(data.get("sleep_hours", 0) or 0),
+        sleep_quality=float(data.get("sleep_quality", 0) or 0),
+        break_hours_before=float(data.get("break_hours_before", 0) or 0),
     )
     connection.close()
     await update.effective_message.reply_text(
@@ -231,7 +298,9 @@ async def newday_odometer(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"Скорость: {day.planned_avg_speed_kmh:.1f} км/ч\n"
         f"Время на адресе: {day.planned_service_minutes:.1f} мин\n"
         f"Поправка OSRM по времени: x{day.planned_route_time_factor:.2f}\n"
-        f"Стартовый одометр: {day.start_odometer:.0f}"
+        f"Стартовый одометр: {day.start_odometer:.0f}\n"
+        f"Сон: {day.sleep_hours:.1f} ч, качество: {day.sleep_quality:.0f}/5\n"
+        f"Перерыв между сменами: {day.break_hours_before:.1f} ч"
     )
     context.user_data.pop("newday", None)
     return ConversationHandler.END
@@ -373,7 +442,7 @@ async def _continue_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 async def _finish_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     data = AddVisitInput(**context.user_data["add"])
-    connection, settings, days, visits, _ = _repos(context)
+    connection, settings, days, visits, stats = _repos(context)
     day = days.active()
     if day is None:
         connection.close()
@@ -427,6 +496,8 @@ async def _finish_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             candidate,
             visits,
             settings,
+            stats,
+            LocationEventRepository(connection),
             strict_routing=data.route_km is None or data.route_minutes is None,
         )
     except RoutingError:
@@ -545,6 +616,29 @@ async def _geocode_newday_point(update: Update, context: ContextTypes.DEFAULT_TY
 def _optional_float(value: str | None) -> float | None:
     if value is None or value == "":
         return None
+
+
+def _hours_between(start: str | None, end: str | None) -> float:
+    if not start or not end:
+        return 0.0
+    try:
+        start_dt = datetime.fromisoformat(start)
+        end_dt = datetime.fromisoformat(end)
+    except ValueError:
+        return 0.0
+    if end_dt <= start_dt:
+        return 0.0
+    return (end_dt - start_dt).total_seconds() / 3600
+
+
+def _is_cbi_due(latest_date: str | None) -> bool:
+    if not latest_date:
+        return True
+    try:
+        latest = datetime.fromisoformat(latest_date).date()
+    except ValueError:
+        return True
+    return (datetime.now().date() - latest).days >= 7
     try:
         return float(value)
     except ValueError:
@@ -570,6 +664,12 @@ async def endday_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     context.user_data["endday"] = {
         "existing_telemed_income": day.telemed_income,
         "existing_telemed_minutes": day.telemed_minutes,
+        "existing_office_income": day.office_income,
+        "existing_office_minutes": day.office_minutes,
+        "existing_food_expenses": day.food_expenses,
+        "existing_food_meal_expenses": day.food_meal_expenses,
+        "existing_coffee_expenses": day.coffee_expenses,
+        "existing_drinks_expenses": day.drinks_expenses,
         "start_odometer": day.start_odometer,
         "default_fuel_consumption": rolling.fuel_consumption_l_per_100km if rolling else 10,
         "gps_total_work_minutes": location_estimate.total_work_minutes if location_estimate else 0,
@@ -614,6 +714,19 @@ def _minutes_to_hours_text(minutes: float) -> str:
     hours = int(minutes // 60)
     rest = int(round(minutes % 60))
     return f"{hours} ч {rest} мин"
+
+
+def _parse_existing_or_float(text: str, context: ContextTypes.DEFAULT_TYPE, existing_key: str) -> float | None:
+    value = text.strip()
+    if value == "-":
+        return float(context.user_data["endday"].get(existing_key, 0) or 0)
+    try:
+        parsed = parse_float(value)
+    except ValueError:
+        return None
+    if parsed < 0:
+        return None
+    return parsed
 
 
 async def end_km(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -839,7 +952,11 @@ async def end_telemed_minutes(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.effective_message.reply_text("Минуты не могут быть отрицательными.")
             return END_TELEMED_MINUTES
         context.user_data["endday"]["telemed_minutes"] = minutes
-    await update.effective_message.reply_text("Сколько потратили на еду и напитки во время работы?")
+    existing = float(context.user_data["endday"].get("existing_food_meal_expenses", 0) or 0)
+    await update.effective_message.reply_text(
+        f"Сколько потратили на еду во время работы? Без кофе/энергетиков и воды. "
+        f"Напишите '-' чтобы оставить уже учтённые {existing:.0f} ₽."
+    )
     return END_FOOD
 
 
@@ -854,13 +971,39 @@ async def end_parking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 
 async def end_food(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    return await _collect_float(
-        update,
-        context,
-        "food_expenses",
-        END_PARKING,
-        "Сколько потратили на парковку?",
+    value = _parse_existing_or_float(update.effective_message.text, context, "existing_food_meal_expenses")
+    if value is None:
+        await update.effective_message.reply_text("Введите число или '-'.")
+        return END_FOOD
+    context.user_data["endday"]["food_meal_expenses"] = value
+    existing = float(context.user_data["endday"].get("existing_coffee_expenses", 0) or 0)
+    await update.effective_message.reply_text(
+        f"Сколько потратили на кофе или энергетики? Напишите '-' чтобы оставить уже учтённые {existing:.0f} ₽."
     )
+    return END_COFFEE
+
+
+async def end_coffee(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    value = _parse_existing_or_float(update.effective_message.text, context, "existing_coffee_expenses")
+    if value is None:
+        await update.effective_message.reply_text("Введите число или '-'.")
+        return END_COFFEE
+    context.user_data["endday"]["coffee_expenses"] = value
+    existing = float(context.user_data["endday"].get("existing_drinks_expenses", 0) or 0)
+    await update.effective_message.reply_text(
+        f"Сколько потратили на воду и другие напитки? Напишите '-' чтобы оставить уже учтённые {existing:.0f} ₽."
+    )
+    return END_DRINKS
+
+
+async def end_drinks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    value = _parse_existing_or_float(update.effective_message.text, context, "existing_drinks_expenses")
+    if value is None:
+        await update.effective_message.reply_text("Введите число или '-'.")
+        return END_DRINKS
+    context.user_data["endday"]["drinks_expenses"] = value
+    await update.effective_message.reply_text("Сколько потратили на парковку?")
+    return END_PARKING
 
 
 async def end_fuel_comp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -916,10 +1059,16 @@ async def end_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     data_dict = dict(context.user_data["endday"])
     data_dict.pop("existing_telemed_income", None)
     data_dict.pop("existing_telemed_minutes", None)
+    data_dict["office_income"] = float(data_dict.pop("existing_office_income", 0) or 0)
+    data_dict["office_minutes"] = float(data_dict.pop("existing_office_minutes", 0) or 0)
+    data_dict.pop("existing_food_meal_expenses", None)
+    data_dict.pop("existing_coffee_expenses", None)
+    data_dict.pop("existing_drinks_expenses", None)
     data_dict.pop("gps_total_work_minutes", None)
     data_dict.pop("gps_route_minutes", None)
     data_dict.pop("gps_avg_service_minutes", None)
     data_dict.pop("gps_detected_visits_count", None)
+    data_dict["food_expenses"] = float(data_dict.pop("existing_food_expenses", 0) or 0)
     data = EndDayData(**data_dict)
     connection, settings, days, visits, stats_repo = _repos(context)
     day = days.active()
@@ -939,10 +1088,11 @@ async def end_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     clinic_breakdown = build_active_clinic_breakdown(
         visits=visits.list_for_day(day.id, ("completed",)),
         telemed_entries=TelemedRepository(connection).list_for_day(day.id),
+        office_entries=OfficeRepository(connection).list_for_day(day.id),
         service_minutes_per_visit=stats.actual_service_minutes_per_visit,
         total_expenses=stats.total_expenses,
         total_telemed_income=stats.telemed_income,
-        total_telemed_minutes=stats.total_work_minutes - stats.total_route_minutes - stats.total_service_minutes,
+        total_telemed_minutes=data.telemed_minutes,
     )
     rolling = calculate_rolling_averages(stats_repo, settings)
     if stats.fuel_purchase_expenses > 0 and rolling.fuel_cost_per_km > 0:
@@ -962,6 +1112,10 @@ async def end_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         + f"- топливо: {rolling.fuel_cost_per_km:.1f} ₽/км "
         + f"({rolling.fuel_price_per_liter:.1f} ₽/л, {rolling.fuel_consumption_l_per_100km:.1f} л/100 км)"
     )
+    await update.effective_message.reply_text(
+        f"Оценка усталости бота: {stats.fatigue_score:.0f}/100. Согласны?",
+        reply_markup=fatigue_feedback_keyboard(day.id, stats.fatigue_score),
+    )
     context.user_data.pop("endday", None)
     return ConversationHandler.END
 
@@ -971,5 +1125,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.pop("add", None)
     context.user_data.pop("endday", None)
     context.user_data.pop("telemed", None)
+    context.user_data.pop("cbi", None)
+    context.user_data.pop("office", None)
     await update.effective_message.reply_text("Ок, диалог отменён.")
     return ConversationHandler.END

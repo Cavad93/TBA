@@ -55,3 +55,22 @@ def test_active_clinic_breakdown_keeps_unassigned_legacy_telemed() -> None:
     assert breakdown[0].clinic == "Без клиники"
     assert breakdown[0].gross_income == 1000
     assert breakdown[0].work_minutes == 6
+
+
+def test_active_clinic_breakdown_includes_office_entries() -> None:
+    breakdown = build_active_clinic_breakdown(
+        visits=[],
+        telemed_entries=[],
+        office_entries=[{"clinic": "ВИТАМЕД", "address": "Офис", "income": 5000, "minutes": 120}],
+        service_minutes_per_visit=20,
+        total_expenses=0,
+        total_telemed_income=0,
+        total_telemed_minutes=0,
+    )
+
+    assert len(breakdown) == 1
+    assert breakdown[0].clinic == "ВИТАМЕД"
+    assert breakdown[0].gross_income == 5000
+    assert breakdown[0].office_income == 5000
+    assert breakdown[0].office_minutes == 120
+    assert breakdown[0].work_minutes == 120

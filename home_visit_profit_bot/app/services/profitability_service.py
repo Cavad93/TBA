@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from app.models import CandidateCalculation, Point, RouteSummary, Visit, WorkDay
-from app.repositories import SettingsRepository, VisitRepository
+from app.repositories import DailyStatsRepository, LocationEventRepository, SettingsRepository, VisitRepository
+from app.services.fatigue_service import calculate_candidate_fatigue_surcharge
 from app.services.optimization_service import optimize_route, optimize_route_estimated, optimize_route_manual
 from app.services.routing_service import RoutingError
 
@@ -23,6 +24,7 @@ def calculate_day_income(day: WorkDay, visits: list[Visit]) -> float:
     return (
         visit_income
         + day.telemed_income
+        + day.office_income
         + day.fuel_compensation
         + day.parking_compensation
         + day.toll_compensation
@@ -41,6 +43,9 @@ def calculate_known_expenses(
         car_expenses
         + day.parking_expenses
         + day.food_expenses
+        + day.food_meal_expenses
+        + day.coffee_expenses
+        + day.drinks_expenses
         + day.toll_expenses
         + day.other_expenses
     )
@@ -60,7 +65,7 @@ def calculate_day_profitability(
     total_income = calculate_day_income(day, visits)
     total_expenses = calculate_known_expenses(day, route.total_km, fuel_cost_per_km, amortization_factor)
     net_profit = total_income - total_expenses
-    total_minutes = route.total_minutes + route.visits_count * service_minutes + day.telemed_minutes
+    total_minutes = route.total_minutes + route.visits_count * service_minutes + day.telemed_minutes + day.office_minutes
     return net_profit, total_minutes, route.total_km, route.total_minutes, route
 
 
@@ -135,6 +140,8 @@ def calculate_candidate_impact(
     candidate: Visit,
     visit_repo: VisitRepository,
     settings_repo: SettingsRepository,
+    stats_repo: DailyStatsRepository | None = None,
+    location_events: LocationEventRepository | None = None,
     *,
     strict_routing: bool = False,
 ) -> CandidateCalculation:
@@ -197,6 +204,16 @@ def calculate_candidate_impact(
         outside_min_hourly=outside_min_hourly,
         outside_min_extra=outside_min_extra,
     )
+    fatigue = calculate_candidate_fatigue_surcharge(
+        day=day,
+        existing_visits=existing_visits,
+        candidate=candidate,
+        before_route=before_route,
+        after_route=after_route,
+        settings_repo=settings_repo,
+        stats_repo=stats_repo,
+        location_events=location_events,
+    )
     visit_repo.update_estimates(candidate.id, marginal_profit, marginal_hourly, before_hourly, after_hourly)
     visit_repo.update_route_estimate(candidate.id, max(0.0, extra_km), max(0.0, extra_drive_minutes))
 
@@ -224,6 +241,16 @@ def calculate_candidate_impact(
         required_extra_for_outside_zone=tariff["required_extra_for_outside_zone"],
         target_day_hourly=target_day_hourly,
         target_marginal_hourly=min_marginal_hourly,
+        fatigue_score_before=fatigue.before_score,
+        fatigue_score_after=fatigue.after_score,
+        fatigue_weekly_average=fatigue.weekly_average,
+        fatigue_extra_payment=fatigue.extra_payment,
+        fatigue_level=fatigue.level,
+        fatigue_reason=fatigue.reason,
+        recovery_debt_before=fatigue.recovery_debt_before,
+        recovery_debt_after=fatigue.recovery_debt_after,
+        circadian_risk_minutes=fatigue.circadian_risk_minutes,
+        burnout_score=fatigue.burnout_score,
     )
 
 
