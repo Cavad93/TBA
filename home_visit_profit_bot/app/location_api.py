@@ -397,8 +397,10 @@ def _handler_factory(config: AppConfig):
             if not _is_authorized(self, config.location_api.api_key):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
+            query = parse_qs(urlparse(self.path).query)
+            clinic = (query.get("clinic") or [None])[0]
             with connect(config.database_path) as connection:
-                payload = MobileReportService(connection).active_summary()
+                payload = MobileReportService(connection).active_summary(clinic)
             self._json_response(payload)
 
         def _handle_report_stats(self) -> None:
@@ -408,9 +410,10 @@ def _handler_factory(config: AppConfig):
             query = parse_qs(urlparse(self.path).query)
             period = (query.get("period") or ["day"])[0]
             value = (query.get("date") or [None])[0]
+            clinic = (query.get("clinic") or [None])[0]
             try:
                 with connect(config.database_path) as connection:
-                    payload = MobileReportService(connection).stats_summary(period, value)
+                    payload = MobileReportService(connection).stats_summary(period, value, clinic)
             except (TypeError, ValueError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
                 return

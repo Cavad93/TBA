@@ -39,7 +39,7 @@ class MobileReportService:
         self.telemed = TelemedRepository(connection)
         self.office = OfficeRepository(connection)
 
-    def active_summary(self) -> dict[str, Any]:
+    def active_summary(self, clinic: str | None = None) -> dict[str, Any]:
         day = self.days.active()
         if day is None:
             return {"ok": False, "reason": "no_active_day"}
@@ -90,7 +90,7 @@ class MobileReportService:
             office_entries=office_entries,
         )
 
-        return {
+        payload = {
             "ok": True,
             "reason": "active_summary",
             "title": f"Активный день {day.date}",
@@ -131,8 +131,9 @@ class MobileReportService:
             ),
             "clinic_breakdown": _clinic_breakdown_payload(clinic_breakdown),
         }
+        return _apply_clinic_filter(payload, clinic_breakdown, clinic)
 
-    def stats_summary(self, period: str, value: str | None = None) -> dict[str, Any]:
+    def stats_summary(self, period: str, value: str | None = None, clinic: str | None = None) -> dict[str, Any]:
         bounds = parse_report_period(period, value)
         aggregate = self.stats.aggregate_between(bounds.start_date, bounds.end_date)
         clinic_breakdown = build_period_clinic_breakdown(
@@ -141,7 +142,7 @@ class MobileReportService:
             office_totals=self.office.aggregate_between(bounds.start_date, bounds.end_date),
             total_expenses=float(aggregate.get("total_expenses") or 0),
         )
-        return {
+        payload = {
             "ok": True,
             "reason": "stats_summary",
             "title": bounds.title,
@@ -151,6 +152,7 @@ class MobileReportService:
             "summary": _summary_payload(aggregate),
             "clinic_breakdown": _clinic_breakdown_payload(clinic_breakdown),
         }
+        return _apply_clinic_filter(payload, clinic_breakdown, clinic)
 
 
 def parse_report_period(period: str, value: str | None = None) -> ReportPeriod:
@@ -251,6 +253,83 @@ def _summary_payload(values: dict[str, Any]) -> dict[str, Any]:
         "circadian_risk_minutes": _float(values, "circadian_risk_minutes"),
         "burnout_score": _float(values, "avg_burnout_score"),
     }
+
+
+def _apply_clinic_filter(
+    payload: dict[str, Any],
+    breakdown: list[ClinicBreakdown],
+    clinic: str | None,
+) -> dict[str, Any]:
+    """Если задана клиника, сузить отчёт до её среза из разбивки.
+
+    Доход и рабочее время берём напрямую из `ClinicBreakdown`, расходы —
+    как распределённую на клинику долю (`gross - net`). Категории расходов и
+    компенсации не атрибутируются на клинику, поэтому обнуляются.
+    """
+    if not clinic:
+        return payload
+    match = next((item for item in breakdown if item.clinic == clinic), None)
+    if match is None:
+        match = ClinicBreakdown(
+            clinic=clinic,
+            visits_count=0,
+            visit_income=0.0,
+            telemed_income=0.0,
+            telemed_minutes=0.0,
+            office_income=0.0,
+            office_minutes=0.0,
+            work_minutes=0.0,
+            gross_income=0.0,
+            net_income=0.0,
+            net_hourly_income=0.0,
+        )
+        clinic_rows: list[ClinicBreakdown] = []
+    else:
+        clinic_rows = [match]
+    result = dict(payload)
+    result["summary"] = _clinic_summary_payload(match, payload["summary"])
+    result["clinic_breakdown"] = _clinic_breakdown_payload(clinic_rows)
+    result["clinic_filter"] = clinic
+    result["title"] = f"{payload['title']} · {clinic}"
+    return result
+
+
+def _clinic_summary_payload(cb: ClinicBreakdown, base: dict[str, Any]) -> dict[str, Any]:
+    summary = dict(base)
+    summary.update(
+        {
+            "visits_count": cb.visits_count,
+            "gross_income": cb.gross_income,
+            "total_income": cb.gross_income,
+            "total_expenses": max(0.0, cb.gross_income - cb.net_income),
+            "net_profit": cb.net_income,
+            "net_hourly_income": cb.net_hourly_income,
+            "total_work_minutes": cb.work_minutes,
+            "visit_income": cb.visit_income,
+            "telemed_income": cb.telemed_income,
+            "office_income": cb.office_income,
+            "office_minutes": cb.office_minutes,
+        }
+    )
+    for key in (
+        "fuel_compensation",
+        "parking_compensation",
+        "clinic_compensation",
+        "toll_compensation",
+        "fuel_expenses",
+        "amortization_expenses",
+        "parking_expenses",
+        "food_expenses",
+        "food_meal_expenses",
+        "coffee_expenses",
+        "drinks_expenses",
+        "toll_expenses",
+        "other_expenses",
+        "total_route_minutes",
+        "actual_km",
+    ):
+        summary[key] = 0.0
+    return summary
 
 
 def _clinic_breakdown_payload(items: list[ClinicBreakdown]) -> list[dict[str, Any]]:

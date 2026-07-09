@@ -320,7 +320,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun refreshActiveReport(serverUrl: String, apiKey: String) {
+    fun refreshActiveReport(serverUrl: String, apiKey: String, clinic: String? = null) {
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) {
                 reportState.value = ReportUiState(message = "Заполните URL сервера и API ключ")
@@ -328,16 +328,22 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             }
             reportState.value = reportState.value.copy(isLoading = true, message = "Обновляю активный отчёт...")
             repository.syncPending(serverUrl, apiKey)
-            val report = repository.fetchActiveReport(serverUrl, apiKey)
+            val report = repository.fetchActiveReport(serverUrl, apiKey, clinic)
             reportState.value = if (report == null) {
-                ReportUiState(message = "Не удалось получить активный отчёт")
+                reportState.value.copy(isLoading = false, message = "Не удалось получить активный отчёт")
             } else {
-                ReportUiState(snapshot = report, message = "Активный отчёт обновлён")
+                reportState.value.copy(
+                    isLoading = false,
+                    snapshot = report,
+                    message = if (clinic == null) "Активный отчёт обновлён" else "Отчёт по клинике: $clinic",
+                    selectedClinic = clinic,
+                    availableClinics = if (clinic == null) report.clinics.map { it.clinic } else reportState.value.availableClinics,
+                )
             }
         }
     }
 
-    fun refreshStatsReport(serverUrl: String, apiKey: String, period: ReportPeriod) {
+    fun refreshStatsReport(serverUrl: String, apiKey: String, period: ReportPeriod, clinic: String? = null) {
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) {
                 reportState.value = ReportUiState(message = "Заполните URL сервера и API ключ")
@@ -345,11 +351,17 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             }
             reportState.value = reportState.value.copy(isLoading = true, message = "Обновляю отчёт: ${period.title.lowercase()}...")
             repository.syncPending(serverUrl, apiKey)
-            val report = repository.fetchStatsReport(serverUrl, apiKey, period)
+            val report = repository.fetchStatsReport(serverUrl, apiKey, period, clinic)
             reportState.value = if (report == null) {
-                ReportUiState(message = "Не удалось получить отчёт за период")
+                reportState.value.copy(isLoading = false, message = "Не удалось получить отчёт за период")
             } else {
-                ReportUiState(snapshot = report, message = "Отчёт обновлён")
+                reportState.value.copy(
+                    isLoading = false,
+                    snapshot = report,
+                    message = if (clinic == null) "Отчёт обновлён" else "Отчёт по клинике: $clinic",
+                    selectedClinic = clinic,
+                    availableClinics = if (clinic == null) report.clinics.map { it.clinic } else reportState.value.availableClinics,
+                )
             }
         }
     }
@@ -661,6 +673,8 @@ data class ReportUiState(
     val isLoading: Boolean = false,
     val snapshot: ReportSnapshot? = null,
     val message: String = "",
+    val selectedClinic: String? = null,
+    val availableClinics: List<String> = emptyList(),
 )
 
 data class FatigueUiState(

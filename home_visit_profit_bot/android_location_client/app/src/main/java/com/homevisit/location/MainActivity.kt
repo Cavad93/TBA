@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -262,8 +263,8 @@ private data class WorkActions(
     val onRefreshGpsHint: () -> Unit,
     val onClassifyCurrentStop: (StopLabel) -> Unit,
     val onRefreshGpsEstimate: () -> Unit,
-    val onRefreshActiveReport: () -> Unit,
-    val onRefreshStatsReport: (ReportPeriod) -> Unit,
+    val onRefreshActiveReport: (String?) -> Unit,
+    val onRefreshStatsReport: (ReportPeriod, String?) -> Unit,
     val onRefreshFatigue: () -> Unit,
     val onSubmitFatigueFeedback: (String, Double?) -> Unit,
     val onRefreshFatigueCorrelation: (Int) -> Unit,
@@ -316,8 +317,8 @@ private fun HomeVisitApp(
     onRefreshGpsHint: (String, String) -> Unit,
     onClassifyCurrentStop: (String, String, StopLabel) -> Unit,
     onRefreshGpsEstimate: (String, String) -> Unit,
-    onRefreshActiveReport: (String, String) -> Unit,
-    onRefreshStatsReport: (String, String, ReportPeriod) -> Unit,
+    onRefreshActiveReport: (String, String, String?) -> Unit,
+    onRefreshStatsReport: (String, String, ReportPeriod, String?) -> Unit,
     onRefreshFatigue: (String, String) -> Unit,
     onSubmitFatigueFeedback: (String, String, String, Double?) -> Unit,
     onRefreshFatigueCorrelation: (String, String, Int) -> Unit,
@@ -375,8 +376,8 @@ private fun HomeVisitApp(
         onRefreshGpsHint = { onRefreshGpsHint(serverUrl, apiKey) },
         onClassifyCurrentStop = { label -> onClassifyCurrentStop(serverUrl, apiKey, label) },
         onRefreshGpsEstimate = { onRefreshGpsEstimate(serverUrl, apiKey) },
-        onRefreshActiveReport = { onRefreshActiveReport(serverUrl, apiKey) },
-        onRefreshStatsReport = { period -> onRefreshStatsReport(serverUrl, apiKey, period) },
+        onRefreshActiveReport = { clinic -> onRefreshActiveReport(serverUrl, apiKey, clinic) },
+        onRefreshStatsReport = { period, clinic -> onRefreshStatsReport(serverUrl, apiKey, period, clinic) },
         onRefreshFatigue = { onRefreshFatigue(serverUrl, apiKey) },
         onSubmitFatigueFeedback = { action, score -> onSubmitFatigueFeedback(serverUrl, apiKey, action, score) },
         onRefreshFatigueCorrelation = { days -> onRefreshFatigueCorrelation(serverUrl, apiKey, days) },
@@ -1099,6 +1100,14 @@ private fun RouteListCard(routeVisits: List<RouteVisitUi>) {
 private fun ReportsScreen(reportState: ReportUiState, workActions: WorkActions) {
     var selectedMode by rememberSaveable { mutableStateOf(ReportMode.Active) }
     val snapshot = reportState.snapshot
+    val refreshWithClinic: (String?) -> Unit = { clinic ->
+        when (selectedMode) {
+            ReportMode.Active -> workActions.onRefreshActiveReport(clinic)
+            ReportMode.Day -> workActions.onRefreshStatsReport(ReportPeriod.Day, clinic)
+            ReportMode.Month -> workActions.onRefreshStatsReport(ReportPeriod.Month, clinic)
+            ReportMode.Year -> workActions.onRefreshStatsReport(ReportPeriod.Year, clinic)
+        }
+    }
     ScreenColumn {
         StatusCard(
             title = snapshot?.title ?: "Итоги",
@@ -1116,16 +1125,18 @@ private fun ReportsScreen(reportState: ReportUiState, workActions: WorkActions) 
         Button(
             modifier = Modifier.fillMaxWidth(),
             enabled = !reportState.isLoading,
-            onClick = {
-                when (selectedMode) {
-                    ReportMode.Active -> workActions.onRefreshActiveReport()
-                    ReportMode.Day -> workActions.onRefreshStatsReport(ReportPeriod.Day)
-                    ReportMode.Month -> workActions.onRefreshStatsReport(ReportPeriod.Month)
-                    ReportMode.Year -> workActions.onRefreshStatsReport(ReportPeriod.Year)
-                }
-            },
+            // Смена периода сбрасывает фильтр по клинике на «Все».
+            onClick = { refreshWithClinic(null) },
         ) {
             Text(if (reportState.isLoading) "Обновляю..." else "Обновить отчёт")
+        }
+        if (reportState.availableClinics.isNotEmpty()) {
+            ClinicFilterCard(
+                clinics = reportState.availableClinics,
+                selectedClinic = reportState.selectedClinic,
+                enabled = !reportState.isLoading,
+                onSelect = { clinic -> refreshWithClinic(clinic) },
+            )
         }
         if (reportState.message.isNotBlank()) {
             CompactCard(title = "Статус", body = reportState.message)
@@ -1134,6 +1145,38 @@ private fun ReportsScreen(reportState: ReportUiState, workActions: WorkActions) 
             ReportSummaryCard(snapshot)
             ClinicBreakdownCard(snapshot.clinics)
             ExpenseBreakdownCard(snapshot.summary)
+        }
+    }
+}
+
+@Composable
+private fun ClinicFilterCard(
+    clinics: List<String>,
+    selectedClinic: String?,
+    enabled: Boolean,
+    onSelect: (String?) -> Unit,
+) {
+    // "Все" в списке = сброс фильтра (null). Пустая строка используется как маркер "Все".
+    val allLabel = "Все"
+    val options = listOf(allLabel) + clinics
+    Card(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("Фильтр по клинике", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            OptionGrid(
+                options = options,
+                selected = selectedClinic ?: allLabel,
+                label = { it },
+                enabled = enabled,
+                onSelect = { option -> onSelect(if (option == allLabel) null else option) },
+            )
         }
     }
 }
@@ -1679,7 +1722,7 @@ private fun collectSettingsChanges(
 }
 
 @Composable
-private fun ScreenColumn(content: @Composable Column.() -> Unit) {
+private fun ScreenColumn(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1968,7 +2011,7 @@ private fun ExpenseInputCard(onSubmit: (ExpenseCategory, Double, String) -> Unit
 }
 
 @Composable
-private fun InputCard(title: String, content: @Composable Column.() -> Unit) {
+private fun InputCard(title: String, content: @Composable ColumnScope.() -> Unit) {
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

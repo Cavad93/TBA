@@ -47,6 +47,45 @@ def test_active_mobile_report_includes_clinic_breakdown(tmp_path) -> None:
     assert clinics["ВИТАМЕД"]["office_income"] == 5000
 
 
+def test_active_mobile_report_clinic_filter_narrows_to_one_clinic(tmp_path) -> None:
+    config = _config(tmp_path)
+    init_db(config)
+
+    with connect(config.database_path) as connection:
+        days = WorkDayRepository(connection)
+        visits = VisitRepository(connection)
+        day = days.create("Дом", "Дом", 30, 20)
+        first = visits.create_candidate(
+            day.id, address="Невский 1", income=2500, route_km=10, route_minutes=30,
+            district=None, is_base_district=True, clinic="Династия",
+        )
+        visits.accept(first.id)
+        second = visits.create_candidate(
+            day.id, address="Лиговский 5", income=1500, route_km=5, route_minutes=15,
+            district=None, is_base_district=True, clinic="ВИТАМЕД",
+        )
+        visits.accept(second.id)
+
+        service = MobileReportService(connection)
+        full = service.active_summary()
+        filtered = service.active_summary("Династия")
+        empty = service.active_summary("ДНД")
+
+    assert full["summary"]["gross_income"] == 4000
+    assert "clinic_filter" not in full
+
+    assert filtered["clinic_filter"] == "Династия"
+    assert filtered["summary"]["visit_income"] == 2500
+    assert filtered["summary"]["gross_income"] == 2500
+    assert filtered["summary"]["visits_count"] == 1
+    assert [row["clinic"] for row in filtered["clinic_breakdown"]] == ["Династия"]
+    assert filtered["title"].endswith("Династия")
+
+    assert empty["clinic_filter"] == "ДНД"
+    assert empty["summary"]["gross_income"] == 0
+    assert empty["clinic_breakdown"] == []
+
+
 def test_report_period_bounds_are_exclusive_end_dates() -> None:
     day = parse_report_period("day", "2026-07-09")
     month = parse_report_period("month", "2026-07")

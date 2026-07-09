@@ -493,21 +493,29 @@ class HomeVisitRepository private constructor(
         parseGpsVisitHint(response.optJSONObject("hint"))
     }
 
-    suspend fun fetchActiveReport(serverUrl: String, apiKey: String): ReportSnapshot? = withContext(Dispatchers.IO) {
-        val response = getJson(normalizeApiUrl(serverUrl, "/api/reports/summary"), apiKey) ?: return@withContext null
+    suspend fun fetchActiveReport(serverUrl: String, apiKey: String, clinic: String? = null): ReportSnapshot? = withContext(Dispatchers.IO) {
+        val path = "/api/reports/summary" + clinicQuery(clinic, first = true)
+        val response = getJson(normalizeApiUrl(serverUrl, path), apiKey) ?: return@withContext null
         if (!response.optBoolean("ok", false)) {
             return@withContext null
         }
         parseReportSnapshot(response)
     }
 
-    suspend fun fetchStatsReport(serverUrl: String, apiKey: String, period: ReportPeriod): ReportSnapshot? = withContext(Dispatchers.IO) {
-        val response = getJson(normalizeApiUrl(serverUrl, "/api/reports/stats?period=${period.apiValue}"), apiKey)
+    suspend fun fetchStatsReport(serverUrl: String, apiKey: String, period: ReportPeriod, clinic: String? = null): ReportSnapshot? = withContext(Dispatchers.IO) {
+        val path = "/api/reports/stats?period=${period.apiValue}" + clinicQuery(clinic, first = false)
+        val response = getJson(normalizeApiUrl(serverUrl, path), apiKey)
             ?: return@withContext null
         if (!response.optBoolean("ok", false)) {
             return@withContext null
         }
         parseReportSnapshot(response)
+    }
+
+    private fun clinicQuery(clinic: String?, first: Boolean): String {
+        if (clinic.isNullOrBlank()) return ""
+        val encoded = java.net.URLEncoder.encode(clinic, "UTF-8")
+        return if (first) "?clinic=$encoded" else "&clinic=$encoded"
     }
 
     suspend fun fetchFatigueSummary(serverUrl: String, apiKey: String): FatigueSnapshot? = withContext(Dispatchers.IO) {
@@ -1190,9 +1198,12 @@ class HomeVisitRepository private constructor(
         return enumValues<T>().firstOrNull { it.name == name } ?: default
     }
 
-    private fun JSONArray.forEachObject(block: (JSONObject) -> Unit) {
+    private inline fun JSONArray.forEachObject(block: (JSONObject) -> Unit) {
         for (index in 0 until length()) {
-            optJSONObject(index)?.let(block)
+            val item = optJSONObject(index)
+            if (item != null) {
+                block(item)
+            }
         }
     }
 
