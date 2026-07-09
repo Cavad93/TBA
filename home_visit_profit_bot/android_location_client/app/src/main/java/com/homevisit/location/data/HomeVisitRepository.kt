@@ -474,6 +474,12 @@ class HomeVisitRepository private constructor(
         response.optBoolean("ok", false)
     }
 
+    suspend fun updateDayFinish(serverUrl: String, apiKey: String, address: String): String? = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("finish_address", address)
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/day/finish"), apiKey, payload) ?: return@withContext null
+        response.optString("reason", if (response.optBoolean("ok", false)) "finish_updated" else "error")
+    }
+
     suspend fun fetchActiveRoute(serverUrl: String, apiKey: String): ServerRouteSnapshot? = withContext(Dispatchers.IO) {
         val response = getJson(normalizeApiUrl(serverUrl, "/api/route/active"), apiKey) ?: return@withContext null
         if (!response.optBoolean("ok", false)) {

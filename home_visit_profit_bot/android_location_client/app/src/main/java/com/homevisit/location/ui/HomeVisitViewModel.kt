@@ -270,6 +270,29 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun updateFinish(serverUrl: String, apiKey: String, address: String) {
+        viewModelScope.launch {
+            if (serverUrl.isBlank() || apiKey.isBlank()) {
+                routeState.value = routeState.value.copy(message = "Заполните URL сервера и API ключ")
+                return@launch
+            }
+            if (address.isBlank()) {
+                routeState.value = routeState.value.copy(message = "Введите новый адрес финиша")
+                return@launch
+            }
+            routeState.value = routeState.value.copy(isLoading = true, message = "Меняю финиш...")
+            when (repository.updateDayFinish(serverUrl, apiKey, address)) {
+                "finish_updated" -> {
+                    refreshRouteInternal(serverUrl, apiKey)
+                    routeState.value = routeState.value.copy(message = "Финиш изменён, маршрут пересчитан")
+                }
+                "needs_coordinates" -> routeState.value = routeState.value.copy(isLoading = false, message = "Сервер не нашёл адрес финиша. Уточните адрес.")
+                "geocoding_failed" -> routeState.value = routeState.value.copy(isLoading = false, message = "Не удалось геокодировать финиш")
+                else -> routeState.value = routeState.value.copy(isLoading = false, message = "Не удалось изменить финиш")
+            }
+        }
+    }
+
     fun refreshGpsHint(serverUrl: String, apiKey: String) {
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) {

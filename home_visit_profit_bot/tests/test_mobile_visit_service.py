@@ -278,6 +278,45 @@ def test_mobile_candidate_rejects_invalid_clinic(tmp_path) -> None:
     assert "unsupported clinic" in message
 
 
+def test_mobile_update_finish_changes_active_day_finish_with_coords(tmp_path) -> None:
+    config = _config(tmp_path)
+    init_db(config)
+
+    with connect(config.database_path) as connection:
+        days = WorkDayRepository(connection)
+        day = days.create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        service = MobileVisitService(connection)
+
+        result = service.update_finish(
+            {"finish_address": "Аэропорт Пулково", "lat": 59.80, "lon": 30.26}
+        )
+        updated = days.get(day.id)
+
+    assert result["ok"] is True
+    assert result["reason"] == "finish_updated"
+    assert result["finish"]["address"] == "Аэропорт Пулково"
+    assert result["finish"]["lat"] == 59.80
+    assert updated.finish_address == "Аэропорт Пулково"
+    assert updated.finish_lat == 59.80
+    assert updated.finish_lon == 30.26
+
+
+def test_mobile_update_finish_requires_active_day(tmp_path) -> None:
+    config = _config(tmp_path)
+    init_db(config)
+
+    with connect(config.database_path) as connection:
+        service = MobileVisitService(connection)
+        try:
+            service.update_finish({"finish_address": "Куда-то", "lat": 59.8, "lon": 30.2})
+        except ValueError as error:
+            message = str(error)
+        else:
+            message = ""
+
+    assert message != ""
+
+
 def _config(tmp_path):
     return AppConfig(
         project_dir=tmp_path,

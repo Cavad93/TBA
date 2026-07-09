@@ -39,6 +39,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
@@ -142,6 +143,7 @@ class MainActivity : ComponentActivity() {
                     onCompleteCurrentVisit = viewModel::completeCurrentVisit,
                     onCancelCurrentVisit = viewModel::cancelCurrentVisit,
                     onRefreshRoute = viewModel::refreshRoute,
+                    onUpdateFinish = viewModel::updateFinish,
                     onRefreshGpsHint = viewModel::refreshGpsHint,
                     onClassifyCurrentStop = viewModel::classifyCurrentStop,
                     onRefreshGpsEstimate = viewModel::refreshGpsEstimate,
@@ -279,6 +281,7 @@ private data class WorkActions(
     val onCompleteCurrentVisit: () -> Unit,
     val onCancelCurrentVisit: () -> Unit,
     val onRefreshRoute: () -> Unit,
+    val onUpdateFinish: (String) -> Unit,
     val onRefreshGpsHint: () -> Unit,
     val onClassifyCurrentStop: (StopLabel) -> Unit,
     val onRefreshGpsEstimate: () -> Unit,
@@ -344,6 +347,7 @@ private fun HomeVisitApp(
     onCompleteCurrentVisit: (String, String) -> Unit,
     onCancelCurrentVisit: (String, String) -> Unit,
     onRefreshRoute: (String, String) -> Unit,
+    onUpdateFinish: (String, String, String) -> Unit,
     onRefreshGpsHint: (String, String) -> Unit,
     onClassifyCurrentStop: (String, String, StopLabel) -> Unit,
     onRefreshGpsEstimate: (String, String) -> Unit,
@@ -404,6 +408,7 @@ private fun HomeVisitApp(
         onCompleteCurrentVisit = { onCompleteCurrentVisit(serverUrl, apiKey) },
         onCancelCurrentVisit = { onCancelCurrentVisit(serverUrl, apiKey) },
         onRefreshRoute = { onRefreshRoute(serverUrl, apiKey) },
+        onUpdateFinish = { address -> onUpdateFinish(serverUrl, apiKey, address) },
         onRefreshGpsHint = { onRefreshGpsHint(serverUrl, apiKey) },
         onClassifyCurrentStop = { label -> onClassifyCurrentStop(serverUrl, apiKey, label) },
         onRefreshGpsEstimate = { onRefreshGpsEstimate(serverUrl, apiKey) },
@@ -450,6 +455,7 @@ private fun HomeVisitApp(
                     workActions = workActions,
                     settingsState = settingsState,
                     onSync = syncNow,
+                    onSelectDestination = { selected = it },
                     bottomBar = {},
                 )
             }
@@ -460,6 +466,7 @@ private fun HomeVisitApp(
                 workActions = workActions,
                 settingsState = settingsState,
                 onSync = syncNow,
+                onSelectDestination = { selected = it },
                 bottomBar = {
                     AppNavigationBar(selected = selected, onSelect = { selected = it })
                 },
@@ -476,6 +483,7 @@ private fun AppScaffold(
     workActions: WorkActions,
     settingsState: GpsSettingsState,
     onSync: () -> Unit,
+    onSelectDestination: (AppDestination) -> Unit,
     bottomBar: @Composable () -> Unit,
 ) {
     Scaffold(
@@ -503,7 +511,7 @@ private fun AppScaffold(
             color = MaterialTheme.colorScheme.background,
         ) {
             when (selected) {
-                AppDestination.Today -> TodayScreen(uiState, workActions, settingsState, onSync)
+                AppDestination.Today -> TodayScreen(uiState, workActions, settingsState, onSync, onOpenWork = { onSelectDestination(AppDestination.Work) })
                 AppDestination.Work -> WorkScreen(uiState, workActions)
                 AppDestination.Route -> RouteScreen(uiState, workActions, settingsState)
                 AppDestination.Reports -> ReportsScreen(uiState.report, workActions)
@@ -555,7 +563,7 @@ private fun DestinationIcon(destination: AppDestination) {
 }
 
 @Composable
-private fun TodayScreen(uiState: HomeVisitUiState, workActions: WorkActions, settingsState: GpsSettingsState, onSync: () -> Unit) {
+private fun TodayScreen(uiState: HomeVisitUiState, workActions: WorkActions, settingsState: GpsSettingsState, onSync: () -> Unit, onOpenWork: () -> Unit) {
     val fatigueText = uiState.fatigue.snapshot?.summary?.let { ", усталость ${oneDecimal(it.score)}/100" }.orEmpty()
     val syncText = if (uiState.sync.stats.pendingCount + uiState.sync.stats.failedCount > 0) {
         ", sync: ${uiState.sync.stats.pendingCount} ждут / ${uiState.sync.stats.failedCount} ошибок"
@@ -570,7 +578,7 @@ private fun TodayScreen(uiState: HomeVisitUiState, workActions: WorkActions, set
         )
         DayDetailsCard(uiState, workActions)
         DayControlRow(uiState, workActions)
-        QuickActions()
+        QuickActions(onOpenWork)
         GpsControlCard(settingsState)
         SyncControlCard(
             syncState = uiState.sync,
@@ -872,12 +880,45 @@ private fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, set
             route = uiState.serverRoute,
             onRefresh = workActions.onRefreshRoute,
         )
+        ChangeFinishCard(
+            isLoading = uiState.serverRoute.isLoading,
+            onUpdateFinish = workActions.onUpdateFinish,
+        )
         RouteListCard(uiState.routeVisits)
         StopClassificationCard(
             activeVisit = uiState.activeVisit,
             isLoading = uiState.serverRoute.isLoading,
             onSelect = workActions.onClassifyCurrentStop,
         )
+    }
+}
+
+@Composable
+private fun ChangeFinishCard(isLoading: Boolean, onUpdateFinish: (String) -> Unit) {
+    var finishAddress by rememberSaveable { mutableStateOf("") }
+    InputCard("Изменить финиш") {
+        Text(
+            "Смените конечную точку среди дня — сервер геокодирует адрес и пересчитает маршрут.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = finishAddress,
+            onValueChange = { finishAddress = it },
+            singleLine = true,
+            label = { Text("Новый адрес финиша") },
+        )
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isLoading && finishAddress.isNotBlank(),
+            onClick = {
+                onUpdateFinish(finishAddress.trim())
+                finishAddress = ""
+            },
+        ) {
+            Text("Применить финиш")
+        }
     }
 }
 
@@ -1860,7 +1901,7 @@ private fun ScreenColumn(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-private fun QuickActions() {
+private fun QuickActions(onOpenWork: () -> Unit) {
     SectionHeader("Быстрые действия")
     ActionGrid(
         actions = listOf(
@@ -1869,6 +1910,7 @@ private fun QuickActions() {
             "Телемед" to "ПСК или ДНД.",
             "Расход" to "Еда, кофе, парковка.",
         ),
+        onClick = onOpenWork,
     )
 }
 
@@ -2219,12 +2261,12 @@ private fun <T> OptionGrid(
 }
 
 @Composable
-private fun ActionGrid(actions: List<Pair<String, String>>) {
+private fun ActionGrid(actions: List<Pair<String, String>>, onClick: (() -> Unit)? = null) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         actions.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { (title, body) ->
-                    ActionCard(title = title, body = body, modifier = Modifier.weight(1f))
+                    ActionCard(title = title, body = body, modifier = Modifier.weight(1f), onClick = onClick)
                 }
                 if (row.size == 1) {
                     Spacer(Modifier.weight(1f))
@@ -2235,9 +2277,9 @@ private fun ActionGrid(actions: List<Pair<String, String>>) {
 }
 
 @Composable
-private fun ActionCard(title: String, body: String, modifier: Modifier = Modifier) {
+private fun ActionCard(title: String, body: String, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
     Card(
-        modifier = modifier.height(116.dp),
+        modifier = (if (onClick != null) modifier.clickable { onClick() } else modifier).height(116.dp),
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
