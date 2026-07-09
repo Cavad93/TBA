@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -57,7 +58,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -75,6 +79,8 @@ import com.homevisit.location.domain.ExpenseCategory
 import com.homevisit.location.domain.FatigueCorrelationCell
 import com.homevisit.location.domain.FatigueCorrelationReport
 import com.homevisit.location.domain.FatigueSnapshot
+import com.homevisit.location.domain.FatigueTrendPoint
+import com.homevisit.location.domain.FatigueTrendReport
 import com.homevisit.location.domain.ReportPeriod
 import com.homevisit.location.domain.ReportSnapshot
 import com.homevisit.location.domain.ReportSummary
@@ -132,6 +138,7 @@ class MainActivity : ComponentActivity() {
                     onRefreshFatigue = viewModel::refreshFatigue,
                     onSubmitFatigueFeedback = viewModel::submitFatigueFeedback,
                     onRefreshFatigueCorrelation = viewModel::refreshFatigueCorrelation,
+                    onRefreshFatigueTrend = viewModel::refreshFatigueTrend,
                     onSubmitCbi = viewModel::submitCbi,
                     onExportBackup = viewModel::exportBackup,
                     onBackupExportHandled = viewModel::clearBackupExport,
@@ -268,6 +275,7 @@ private data class WorkActions(
     val onRefreshFatigue: () -> Unit,
     val onSubmitFatigueFeedback: (String, Double?) -> Unit,
     val onRefreshFatigueCorrelation: (Int) -> Unit,
+    val onRefreshFatigueTrend: (Int) -> Unit,
     val onSubmitCbi: (List<Int>) -> Unit,
     val onExportBackup: () -> Unit,
     val onRefreshSyncConflicts: () -> Unit,
@@ -322,6 +330,7 @@ private fun HomeVisitApp(
     onRefreshFatigue: (String, String) -> Unit,
     onSubmitFatigueFeedback: (String, String, String, Double?) -> Unit,
     onRefreshFatigueCorrelation: (String, String, Int) -> Unit,
+    onRefreshFatigueTrend: (String, String, Int) -> Unit,
     onSubmitCbi: (String, String, List<Int>) -> Unit,
     onExportBackup: () -> Unit,
     onBackupExportHandled: () -> Unit,
@@ -381,6 +390,7 @@ private fun HomeVisitApp(
         onRefreshFatigue = { onRefreshFatigue(serverUrl, apiKey) },
         onSubmitFatigueFeedback = { action, score -> onSubmitFatigueFeedback(serverUrl, apiKey, action, score) },
         onRefreshFatigueCorrelation = { days -> onRefreshFatigueCorrelation(serverUrl, apiKey, days) },
+        onRefreshFatigueTrend = { days -> onRefreshFatigueTrend(serverUrl, apiKey, days) },
         onSubmitCbi = { answers -> onSubmitCbi(serverUrl, apiKey, answers) },
         onExportBackup = onExportBackup,
         onRefreshSyncConflicts = { onRefreshSyncConflicts(serverUrl, apiKey) },
@@ -1313,6 +1323,8 @@ private fun ReportLine(label: String, value: String) {
 private fun FatigueScreen(fatigueState: FatigueUiState, workActions: WorkActions) {
     var manualScoreText by rememberSaveable { mutableStateOf("") }
     var selectedCorrelationDays by rememberSaveable { mutableStateOf(14) }
+    var selectedTrendDays by rememberSaveable { mutableStateOf(30) }
+    var showAllCorrelations by rememberSaveable { mutableStateOf(false) }
     var cbiAnswersText by rememberSaveable { mutableStateOf("") }
     val snapshot = fatigueState.snapshot
     val summary = snapshot?.summary
@@ -1358,12 +1370,105 @@ private fun FatigueScreen(fatigueState: FatigueUiState, workActions: WorkActions
                 },
             )
         }
+        FatigueTrendCard(
+            trend = fatigueState.trend,
+            selectedDays = selectedTrendDays,
+            onDaysChange = { selectedTrendDays = it },
+            onRefresh = { workActions.onRefreshFatigueTrend(selectedTrendDays) },
+        )
         FatigueCorrelationCard(
             report = fatigueState.correlation,
             selectedDays = selectedCorrelationDays,
+            showAll = showAllCorrelations,
             onDaysChange = { selectedCorrelationDays = it },
+            onToggleShowAll = { showAllCorrelations = !showAllCorrelations },
             onRefresh = { workActions.onRefreshFatigueCorrelation(selectedCorrelationDays) },
         )
+    }
+}
+
+@Composable
+private fun FatigueTrendCard(
+    trend: FatigueTrendReport?,
+    selectedDays: Int,
+    onDaysChange: (Int) -> Unit,
+    onRefresh: () -> Unit,
+) {
+    InputCard("Тренд усталости") {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(14, 30, 60).forEach { days ->
+                if (selectedDays == days) {
+                    Button(modifier = Modifier.weight(1f), onClick = { onDaysChange(days) }) { Text("$days дн.") }
+                } else {
+                    OutlinedButton(modifier = Modifier.weight(1f), onClick = { onDaysChange(days) }) { Text("$days дн.") }
+                }
+            }
+        }
+        Button(modifier = Modifier.fillMaxWidth(), onClick = onRefresh) {
+            Text("Показать тренд")
+        }
+        val points = trend?.points.orEmpty()
+        if (points.isEmpty()) {
+            Text(
+                "График появится после нескольких закрытых дней. Линия — индекс усталости, пунктирная — 7-дневная средняя.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                "Индекс усталости (сплошная) и 7-дневная средняя (светлая). Точек: ${points.size}.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FatigueTrendChart(points)
+            val last = points.last()
+            ReportLine("Последний индекс", "${oneDecimal(last.score)}/100")
+            ReportLine("7-дневная средняя", "${oneDecimal(last.weeklyAverage)}/100")
+            ReportLine("Долг восстановления", "${oneDecimal(last.recoveryDebt)}/100")
+        }
+    }
+}
+
+@Composable
+private fun FatigueTrendChart(points: List<FatigueTrendPoint>) {
+    val scoreColor = MaterialTheme.colorScheme.primary
+    val avgColor = MaterialTheme.colorScheme.tertiary
+    val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(160.dp)
+            .padding(vertical = 8.dp),
+    ) {
+        val n = points.size
+        val w = size.width
+        val h = size.height
+        fun px(i: Int): Float = if (n <= 1) w / 2f else w * i / (n - 1)
+        fun py(v: Double): Float = h - (v.coerceIn(0.0, 100.0) / 100.0).toFloat() * h
+        // Горизонтальная сетка 0/25/50/75/100
+        listOf(0.0, 25.0, 50.0, 75.0, 100.0).forEach { level ->
+            val y = py(level)
+            drawLine(gridColor, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+        }
+        // Линия 7-дневной средней (светлее, тоньше)
+        val avgPath = Path()
+        points.forEachIndexed { i, p ->
+            val x = px(i)
+            val y = py(p.weeklyAverage)
+            if (i == 0) avgPath.moveTo(x, y) else avgPath.lineTo(x, y)
+        }
+        drawPath(avgPath, color = avgColor, style = Stroke(width = 3f))
+        // Линия индекса усталости (основная)
+        val scorePath = Path()
+        points.forEachIndexed { i, p ->
+            val x = px(i)
+            val y = py(p.score)
+            if (i == 0) scorePath.moveTo(x, y) else scorePath.lineTo(x, y)
+        }
+        drawPath(scorePath, color = scoreColor, style = Stroke(width = 5f))
+        points.forEachIndexed { i, p ->
+            drawCircle(scoreColor, radius = 5f, center = Offset(px(i), py(p.score)))
+        }
     }
 }
 
@@ -1488,7 +1593,9 @@ private fun CbiCard(
 private fun FatigueCorrelationCard(
     report: FatigueCorrelationReport?,
     selectedDays: Int,
+    showAll: Boolean,
     onDaysChange: (Int) -> Unit,
+    onToggleShowAll: () -> Unit,
     onRefresh: () -> Unit,
 ) {
     InputCard("Корреляции") {
@@ -1516,8 +1623,15 @@ private fun FatigueCorrelationCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            topCorrelationCells(report.cells).forEach { cell ->
+            val allCells = sortedCorrelationCells(report.cells)
+            val visibleCells = if (showAll) allCells else allCells.take(8)
+            visibleCells.forEach { cell ->
                 CorrelationRow(cell)
+            }
+            if (allCells.size > 8) {
+                OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onToggleShowAll) {
+                    Text(if (showAll) "Свернуть до топ-8" else "Показать все (${allCells.size})")
+                }
             }
         }
     }
@@ -2410,11 +2524,10 @@ private fun updateCbiAnswer(raw: String, count: Int, index: Int, value: Int): St
     return answers.joinToString(",")
 }
 
-private fun topCorrelationCells(cells: List<FatigueCorrelationCell>): List<FatigueCorrelationCell> {
+private fun sortedCorrelationCells(cells: List<FatigueCorrelationCell>): List<FatigueCorrelationCell> {
     return cells
         .filter { it.n >= 3 && (it.pearson != null || it.spearman != null) }
         .sortedByDescending { kotlin.math.abs(it.pearson ?: it.spearman ?: 0.0) }
-        .take(8)
 }
 
 private fun fatigueFeatureTitle(value: String): String = when (value) {

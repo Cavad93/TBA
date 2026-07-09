@@ -25,6 +25,8 @@ import com.homevisit.location.domain.FatigueFeedback
 import com.homevisit.location.domain.FatigueFeedbackResult
 import com.homevisit.location.domain.FatigueSnapshot
 import com.homevisit.location.domain.FatigueSummary
+import com.homevisit.location.domain.FatigueTrendPoint
+import com.homevisit.location.domain.FatigueTrendReport
 import com.homevisit.location.domain.GpsDayEstimate
 import com.homevisit.location.domain.GpsVisitHint
 import com.homevisit.location.domain.ReportPeriod
@@ -614,6 +616,24 @@ class HomeVisitRepository private constructor(
             return@withContext null
         }
         parseFatigueCorrelationReport(response)
+    }
+
+    suspend fun fetchFatigueTrend(serverUrl: String, apiKey: String, days: Int): FatigueTrendReport? = withContext(Dispatchers.IO) {
+        val response = getJson(normalizeApiUrl(serverUrl, "/api/fatigue/trend?days=$days"), apiKey) ?: return@withContext null
+        if (!response.optBoolean("ok", false)) {
+            return@withContext null
+        }
+        val pointsJson = response.optJSONArray("points") ?: return@withContext FatigueTrendReport(response.optInt("days", days), emptyList())
+        val points = (0 until pointsJson.length()).mapNotNull { index ->
+            val obj = pointsJson.optJSONObject(index) ?: return@mapNotNull null
+            FatigueTrendPoint(
+                date = obj.optString("date"),
+                score = obj.optDouble("score", 0.0),
+                weeklyAverage = obj.optDouble("weekly_average", 0.0),
+                recoveryDebt = obj.optDouble("recovery_debt", 0.0),
+            )
+        }
+        FatigueTrendReport(days = response.optInt("days", days), points = points)
     }
 
     suspend fun saveFatigueFeedback(

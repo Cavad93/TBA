@@ -11,6 +11,7 @@ import com.homevisit.location.domain.EndDayDetails
 import com.homevisit.location.domain.ExpenseCategory
 import com.homevisit.location.domain.FatigueCorrelationReport
 import com.homevisit.location.domain.FatigueSnapshot
+import com.homevisit.location.domain.FatigueTrendReport
 import com.homevisit.location.domain.GpsDayEstimate
 import com.homevisit.location.domain.GpsVisitHint
 import com.homevisit.location.domain.ReportPeriod
@@ -421,6 +422,22 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun refreshFatigueTrend(serverUrl: String, apiKey: String, days: Int) {
+        viewModelScope.launch {
+            if (serverUrl.isBlank() || apiKey.isBlank()) {
+                fatigueState.value = fatigueState.value.copy(message = "Заполните URL сервера и API ключ")
+                return@launch
+            }
+            fatigueState.value = fatigueState.value.copy(isLoading = true, message = "Загружаю тренд усталости...")
+            val report = repository.fetchFatigueTrend(serverUrl, apiKey, days)
+            fatigueState.value = if (report == null) {
+                fatigueState.value.copy(isLoading = false, message = "Не удалось получить тренд усталости")
+            } else {
+                fatigueState.value.copy(isLoading = false, trend = report, message = "Тренд за ${report.days} дн. обновлён")
+            }
+        }
+    }
+
     fun submitCbi(serverUrl: String, apiKey: String, answers: List<Int>) {
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) {
@@ -681,6 +698,7 @@ data class FatigueUiState(
     val isLoading: Boolean = false,
     val snapshot: FatigueSnapshot? = null,
     val correlation: FatigueCorrelationReport? = null,
+    val trend: FatigueTrendReport? = null,
     val message: String = "",
 )
 

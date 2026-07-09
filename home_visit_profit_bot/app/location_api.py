@@ -87,6 +87,9 @@ def _handler_factory(config: AppConfig):
             if path == "/api/fatigue/corr":
                 self._handle_fatigue_correlation()
                 return
+            if path == "/api/fatigue/trend":
+                self._handle_fatigue_trend()
+                return
             if path == "/api/fatigue/cbi":
                 self._handle_fatigue_cbi_form()
                 return
@@ -436,6 +439,20 @@ def _handler_factory(config: AppConfig):
                 days = int((query.get("days") or ["28"])[0])
                 with connect(config.database_path) as connection:
                     payload = MobileFatigueService(connection).correlation(days)
+            except (TypeError, ValueError) as error:
+                self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            self._json_response(payload)
+
+        def _handle_fatigue_trend(self) -> None:
+            if not _is_authorized(self, config.location_api.api_key):
+                self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            query = parse_qs(urlparse(self.path).query)
+            try:
+                days = int((query.get("days") or ["30"])[0])
+                with connect(config.database_path) as connection:
+                    payload = MobileFatigueService(connection).trend(days)
             except (TypeError, ValueError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
                 return

@@ -103,6 +103,44 @@ def test_mobile_correlation_report_payload(tmp_path) -> None:
     assert any(cell["target"] == "fatigue_score" and cell["feature"] == "aggressive_score" for cell in payload["cells"])
 
 
+def test_mobile_fatigue_trend_returns_chronological_points(tmp_path) -> None:
+    config = _config(tmp_path)
+    init_db(config)
+
+    with connect(config.database_path) as connection:
+        days = WorkDayRepository(connection)
+        stats = DailyStatsRepository(connection)
+        for index in range(3):
+            day = days.create("Дом", "Дом", 30, 20)
+            days.close(day.id, {"actual_km": 30})
+            stats.create(
+                day.id,
+                DailyStats(
+                    completed_visits_count=4,
+                    total_income=8000,
+                    total_expenses=1000,
+                    net_profit=7000,
+                    total_work_minutes=300,
+                    total_route_minutes=100,
+                    total_service_minutes=80,
+                    net_hourly_income=1400,
+                    actual_km=30,
+                    actual_avg_speed_kmh=25,
+                    actual_service_minutes_per_visit=20,
+                    fatigue_score=40 + index * 10,
+                    fatigue_weekly_average=45 + index * 5,
+                    recovery_debt=20 + index * 5,
+                ),
+            )
+
+        payload = MobileFatigueService(connection).trend(30)
+
+    assert payload["ok"] is True
+    scores = [point["score"] for point in payload["points"]]
+    assert scores == [40, 50, 60]  # хронологический порядок, самый свежий последним
+    assert payload["points"][-1]["weekly_average"] == 55
+
+
 def _config(tmp_path):
     return AppConfig(
         project_dir=tmp_path,

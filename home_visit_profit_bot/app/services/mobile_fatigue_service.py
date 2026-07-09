@@ -132,6 +132,20 @@ class MobileFatigueService:
             "cells": [_correlation_cell_payload(cell) for cell in report.cells],
         }
 
+    def trend(self, days: int) -> dict[str, Any]:
+        limit = max(1, min(90, days))
+        rows = self.stats.last(limit)
+        points = [
+            {
+                "date": str(row["date"] or ""),
+                "score": float(row["fatigue_score"] or 0),
+                "weekly_average": float(row["fatigue_weekly_average"] or 0),
+                "recovery_debt": float(row["recovery_debt"] or 0),
+            }
+            for row in reversed(rows)  # last() отдаёт по убыванию, разворачиваем в хронологию
+        ]
+        return {"ok": True, "days": limit, "points": points}
+
     def save_feedback(self, payload: dict[str, Any]) -> dict[str, Any]:
         day_id = int(payload.get("work_day_id") or 0)
         day = self.days.get(day_id) if day_id else self.days.latest_closed()

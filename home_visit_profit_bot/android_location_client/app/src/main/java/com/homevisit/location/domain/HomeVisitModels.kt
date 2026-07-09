@@ -260,6 +260,18 @@ data class FatigueCorrelationCell(
     val n: Int,
 )
 
+data class FatigueTrendPoint(
+    val date: String,
+    val score: Double,
+    val weeklyAverage: Double,
+    val recoveryDebt: Double,
+)
+
+data class FatigueTrendReport(
+    val days: Int,
+    val points: List<FatigueTrendPoint>,
+)
+
 data class SyncQueueStats(
     val pendingCount: Int = 0,
     val sentCount: Int = 0,
