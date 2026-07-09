@@ -15,7 +15,7 @@ import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.CandidateEstimate
 import com.homevisit.location.domain.CandidateRequestResult
 import com.homevisit.location.domain.CbiInfo
-import com.homevisit.location.domain.Clinic
+import com.homevisit.location.domain.ClinicOptions
 import com.homevisit.location.domain.ClinicReportRow
 import com.homevisit.location.domain.EndDayDetails
 import com.homevisit.location.domain.ExpenseCategory
@@ -137,7 +137,7 @@ class HomeVisitRepository private constructor(
         workDayId: String,
         address: String,
         income: Double,
-        clinic: Clinic,
+        clinic: String,
         status: VisitStatus = VisitStatus.Accepted,
     ): String {
         val now = now()
@@ -164,7 +164,7 @@ class HomeVisitRepository private constructor(
         address: String,
         minutes: Double,
         income: Double,
-        clinic: Clinic,
+        clinic: String,
     ): String {
         val now = now()
         val office = OfficeEntryEntity(
@@ -186,11 +186,8 @@ class HomeVisitRepository private constructor(
         workDayId: String,
         minutes: Double,
         income: Double,
-        clinic: Clinic,
+        clinic: String,
     ): String {
-        require(clinic == Clinic.Psk || clinic == Clinic.Dnd) {
-            "Телемедицина доступна только для ПСК или ДНД"
-        }
         val now = now()
         val telemed = TelemedEntryEntity(
             id = id(),
@@ -309,7 +306,7 @@ class HomeVisitRepository private constructor(
                         workDayId = item.optString("work_day_id"),
                         address = item.optString("address"),
                         income = item.optDouble("income", 0.0),
-                        clinic = clinicFromTitle(item.optString("clinic")),
+                        clinic = item.optString("clinic"),
                         status = enumValueOrDefault(item.optString("status"), VisitStatus.Accepted),
                         estimatedDriveMinutes = item.nullableDouble("estimated_drive_minutes"),
                         actualDriveMinutes = item.nullableDouble("actual_drive_minutes"),
@@ -328,7 +325,7 @@ class HomeVisitRepository private constructor(
                         address = item.optString("address"),
                         minutes = item.optDouble("minutes", 0.0),
                         income = item.optDouble("income", 0.0),
-                        clinic = clinicFromTitle(item.optString("clinic")),
+                        clinic = item.optString("clinic"),
                         createdAtEpochMillis = item.optLong("created_at_epoch_millis", now()),
                         updatedAtEpochMillis = item.optLong("updated_at_epoch_millis", now()),
                     )
@@ -342,7 +339,7 @@ class HomeVisitRepository private constructor(
                         workDayId = item.optString("work_day_id"),
                         minutes = item.optDouble("minutes", 0.0),
                         income = item.optDouble("income", 0.0),
-                        clinic = clinicFromTitle(item.optString("clinic")),
+                        clinic = item.optString("clinic"),
                         createdAtEpochMillis = item.optLong("created_at_epoch_millis", now()),
                         updatedAtEpochMillis = item.optLong("updated_at_epoch_millis", now()),
                     )
@@ -448,14 +445,14 @@ class HomeVisitRepository private constructor(
         apiKey: String,
         address: String,
         income: Double,
-        clinic: Clinic,
+        clinic: String,
         routeKm: Double? = null,
         routeMinutes: Double? = null,
     ): CandidateRequestResult = withContext(Dispatchers.IO) {
         val payload = JSONObject()
             .put("address", address.trim())
             .put("income", income)
-            .put("clinic", clinic.title)
+            .put("clinic", clinic)
         if (routeKm != null && routeMinutes != null) {
             payload.put("route_km", routeKm)
             payload.put("route_minutes", routeMinutes)
@@ -565,7 +562,47 @@ class HomeVisitRepository private constructor(
         }
         val snapshot = parseAppSettings(response) ?: return@withContext loadCachedAppSettings()
         dao.saveSetting(SettingEntity(key = CACHE_KEY_APP_SETTINGS, value = response.toString(), updatedAtEpochMillis = now()))
+        cacheClinics(extractClinics(snapshot))
         snapshot
+    }
+
+    suspend fun fetchClinics(serverUrl: String, apiKey: String): ClinicOptions = withContext(Dispatchers.IO) {
+        val snapshot = fetchAppSettings(serverUrl, apiKey) ?: return@withContext loadCachedClinics()
+        val options = extractClinics(snapshot)
+        cacheClinics(options)
+        options
+    }
+
+    suspend fun loadCachedClinics(): ClinicOptions = withContext(Dispatchers.IO) {
+        ClinicOptions(
+            all = parseCachedList(dao.getSetting(CACHE_KEY_CLINICS)?.value),
+            telemed = parseCachedList(dao.getSetting(CACHE_KEY_TELEMED_CLINICS)?.value),
+        )
+    }
+
+    private suspend fun cacheClinics(options: ClinicOptions) {
+        val now = now()
+        dao.saveSetting(SettingEntity(key = CACHE_KEY_CLINICS, value = options.all.joinToString(", "), updatedAtEpochMillis = now))
+        dao.saveSetting(SettingEntity(key = CACHE_KEY_TELEMED_CLINICS, value = options.telemed.joinToString(", "), updatedAtEpochMillis = now))
+    }
+
+    private fun extractClinics(snapshot: AppSettingsSnapshot): ClinicOptions {
+        var all = emptyList<String>()
+        var telemed = emptyList<String>()
+        snapshot.sections.forEach { section ->
+            section.fields.forEach { field ->
+                when (field.key) {
+                    "clinics" -> all = field.listValue
+                    "telemed_clinics" -> telemed = field.listValue
+                }
+            }
+        }
+        return ClinicOptions(all = all, telemed = telemed)
+    }
+
+    private fun parseCachedList(value: String?): List<String> {
+        if (value.isNullOrBlank()) return emptyList()
+        return value.split(",").map { it.trim() }.filter { it.isNotEmpty() }
     }
 
     private suspend fun loadCachedAppSettings(): AppSettingsSnapshot? {
@@ -797,7 +834,7 @@ class HomeVisitRepository private constructor(
         .put("work_day_id", visit.workDayId)
         .put("address", visit.address)
         .put("income", visit.income)
-        .put("clinic", visit.clinic.title)
+        .put("clinic", visit.clinic)
         .put("status", visit.status.name)
         .toString()
 
@@ -807,7 +844,7 @@ class HomeVisitRepository private constructor(
         .put("address", office.address)
         .put("minutes", office.minutes)
         .put("income", office.income)
-        .put("clinic", office.clinic.title)
+        .put("clinic", office.clinic)
         .toString()
 
     private fun telemedPayload(telemed: TelemedEntryEntity): String = JSONObject()
@@ -815,7 +852,7 @@ class HomeVisitRepository private constructor(
         .put("work_day_id", telemed.workDayId)
         .put("minutes", telemed.minutes)
         .put("income", telemed.income)
-        .put("clinic", telemed.clinic.title)
+        .put("clinic", telemed.clinic)
         .toString()
 
     private fun expensePayload(expense: ExpenseEntity): String = JSONObject()
@@ -972,7 +1009,7 @@ class HomeVisitRepository private constructor(
                 visitId = candidate.optInt("id"),
                 address = candidate.optString("address"),
                 income = candidate.optDouble("income", 0.0),
-                clinic = clinicFromTitle(candidate.optString("clinic")),
+                clinic = candidate.optString("clinic"),
                 decision = calculation.optString("decision"),
                 reason = calculation.optString("reason"),
                 requiredExtraPayment = calculation.optDouble("required_extra_payment", 0.0),
@@ -1229,10 +1266,6 @@ class HomeVisitRepository private constructor(
         return base + path
     }
 
-    private fun clinicFromTitle(title: String): Clinic {
-        return Clinic.entries.firstOrNull { it.title == title } ?: Clinic.Dynasty
-    }
-
     private fun expenseCategoryFromTitle(title: String): ExpenseCategory {
         return ExpenseCategory.entries.firstOrNull { it.title == title || it.name == title } ?: ExpenseCategory.Other
     }
@@ -1277,6 +1310,8 @@ class HomeVisitRepository private constructor(
 
     companion object {
         private const val CACHE_KEY_APP_SETTINGS = "app_settings_cache"
+        private const val CACHE_KEY_CLINICS = "clinics"
+        private const val CACHE_KEY_TELEMED_CLINICS = "telemed_clinics"
 
         fun create(context: Context): HomeVisitRepository {
             return HomeVisitRepository(HomeVisitDatabase.getInstance(context))

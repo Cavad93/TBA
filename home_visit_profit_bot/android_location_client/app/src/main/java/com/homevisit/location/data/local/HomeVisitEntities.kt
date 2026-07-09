@@ -3,7 +3,6 @@ package com.homevisit.location.data.local
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
-import com.homevisit.location.domain.Clinic
 import com.homevisit.location.domain.ExpenseCategory
 import com.homevisit.location.domain.VisitStatus
 import com.homevisit.location.domain.WorkDayStatus
@@ -34,7 +33,7 @@ data class VisitEntity(
     val workDayId: String,
     val address: String,
     val income: Double,
-    val clinic: Clinic,
+    val clinic: String,
     val status: VisitStatus,
     val estimatedDriveMinutes: Double?,
     val actualDriveMinutes: Double?,
@@ -53,7 +52,7 @@ data class OfficeEntryEntity(
     val address: String,
     val minutes: Double,
     val income: Double,
-    val clinic: Clinic,
+    val clinic: String,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
 )
@@ -67,7 +66,7 @@ data class TelemedEntryEntity(
     val workDayId: String,
     val minutes: Double,
     val income: Double,
-    val clinic: Clinic,
+    val clinic: String,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
 )

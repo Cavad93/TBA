@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.homevisit.location.data.HomeVisitRepository
 import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.CandidateEstimate
-import com.homevisit.location.domain.Clinic
+import com.homevisit.location.domain.ClinicOptions
 import com.homevisit.location.domain.EndDayDetails
 import com.homevisit.location.domain.ExpenseCategory
 import com.homevisit.location.domain.FatigueCorrelationReport
@@ -43,6 +43,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     private val reportState = MutableStateFlow(ReportUiState())
     private val fatigueState = MutableStateFlow(FatigueUiState())
     private val appSettingsState = MutableStateFlow(AppSettingsUiState())
+    private val clinicsState = MutableStateFlow(ClinicOptions())
     private val syncMessageState = MutableStateFlow("")
     private val backupExportState = MutableStateFlow<String?>(null)
     private val syncConflictState = MutableStateFlow<List<SyncConflict>>(emptyList())
@@ -83,11 +84,11 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                         activeVisit = visits
                             .filter { it.status == VisitStatus.Accepted }
                             .minByOrNull { it.createdAtEpochMillis }
-                            ?.let { RouteVisitUi.fromVisit(it.id, it.address, it.clinic.title, it.income) },
+                            ?.let { RouteVisitUi.fromVisit(it.id, it.address, it.clinic, it.income) },
                         routeVisits = visits
                             .filter { it.status == VisitStatus.Accepted }
                             .sortedBy { it.createdAtEpochMillis }
-                            .map { RouteVisitUi.fromVisit(it.id, it.address, it.clinic.title, it.income) },
+                            .map { RouteVisitUi.fromVisit(it.id, it.address, it.clinic, it.income) },
                     )
                 }
             }
@@ -97,7 +98,11 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         OperationalUiState(route, gpsEstimate, gpsHint, report, fatigue)
     }
 
-    val uiState: StateFlow<HomeVisitUiState> = combine(dayState, candidateState, operationalState, syncState, appSettingsState) { day, candidate, operational, sync, appSettings ->
+    private val auxState = combine(appSettingsState, clinicsState) { appSettings, clinics ->
+        AuxUiState(appSettings, clinics)
+    }
+
+    val uiState: StateFlow<HomeVisitUiState> = combine(dayState, candidateState, operationalState, syncState, auxState) { day, candidate, operational, sync, aux ->
         day.copy(
             candidate = candidate,
             serverRoute = operational.route,
@@ -106,7 +111,8 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             report = operational.report,
             fatigue = operational.fatigue,
             sync = sync,
-            appSettings = appSettings,
+            appSettings = aux.appSettings,
+            clinics = aux.clinics,
         )
     }
         .stateIn(
@@ -114,6 +120,20 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = HomeVisitUiState(),
         )
+
+    init {
+        // Загружаем список клиник из локального кэша, чтобы формы работали офлайн.
+        viewModelScope.launch {
+            clinicsState.value = repository.loadCachedClinics()
+        }
+    }
+
+    fun refreshClinics(serverUrl: String, apiKey: String) {
+        viewModelScope.launch {
+            if (serverUrl.isBlank() || apiKey.isBlank()) return@launch
+            clinicsState.value = repository.fetchClinics(serverUrl, apiKey)
+        }
+    }
 
     fun startDay() {
         viewModelScope.launch {
@@ -159,7 +179,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun addVisit(address: String, income: Double, clinic: Clinic) {
+    fun addVisit(address: String, income: Double, clinic: String) {
         viewModelScope.launch {
             val workDayId = ensureActiveDay()
             repository.addVisit(workDayId, address, income, clinic)
@@ -171,7 +191,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         apiKey: String,
         address: String,
         income: Double,
-        clinic: Clinic,
+        clinic: String,
         routeKm: Double?,
         routeMinutes: Double?,
     ) {
@@ -482,14 +502,14 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun addOffice(address: String, minutes: Double, income: Double, clinic: Clinic) {
+    fun addOffice(address: String, minutes: Double, income: Double, clinic: String) {
         viewModelScope.launch {
             val workDayId = ensureActiveDay()
             repository.addOfficeEntry(workDayId, address, minutes, income, clinic)
         }
     }
 
-    fun addTelemed(minutes: Double, income: Double, clinic: Clinic) {
+    fun addTelemed(minutes: Double, income: Double, clinic: String) {
         viewModelScope.launch {
             val workDayId = ensureActiveDay()
             repository.addTelemedEntry(workDayId, minutes, income, clinic)
@@ -582,6 +602,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             } else {
                 AppSettingsUiState(snapshot = snapshot, message = "Настройки обновлены")
             }
+            clinicsState.value = repository.loadCachedClinics()
         }
     }
 
@@ -606,6 +627,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             } else {
                 AppSettingsUiState(snapshot = snapshot, message = "Настройки сохранены")
             }
+            clinicsState.value = repository.loadCachedClinics()
         }
     }
 
@@ -658,6 +680,7 @@ data class HomeVisitUiState(
     val fatigue: FatigueUiState = FatigueUiState(),
     val sync: SyncUiState = SyncUiState(),
     val appSettings: AppSettingsUiState = AppSettingsUiState(),
+    val clinics: ClinicOptions = ClinicOptions(),
 ) {
     val netIncome: Double
         get() = grossIncome - expensesAmount
@@ -669,6 +692,11 @@ private data class OperationalUiState(
     val gpsHint: GpsHintUiState,
     val report: ReportUiState,
     val fatigue: FatigueUiState,
+)
+
+private data class AuxUiState(
+    val appSettings: AppSettingsUiState,
+    val clinics: ClinicOptions,
 )
 
 data class RouteVisitUi(

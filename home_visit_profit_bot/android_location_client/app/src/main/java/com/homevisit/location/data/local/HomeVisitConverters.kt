@@ -1,18 +1,11 @@
 package com.homevisit.location.data.local
 
 import androidx.room.TypeConverter
-import com.homevisit.location.domain.Clinic
 import com.homevisit.location.domain.ExpenseCategory
 import com.homevisit.location.domain.VisitStatus
 import com.homevisit.location.domain.WorkDayStatus
 
 class HomeVisitConverters {
-    @TypeConverter
-    fun fromClinic(value: Clinic?): String? = value?.name
-
-    @TypeConverter
-    fun toClinic(value: String?): Clinic? = value?.let { Clinic.valueOf(it) }
-
     @TypeConverter
     fun fromWorkDayStatus(value: WorkDayStatus): String = value.name
 

@@ -82,7 +82,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.homevisit.location.domain.Clinic
 import com.homevisit.location.domain.ClinicReportRow
 import com.homevisit.location.domain.SettingField
 import com.homevisit.location.domain.SettingType
@@ -165,6 +164,7 @@ class MainActivity : ComponentActivity() {
                     onSync = viewModel::syncPending,
                     onRefreshAppSettings = viewModel::refreshAppSettings,
                     onSaveAppSettings = viewModel::saveAppSettings,
+                    onRefreshClinics = viewModel::refreshClinics,
                 )
             }
         }
@@ -276,7 +276,7 @@ private data class WorkActions(
     val onEndDay: () -> Unit,
     val onEndDayWithOdometer: (Double?) -> Unit,
     val onEndDayWithDetails: (EndDayDetails) -> Unit,
-    val onCalculateVisit: (String, Double, Clinic, Double?, Double?) -> Unit,
+    val onCalculateVisit: (String, Double, String, Double?, Double?) -> Unit,
     val onAcceptCandidate: () -> Unit,
     val onRejectCandidate: () -> Unit,
     val onCompleteCurrentVisit: () -> Unit,
@@ -297,8 +297,8 @@ private data class WorkActions(
     val onRefreshSyncConflicts: () -> Unit,
     val onCheckConnection: () -> Unit,
     val onImportBackup: (String) -> Unit,
-    val onAddOffice: (String, Double, Double, Clinic) -> Unit,
-    val onAddTelemed: (Double, Double, Clinic) -> Unit,
+    val onAddOffice: (String, Double, Double, String) -> Unit,
+    val onAddTelemed: (Double, Double, String) -> Unit,
     val onAddExpense: (ExpenseCategory, Double, String) -> Unit,
     val onRefreshAppSettings: () -> Unit,
     val onSaveAppSettings: (Map<String, Any?>) -> Unit,
@@ -343,7 +343,7 @@ private fun HomeVisitApp(
     onEndDay: () -> Unit,
     onEndDayWithOdometer: (Double?) -> Unit,
     onEndDayWithDetails: (EndDayDetails) -> Unit,
-    onCalculateVisit: (String, String, String, Double, Clinic, Double?, Double?) -> Unit,
+    onCalculateVisit: (String, String, String, Double, String, Double?, Double?) -> Unit,
     onAcceptCandidate: (String, String) -> Unit,
     onRejectCandidate: (String, String) -> Unit,
     onCompleteCurrentVisit: (String, String) -> Unit,
@@ -365,12 +365,13 @@ private fun HomeVisitApp(
     onRefreshSyncConflicts: (String, String) -> Unit,
     onCheckConnection: (String, String) -> Unit,
     onImportBackup: (String) -> Unit,
-    onAddOffice: (String, Double, Double, Clinic) -> Unit,
-    onAddTelemed: (Double, Double, Clinic) -> Unit,
+    onAddOffice: (String, Double, Double, String) -> Unit,
+    onAddTelemed: (Double, Double, String) -> Unit,
     onAddExpense: (ExpenseCategory, Double, String) -> Unit,
     onSync: (String, String) -> Unit,
     onRefreshAppSettings: (String, String) -> Unit,
     onSaveAppSettings: (String, String, Map<String, Any?>) -> Unit,
+    onRefreshClinics: (String, String) -> Unit,
 ) {
     var selected by rememberSaveable { mutableStateOf(AppDestination.Today) }
     var serverUrl by rememberSaveable { mutableStateOf(initialServerUrl) }
@@ -433,6 +434,12 @@ private fun HomeVisitApp(
         onSaveAppSettings = { values -> onSaveAppSettings(serverUrl, apiKey, values) },
     )
     val syncNow = { onSync(serverUrl, apiKey) }
+    // Подтягиваем список клиник из настроек, когда есть URL и ключ (для форм).
+    LaunchedEffect(serverUrl, apiKey) {
+        if (serverUrl.isNotBlank() && apiKey.isNotBlank()) {
+            onRefreshClinics(serverUrl, apiKey)
+        }
+    }
     LaunchedEffect(uiState.sync.backupJson) {
         val backup = uiState.sync.backupJson ?: return@LaunchedEffect
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
@@ -859,12 +866,13 @@ private fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
         when (selectedForm) {
             WorkForm.Visit -> VisitInputCard(
                 candidate = uiState.candidate,
+                clinics = uiState.clinics.all,
                 onCalculate = workActions.onCalculateVisit,
                 onAccept = workActions.onAcceptCandidate,
                 onReject = workActions.onRejectCandidate,
             )
-            WorkForm.Office -> OfficeInputCard(workActions.onAddOffice)
-            WorkForm.Telemed -> TelemedInputCard(workActions.onAddTelemed)
+            WorkForm.Office -> OfficeInputCard(uiState.clinics.all, workActions.onAddOffice)
+            WorkForm.Telemed -> TelemedInputCard(uiState.clinics.telemed, workActions.onAddTelemed)
             WorkForm.Expense -> ExpenseInputCard(workActions.onAddExpense)
         }
     }
@@ -1962,7 +1970,8 @@ private fun WorkFormTabs(selectedForm: WorkForm, onSelect: (WorkForm) -> Unit) {
 @Composable
 private fun VisitInputCard(
     candidate: CandidateUiState,
-    onCalculate: (String, Double, Clinic, Double?, Double?) -> Unit,
+    clinics: List<String>,
+    onCalculate: (String, Double, String, Double?, Double?) -> Unit,
     onAccept: () -> Unit,
     onReject: () -> Unit,
 ) {
@@ -1970,7 +1979,7 @@ private fun VisitInputCard(
     var incomeText by rememberSaveable { mutableStateOf("") }
     var routeKmText by rememberSaveable { mutableStateOf("") }
     var routeMinutesText by rememberSaveable { mutableStateOf("") }
-    var clinic by rememberSaveable { mutableStateOf(Clinic.Dynasty) }
+    var clinic by rememberSaveable(clinics) { mutableStateOf(clinics.firstOrNull().orEmpty()) }
     val income = parseNumber(incomeText)
     val routeKm = parseNumber(routeKmText)
     val routeMinutes = parseNumber(routeMinutesText)
@@ -1985,7 +1994,7 @@ private fun VisitInputCard(
             singleLine = false,
         )
         MoneyField(value = incomeText, onValueChange = { incomeText = it }, label = "Стоимость")
-        ClinicPicker(selected = clinic, onSelect = { clinic = it })
+        ClinicPicker(clinics = clinics, selected = clinic, onSelect = { clinic = it })
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MoneyField(
                 modifier = Modifier.weight(1f),
@@ -2002,7 +2011,7 @@ private fun VisitInputCard(
         }
         Button(
             modifier = Modifier.fillMaxWidth(),
-            enabled = address.isNotBlank() && income != null,
+            enabled = address.isNotBlank() && income != null && clinic.isNotBlank(),
             onClick = {
                 onCalculate(
                     address,
@@ -2085,11 +2094,11 @@ private fun CandidateResultCard(candidate: CandidateUiState, onAccept: () -> Uni
 }
 
 @Composable
-private fun OfficeInputCard(onSubmit: (String, Double, Double, Clinic) -> Unit) {
+private fun OfficeInputCard(clinics: List<String>, onSubmit: (String, Double, Double, String) -> Unit) {
     var address by rememberSaveable { mutableStateOf("") }
     var minutesText by rememberSaveable { mutableStateOf("") }
     var incomeText by rememberSaveable { mutableStateOf("") }
-    var clinic by rememberSaveable { mutableStateOf(Clinic.Dynasty) }
+    var clinic by rememberSaveable(clinics) { mutableStateOf(clinics.firstOrNull().orEmpty()) }
     val minutes = parseNumber(minutesText)
     val income = parseNumber(incomeText)
 
@@ -2103,10 +2112,10 @@ private fun OfficeInputCard(onSubmit: (String, Double, Double, Clinic) -> Unit) 
         )
         MoneyField(value = minutesText, onValueChange = { minutesText = it }, label = "Продолжительность, мин")
         MoneyField(value = incomeText, onValueChange = { incomeText = it }, label = "Стоимость")
-        ClinicPicker(selected = clinic, onSelect = { clinic = it })
+        ClinicPicker(clinics = clinics, selected = clinic, onSelect = { clinic = it })
         Button(
             modifier = Modifier.fillMaxWidth(),
-            enabled = address.isNotBlank() && minutes != null && income != null,
+            enabled = address.isNotBlank() && minutes != null && income != null && clinic.isNotBlank(),
             onClick = {
                 onSubmit(address, minutes ?: 0.0, income ?: 0.0, clinic)
                 address = ""
@@ -2120,24 +2129,20 @@ private fun OfficeInputCard(onSubmit: (String, Double, Double, Clinic) -> Unit) 
 }
 
 @Composable
-private fun TelemedInputCard(onSubmit: (Double, Double, Clinic) -> Unit) {
+private fun TelemedInputCard(clinics: List<String>, onSubmit: (Double, Double, String) -> Unit) {
     var minutesText by rememberSaveable { mutableStateOf("3") }
     var incomeText by rememberSaveable { mutableStateOf("") }
-    var clinic by rememberSaveable { mutableStateOf(Clinic.Psk) }
+    var clinic by rememberSaveable(clinics) { mutableStateOf(clinics.firstOrNull().orEmpty()) }
     val minutes = parseNumber(minutesText)
     val income = parseNumber(incomeText)
 
     InputCard("Телемедицина") {
         MoneyField(value = incomeText, onValueChange = { incomeText = it }, label = "Стоимость")
         MoneyField(value = minutesText, onValueChange = { minutesText = it }, label = "Минуты")
-        ClinicPicker(
-            selected = clinic,
-            allowedClinics = listOf(Clinic.Psk, Clinic.Dnd),
-            onSelect = { clinic = it },
-        )
+        ClinicPicker(clinics = clinics, selected = clinic, onSelect = { clinic = it })
         Button(
             modifier = Modifier.fillMaxWidth(),
-            enabled = minutes != null && income != null,
+            enabled = minutes != null && income != null && clinic.isNotBlank(),
             onClick = {
                 onSubmit(minutes ?: 3.0, income ?: 0.0, clinic)
                 incomeText = ""
@@ -2221,14 +2226,22 @@ private fun MoneyField(
 
 @Composable
 private fun ClinicPicker(
-    selected: Clinic,
-    allowedClinics: List<Clinic> = Clinic.entries.toList(),
-    onSelect: (Clinic) -> Unit,
+    clinics: List<String>,
+    selected: String,
+    onSelect: (String) -> Unit,
 ) {
+    if (clinics.isEmpty()) {
+        Text(
+            "Список клиник пуст. Добавьте клиники в разделе «Настройки» → «Клиники».",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
     OptionGrid(
-        options = allowedClinics,
+        options = clinics,
         selected = selected,
-        label = { it.title },
+        label = { it },
         onSelect = onSelect,
     )
 }

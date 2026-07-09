@@ -1,11 +1,13 @@
 package com.homevisit.location.domain
 
-enum class Clinic(val title: String) {
-    Dynasty("Династия"),
-    Psk("ПСК"),
-    Vitamed("ВИТАМЕД"),
-    Dnd("ДНД"),
-}
+/**
+ * Клиники не захардкожены: доступный список приходит из настроек сервера
+ * (ключи `clinics` / `telemed_clinics`) и может содержать любое число клиник.
+ */
+data class ClinicOptions(
+    val all: List<String> = emptyList(),
+    val telemed: List<String> = emptyList(),
+)
 
 enum class WorkDayStatus {
     NotStarted,
@@ -58,14 +60,14 @@ data class WorkDaySummary(
 data class VisitDraft(
     val address: String = "",
     val income: Double = 0.0,
-    val clinic: Clinic? = null,
+    val clinic: String? = null,
 )
 
 data class CandidateEstimate(
     val visitId: Int,
     val address: String,
     val income: Double,
-    val clinic: Clinic,
+    val clinic: String,
     val decision: String,
     val reason: String,
     val requiredExtraPayment: Double,
@@ -297,13 +299,13 @@ data class OfficeEntryDraft(
     val address: String = "",
     val minutes: Double = 0.0,
     val income: Double = 0.0,
-    val clinic: Clinic? = null,
+    val clinic: String? = null,
 )
 
 data class TelemedEntryDraft(
     val income: Double = 0.0,
     val minutes: Double = 3.0,
-    val clinic: Clinic? = null,
+    val clinic: String? = null,
 )
 
 data class ExpenseDraft(

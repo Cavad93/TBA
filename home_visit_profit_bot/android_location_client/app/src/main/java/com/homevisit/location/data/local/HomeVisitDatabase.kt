@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SettingEntity::class,
         SyncQueueEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 @TypeConverters(HomeVisitConverters::class)
@@ -36,7 +36,7 @@ abstract class HomeVisitDatabase : RoomDatabase() {
                     HomeVisitDatabase::class.java,
                     "home_visit.db",
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { instance = it }
             }
@@ -49,6 +49,25 @@ abstract class HomeVisitDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE work_days ADD COLUMN sleepHours REAL NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE work_days ADD COLUMN sleepQuality REAL NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE work_days ADD COLUMN breakHoursBefore REAL NOT NULL DEFAULT 0")
+            }
+        }
+
+        // Клиника теперь хранится как название (строка), а не имя enum.
+        // Конвертируем старые значения enum-имён в названия; неизвестные оставляем как есть.
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (table in listOf("visits", "office_entries", "telemed_entries")) {
+                    db.execSQL(
+                        """
+                        UPDATE $table SET clinic = CASE clinic
+                            WHEN 'Dynasty' THEN 'Династия'
+                            WHEN 'Psk' THEN 'ПСК'
+                            WHEN 'Vitamed' THEN 'ВИТАМЕД'
+                            WHEN 'Dnd' THEN 'ДНД'
+                            ELSE clinic END
+                        """.trimIndent()
+                    )
+                }
             }
         }
     }
