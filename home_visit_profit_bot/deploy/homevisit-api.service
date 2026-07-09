@@ -1,0 +1,39 @@
+# systemd-юнит для backend REST API (запуск как постоянная служба).
+#
+# Установка:
+#   sudo cp deploy/homevisit-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now homevisit-api
+#   systemctl status homevisit-api
+#
+# Пути ниже рассчитаны на разворачивание репозитория в /opt/tba.
+# Поправьте User/WorkingDirectory/пути под свою установку.
+
+[Unit]
+Description=Home Visit backend REST API (Android)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=homevisit
+Group=homevisit
+
+# Каталог, где лежат config.yaml, .env и создаётся data.sqlite3.
+WorkingDirectory=/opt/tba/home_visit_profit_bot
+EnvironmentFile=/opt/tba/home_visit_profit_bot/.env
+ExecStart=/opt/tba/home_visit_profit_bot/.venv/bin/python -m app.main
+
+Restart=on-failure
+RestartSec=3
+
+# Базовое усиление безопасности процесса.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# Единственный каталог, куда службе можно писать (SQLite-база, логи).
+ReadWritePaths=/opt/tba/home_visit_profit_bot
+
+[Install]
+WantedBy=multi-user.target

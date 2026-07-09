@@ -34,6 +34,12 @@ python -m app.main
 
 SQLite-база создастся автоматически в `data.sqlite3`. Процесс поднимает HTTP REST API для Android-приложения (управляется `LOCATION_API_ENABLED`, по умолчанию включён).
 
+> **Production (домен + HTTPS вместо IP):** локальный запуск выше — для разработки.
+> Чтобы приложение ходило на `https://<имя>` (сначала бесплатное, позже купленный
+> домен) через обратный прокси Caddy с автоматическим TLS, см.
+> [deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md). Готовые файлы (Caddyfile, systemd-юнит,
+> docker-compose) лежат в каталоге `deploy/`.
+
 Основные endpoint-ы приложения: `/api/health`, `/api/sync`, `/api/settings`, `/api/day/active`, `/api/visits/candidate`, `/api/visits/{id}/accept|reject|complete|cancel`, `/api/route/active`, `/api/reports/summary`, `/api/reports/stats`, `/api/fatigue/summary`, `/api/fatigue/corr`, `/api/fatigue/trend`, `/api/fatigue/cbi`, `/location`, `/driving`.
 
 ## Основной сценарий

@@ -1,0 +1,20 @@
+# Caddyfile для варианта с Docker Compose.
+# Отличие от нативного deploy/Caddyfile — апстрим по имени сервиса `api`
+# внутри compose-сети, а не 127.0.0.1.
+
+# tba.duckdns.org, api.example.com {
+tba.duckdns.org {
+	encode zstd gzip
+
+	reverse_proxy api:8088 {
+		health_uri /api/health
+		health_interval 30s
+		health_timeout 5s
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+}

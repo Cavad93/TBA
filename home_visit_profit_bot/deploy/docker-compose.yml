@@ -1,0 +1,42 @@
+# Вариант «всё в контейнерах»: backend + Caddy с автоматическим HTTPS.
+#
+# Запуск (из каталога deploy/):
+#   cp env.production.example ../.env   # и вписать LOCATION_API_KEY
+#   docker compose up -d --build
+#
+# Caddy сам получит TLS-сертификат для имён из Caddyfile.docker и будет
+# продлевать его. Данные сертификатов и SQLite живут в именованных томах.
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      # Внутри контейнера база лежит на постоянном томе.
+      DATABASE_PATH: /data/data.sqlite3
+      LOCATION_API_HOST: 0.0.0.0
+    volumes:
+      - app_data:/data
+    expose:
+      - "8088"          # доступен только Caddy внутри сети, наружу не публикуется
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.docker:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # сертификаты Let's Encrypt (не удалять!)
+      - caddy_config:/config
+
+volumes:
+  app_data:
+  caddy_data:
+  caddy_config:
