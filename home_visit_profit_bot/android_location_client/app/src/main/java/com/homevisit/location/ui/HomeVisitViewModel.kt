@@ -3,6 +3,7 @@ package com.homevisit.location.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.homevisit.location.OrderSource
 import com.homevisit.location.data.HomeVisitRepository
 import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.CandidateEstimate
@@ -379,7 +380,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 reportState.value.copy(
                     isLoading = false,
                     snapshot = report,
-                    message = if (clinic == null) "Активный отчёт обновлён" else "Отчёт по клинике: $clinic",
+                    message = if (clinic == null) "Активный отчёт обновлён" else "Отчёт по ${OrderSource.current.datSingle}: $clinic",
                     selectedClinic = clinic,
                     availableClinics = if (clinic == null) report.clinics.map { it.clinic } else reportState.value.availableClinics,
                 )
@@ -402,7 +403,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 reportState.value.copy(
                     isLoading = false,
                     snapshot = report,
-                    message = if (clinic == null) "Отчёт обновлён" else "Отчёт по клинике: $clinic",
+                    message = if (clinic == null) "Отчёт обновлён" else "Отчёт по ${OrderSource.current.datSingle}: $clinic",
                     selectedClinic = clinic,
                     availableClinics = if (clinic == null) report.clinics.map { it.clinic } else reportState.value.availableClinics,
                 )
@@ -416,13 +417,13 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 fatigueState.value = FatigueUiState(message = "Заполните URL сервера и API ключ")
                 return@launch
             }
-            fatigueState.value = fatigueState.value.copy(isLoading = true, message = "Обновляю усталость...")
+            fatigueState.value = fatigueState.value.copy(isLoading = true, message = "Обновляю нагрузку...")
             repository.syncPending(serverUrl, apiKey)
             val snapshot = repository.fetchFatigueSummary(serverUrl, apiKey)
             fatigueState.value = if (snapshot == null) {
-                FatigueUiState(message = "Не удалось получить данные усталости")
+                FatigueUiState(message = "Не удалось получить данные нагрузки")
             } else {
-                fatigueState.value.copy(isLoading = false, snapshot = snapshot, message = "Усталость обновлена")
+                fatigueState.value.copy(isLoading = false, snapshot = snapshot, message = "Нагрузка обновлена")
             }
         }
     }
@@ -471,10 +472,10 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 fatigueState.value = fatigueState.value.copy(message = "Заполните URL сервера и API ключ")
                 return@launch
             }
-            fatigueState.value = fatigueState.value.copy(isLoading = true, message = "Загружаю тренд усталости...")
+            fatigueState.value = fatigueState.value.copy(isLoading = true, message = "Загружаю тренд нагрузки...")
             val report = repository.fetchFatigueTrend(serverUrl, apiKey, days)
             fatigueState.value = if (report == null) {
-                fatigueState.value.copy(isLoading = false, message = "Не удалось получить тренд усталости")
+                fatigueState.value.copy(isLoading = false, message = "Не удалось получить тренд нагрузки")
             } else {
                 fatigueState.value.copy(isLoading = false, trend = report, message = "Тренд за ${report.days} дн. обновлён")
             }
@@ -487,17 +488,17 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 fatigueState.value = fatigueState.value.copy(message = "Заполните URL сервера и API ключ")
                 return@launch
             }
-            fatigueState.value = fatigueState.value.copy(isLoading = true, message = "Сохраняю CBI...")
+            fatigueState.value = fatigueState.value.copy(isLoading = true, message = "Сохраняю индекс восст....")
             val cbi = repository.saveCbi(serverUrl, apiKey, answers)
             if (cbi == null) {
-                fatigueState.value = fatigueState.value.copy(isLoading = false, message = "Не удалось сохранить CBI")
+                fatigueState.value = fatigueState.value.copy(isLoading = false, message = "Не удалось сохранить индекс восст.")
                 return@launch
             }
             val snapshot = repository.fetchFatigueSummary(serverUrl, apiKey)
             fatigueState.value = fatigueState.value.copy(
                 isLoading = false,
                 snapshot = snapshot ?: fatigueState.value.snapshot,
-                message = "CBI сохранён: ${cbi.latestScore.toInt()}/100 (${cbi.level})",
+                message = "Индекс восст. сохранён: ${cbi.latestScore.toInt()}/100 (${cbi.level})",
             )
         }
     }

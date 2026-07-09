@@ -1177,7 +1177,7 @@ class DailyStatsRepository:
         return self.connection.execute(
             """
             SELECT
-                COALESCE(NULLIF(visits.clinic, ''), 'Без клиники') AS clinic,
+                COALESCE(NULLIF(visits.clinic, ''), 'Без компании') AS clinic,
                 COUNT(*) AS visits_count,
                 COALESCE(SUM(visits.income), 0) AS visit_income,
                 COALESCE(SUM(visits.estimated_extra_minutes), 0) AS route_minutes,
@@ -1187,7 +1187,7 @@ class DailyStatsRepository:
             LEFT JOIN daily_stats ON daily_stats.work_day_id = work_days.id
             WHERE work_days.date >= ? AND work_days.date < ?
               AND visits.status = 'completed'
-            GROUP BY COALESCE(NULLIF(visits.clinic, ''), 'Без клиники')
+            GROUP BY COALESCE(NULLIF(visits.clinic, ''), 'Без компании')
             ORDER BY clinic
             """,
             (start_date, end_date),

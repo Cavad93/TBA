@@ -52,7 +52,7 @@ def test_active_clinic_breakdown_keeps_unassigned_legacy_telemed() -> None:
     )
 
     assert len(breakdown) == 1
-    assert breakdown[0].clinic == "Без клиники"
+    assert breakdown[0].clinic == "Без компании"
     assert breakdown[0].gross_income == 1000
     assert breakdown[0].work_minutes == 6
 

@@ -6,7 +6,7 @@ from typing import Any
 from app.models import Visit
 
 
-UNKNOWN_CLINIC = "Без клиники"
+UNKNOWN_CLINIC = "Без компании"
 
 
 @dataclass(frozen=True)

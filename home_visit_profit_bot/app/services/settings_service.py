@@ -39,11 +39,11 @@ SECTION_TITLES: dict[str, str] = {
     "economics": "Экономика",
     "car": "Авто",
     "addresses": "Дом / старт / финиш",
-    "clinics": "Клиники",
+    "clinics": "Компании",
     "districts": "Базовые районы",
     "routing": "Маршрутизация и OSRM",
     "gps": "GPS",
-    "fatigue": "Усталость и автообучение",
+    "fatigue": "Нагрузка и автообучение",
 }
 
 SETTINGS_CATALOG: list[SettingField] = [
@@ -62,8 +62,8 @@ SETTINGS_CATALOG: list[SettingField] = [
     SettingField("default_start_address", "addresses", "Старт по умолчанию", "text", "Дом"),
     SettingField("default_finish_address", "addresses", "Финиш по умолчанию", "text", "Дом"),
     # Клиники (значения сеедятся из config.yaml, дальше редактируются пользователем)
-    SettingField("clinics", "clinics", "Клиники", "list", []),
-    SettingField("telemed_clinics", "clinics", "Клиники телемедицины", "list", []),
+    SettingField("clinics", "clinics", "Компании", "list", []),
+    SettingField("telemed_clinics", "clinics", "Компании удалённых заказов", "list", []),
     # Базовые районы
     SettingField("base_districts", "districts", "Базовые районы", "list", []),
     # Маршрутизация и OSRM
@@ -73,14 +73,14 @@ SETTINGS_CATALOG: list[SettingField] = [
     SettingField("default_route_time_factor", "routing", "Поправка OSRM по времени", "number", 1.0, min=0),
     SettingField("default_avg_speed_kmh", "routing", "Скорость по умолчанию, км/ч", "number", 30.0, min=0),
     SettingField("default_service_minutes", "routing", "Время на адресе, мин", "number", 20.0, min=0),
-    SettingField("default_telemed_minutes", "routing", "Телемедицина по умолчанию, мин", "number", 3.0, min=0),
+    SettingField("default_telemed_minutes", "routing", "Удалённые заказы по умолчанию, мин", "number", 3.0, min=0),
     # GPS
     SettingField("location_geofence_radius_m", "gps", "Радиус геозоны, м", "number", 120.0, min=0),
     SettingField("location_dwell_minutes", "gps", "Порог стоянки, мин", "number", 12.0, min=0),
     SettingField("location_notification_cooldown_minutes", "gps", "Cooldown уведомлений, мин", "number", 60.0, min=0),
     # Усталость
-    SettingField("fatigue_enabled", "fatigue", "Учёт усталости", "bool", True),
-    SettingField("fatigue_learning_enabled", "fatigue", "Автообучение усталости", "bool", True),
+    SettingField("fatigue_enabled", "fatigue", "Учёт нагрузки", "bool", True),
+    SettingField("fatigue_learning_enabled", "fatigue", "Автообучение нагрузки", "bool", True),
 ]
 
 _FIELD_BY_KEY: dict[str, SettingField] = {field.key: field for field in SETTINGS_CATALOG}

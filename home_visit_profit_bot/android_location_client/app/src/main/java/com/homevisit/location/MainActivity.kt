@@ -122,11 +122,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        OrderSource.current = OrderSource.byKey(prefs.getString(KEY_ORDER_SOURCE, null))
         SyncScheduler.schedule(this)
         setContent {
             HomeVisitTheme {
                 val viewModel: HomeVisitViewModel = viewModel()
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+                // Персист выбранного пресета источника заказов при его смене.
+                LaunchedEffect(OrderSource.current) {
+                    prefs.edit().putString(KEY_ORDER_SOURCE, OrderSource.current.key).apply()
+                }
                 HomeVisitApp(
                     uiState = uiState,
                     initialServerUrl = prefs.getString(KEY_SERVER_URL, "").orEmpty(),
@@ -244,6 +249,7 @@ class MainActivity : ComponentActivity() {
         const val KEY_SERVER_URL = "server_url"
         const val KEY_API_KEY = "api_key"
         const val KEY_INTERVAL_SECONDS = "interval_seconds"
+        const val KEY_ORDER_SOURCE = "order_source"
         private const val PERMISSION_REQUEST = 1001
     }
 }
@@ -257,7 +263,7 @@ private enum class AppDestination(
     Work("Работа", Icons.Filled.Work, "Работа"),
     Route("Маршрут", Icons.Filled.Map, "Маршрут и GPS"),
     Reports("Отчеты", Icons.Filled.BarChart, "Отчеты"),
-    Fatigue("Усталость", Icons.Filled.MonitorHeart, "Усталость"),
+    Fatigue("Нагрузка", Icons.Filled.MonitorHeart, "Нагрузка"),
     Settings("Настройки", Icons.Filled.Settings, "Настройки"),
 }
 
@@ -623,7 +629,7 @@ private fun DestinationIcon(destination: AppDestination) {
 
 @Composable
 private fun TodayScreen(uiState: HomeVisitUiState, workActions: WorkActions, settingsState: GpsSettingsState, onSync: () -> Unit, onOpenWork: () -> Unit) {
-    val fatigueText = uiState.fatigue.snapshot?.summary?.let { ", усталость ${oneDecimal(it.score)}/100" }.orEmpty()
+    val fatigueText = uiState.fatigue.snapshot?.summary?.let { ", нагрузка ${oneDecimal(it.score)}/100" }.orEmpty()
     val syncText = if (uiState.sync.stats.pendingCount + uiState.sync.stats.failedCount > 0) {
         ", sync: ${uiState.sync.stats.pendingCount} ждут / ${uiState.sync.stats.failedCount} ошибок"
     } else {
@@ -633,7 +639,7 @@ private fun TodayScreen(uiState: HomeVisitUiState, workActions: WorkActions, set
         StatusCard(
             title = "Рабочий день",
             value = uiState.status.title(),
-            body = "Адресов: ${uiState.visitsCount}, офис: ${uiState.officeCount}, телемед: ${uiState.telemedCount}$fatigueText$syncText. Доход: ${money(uiState.grossIncome)}, чистыми после расходов: ${money(uiState.netIncome)}.",
+            body = "Адресов: ${uiState.visitsCount}, на точке: ${uiState.officeCount}, удалённо: ${uiState.telemedCount}$fatigueText$syncText. Доход: ${money(uiState.grossIncome)}, чистыми после расходов: ${money(uiState.netIncome)}.",
         )
         DayDetailsCard(uiState, workActions)
         DayControlRow(uiState, workActions)
@@ -782,7 +788,7 @@ private fun EndDayDetailsCard(uiState: HomeVisitUiState, workActions: WorkAction
 
     InputCard("Полное завершение дня") {
         Text(
-            "Для чистого дохода/час, топлива, личного коэффициента дороги и усталости.",
+            "Для чистого дохода/час, топлива, личного коэффициента дороги и нагрузки.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -806,7 +812,7 @@ private fun EndDayDetailsCard(uiState: HomeVisitUiState, workActions: WorkAction
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MoneyField(modifier = Modifier.weight(1f), value = actualKmText, onValueChange = { actualKmText = it }, label = "Рабочие км")
-            MoneyField(modifier = Modifier.weight(1f), value = completedVisitsText, onValueChange = { completedVisitsText = it }, label = "Вызовов")
+            MoneyField(modifier = Modifier.weight(1f), value = completedVisitsText, onValueChange = { completedVisitsText = it }, label = "Заказов")
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MoneyField(modifier = Modifier.weight(1f), value = workHoursText, onValueChange = { workHoursText = it }, label = "Работа, ч")
@@ -830,7 +836,7 @@ private fun EndDayDetailsCard(uiState: HomeVisitUiState, workActions: WorkAction
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MoneyField(modifier = Modifier.weight(1f), value = otherExpensesText, onValueChange = { otherExpensesText = it }, label = "Прочее")
-            MoneyField(modifier = Modifier.weight(1f), value = fatigueText, onValueChange = { fatigueText = it }, label = "Усталость 0-100")
+            MoneyField(modifier = Modifier.weight(1f), value = fatigueText, onValueChange = { fatigueText = it }, label = "Нагрузка 0-100")
         }
         Button(
             modifier = Modifier.fillMaxWidth(),
@@ -1005,7 +1011,7 @@ private fun ActiveVisitCard(
             Text("Текущий адрес", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             if (activeVisit == null) {
                 Text(
-                    "Нет принятого адреса. После расчёта и принятия вызова он появится здесь.",
+                    "Нет принятого адреса. После расчёта и принятия заказа он появится здесь.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1116,7 +1122,7 @@ private fun ServerRouteCard(route: RouteUiState, onRefresh: () -> Unit) {
             val snapshot = route.snapshot
             if (snapshot == null) {
                 Text(
-                    "Пока нет серверного порядка адресов. Нажмите обновить после принятия вызова.",
+                    "Пока нет серверного порядка адресов. Нажмите обновить после принятия заказа.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1161,7 +1167,7 @@ private fun StopClassificationCard(activeVisit: RouteVisitUi?, isLoading: Boolea
     var selected by rememberSaveable { mutableStateOf(StopLabel.Normal) }
     InputCard("Тип GPS-остановки") {
         Text(
-            "Уточнение влияет только на усталость и долг восстановления, экономический расчёт не меняет.",
+            "Уточнение влияет только на нагрузку и долг восстановления, экономический расчёт не меняет.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1296,7 +1302,7 @@ private fun ClinicFilterCard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Фильтр по клинике", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("Фильтр по ${OrderSource.current.datSingle}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             OptionGrid(
                 options = options,
                 selected = selectedClinic ?: allLabel,
@@ -1317,18 +1323,18 @@ private fun ReportSummaryCard(snapshot: ReportSnapshot) {
                 "Расходы" to money(snapshot.summary.totalExpenses),
                 "Чистый" to money(snapshot.summary.netProfit),
                 "Чистый/час" to "${money(snapshot.summary.netHourlyIncome)}/ч",
-                "Вызовы" to snapshot.summary.visitsCount.toString(),
+                "Заказы" to snapshot.summary.visitsCount.toString(),
                 "Работа" to minutesText(snapshot.summary.totalWorkMinutes),
                 "Дорога" to minutesText(snapshot.summary.totalRouteMinutes),
                 "Км" to oneDecimal(snapshot.summary.actualKm),
             ),
         )
-        ReportLine("Вызовы", money(snapshot.summary.visitIncome))
-        ReportLine("Телемедицина", money(snapshot.summary.telemedIncome))
-        ReportLine("Офис", "${money(snapshot.summary.officeIncome)} / ${minutesText(snapshot.summary.officeMinutes)}")
+        ReportLine("Заказы", money(snapshot.summary.visitIncome))
+        ReportLine("Удалённые заказы", money(snapshot.summary.telemedIncome))
+        ReportLine("На точке", "${money(snapshot.summary.officeIncome)} / ${minutesText(snapshot.summary.officeMinutes)}")
         if (snapshot.summary.fatigueScore > 0 || snapshot.summary.recoveryDebt > 0) {
             ReportLine(
-                "Усталость",
+                "Нагрузка",
                 "${oneDecimal(snapshot.summary.fatigueScore)}/100, долг ${oneDecimal(snapshot.summary.recoveryDebt)}",
             )
         }
@@ -1337,10 +1343,10 @@ private fun ReportSummaryCard(snapshot: ReportSnapshot) {
 
 @Composable
 private fun ClinicBreakdownCard(rows: List<ClinicReportRow>) {
-    InputCard("По клиникам") {
+    InputCard("По ${OrderSource.current.datPlural}") {
         if (rows.isEmpty()) {
             Text(
-                "Данных по клиникам пока нет.",
+                "Данных по ${OrderSource.current.datPlural} пока нет.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1373,7 +1379,7 @@ private fun ClinicReportItem(row: ClinicReportRow) {
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                "Вызовы: ${row.visitsCount} / ${money(row.visitIncome)}. Телемед: ${money(row.telemedIncome)}. Офис: ${money(row.officeIncome)}.",
+                "Заказы: ${row.visitsCount} / ${money(row.visitIncome)}. Удалённо: ${money(row.telemedIncome)}. На точке: ${money(row.officeIncome)}.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1449,10 +1455,10 @@ private fun FatigueScreen(fatigueState: FatigueUiState, workActions: WorkActions
     val cbiAnswers = parseCbiAnswers(cbiAnswersText, cbiQuestions.size)
     ScreenColumn {
         StatusCard(
-            title = "Усталость",
+            title = "Нагрузка",
             value = summary?.let { "${oneDecimal(it.score)} / 100" } ?: "Нет данных",
             body = summary?.let {
-                "${it.level}. 7 дней: ${oneDecimal(it.weeklyAverage)}, долг восстановления: ${oneDecimal(it.recoveryDebt)}, CBI: ${oneDecimal(it.burnoutScore)}."
+                "${it.level}. 7 дней: ${oneDecimal(it.weeklyAverage)}, долг восстановления: ${oneDecimal(it.recoveryDebt)}, Индекс восст.: ${oneDecimal(it.burnoutScore)}."
             } ?: "Обновите сводку после синхронизации. Активный день считается предварительно, закрытый день берётся из статистики.",
         )
         Button(
@@ -1460,7 +1466,7 @@ private fun FatigueScreen(fatigueState: FatigueUiState, workActions: WorkActions
             enabled = !fatigueState.isLoading,
             onClick = workActions.onRefreshFatigue,
         ) {
-            Text(if (fatigueState.isLoading) "Обновляю..." else "Обновить усталость")
+            Text(if (fatigueState.isLoading) "Обновляю..." else "Обновить нагрузку")
         }
         if (fatigueState.message.isNotBlank()) {
             CompactCard(title = "Статус", body = fatigueState.message)
@@ -1512,7 +1518,7 @@ private fun FatigueTrendCard(
     onDaysChange: (Int) -> Unit,
     onRefresh: () -> Unit,
 ) {
-    InputCard("Тренд усталости") {
+    InputCard("Тренд нагрузки") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(14, 30, 60).forEach { days ->
                 if (selectedDays == days) {
@@ -1528,14 +1534,14 @@ private fun FatigueTrendCard(
         val points = trend?.points.orEmpty()
         if (points.isEmpty()) {
             Text(
-                "График появится после нескольких закрытых дней. Линия — индекс усталости, пунктирная — 7-дневная средняя.",
+                "График появится после нескольких закрытых дней. Линия — индекс нагрузки, пунктирная — 7-дневная средняя.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
             if (trend?.fromCache == true) OfflineBadge()
             Text(
-                "Индекс усталости (сплошная) и 7-дневная средняя (светлая). Точек: ${points.size}.",
+                "Индекс нагрузки (сплошная) и 7-дневная средняя (светлая). Точек: ${points.size}.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1600,7 +1606,7 @@ private fun FatigueSummaryCard(snapshot: FatigueSnapshot) {
                 "Индекс" to "${oneDecimal(summary.score)}/100",
                 "7 дней" to "${oneDecimal(summary.weeklyAverage)}/100",
                 "Долг" to "${oneDecimal(summary.recoveryDebt)}/100",
-                "CBI" to "${oneDecimal(summary.burnoutScore)}/100",
+                "Индекс восст." to "${oneDecimal(summary.burnoutScore)}/100",
                 "Сон" to "${oneDecimal(summary.sleepHours)} ч",
                 "Качество" to "${oneDecimal(summary.sleepQuality)}/5",
                 "Перерыв" to "${oneDecimal(summary.breakHoursBefore)} ч",
@@ -1609,7 +1615,7 @@ private fun FatigueSummaryCard(snapshot: FatigueSnapshot) {
         )
         ReportLine("Длинные остановки", summary.longStopCount.toString())
         ReportLine("Вероятные паузы", minutesText(summary.pauseMinutes))
-        ReportLine("Тяжёлые GPS-вызовы", summary.heavyVisitCount.toString())
+        ReportLine("Тяжёлые GPS-заказы", summary.heavyVisitCount.toString())
         ReportLine("Источник", if (snapshot.source == "active") "Активный день" else "Последний закрытый день")
     }
 }
@@ -1675,14 +1681,14 @@ private fun CbiCard(
     onAnswer: (Int, Int) -> Unit,
     onSubmit: () -> Unit,
 ) {
-    InputCard("CBI/выгорание") {
+    InputCard("Индекс восстановления") {
         Text(
-            "Последний CBI: ${oneDecimal(latestScore)}/100, $latestLevel.",
+            "Последний индекс восст.: ${oneDecimal(latestScore)}/100, $latestLevel.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (questions.isEmpty()) {
-            Text("Нажмите `Обновить усталость`, чтобы загрузить вопросы.", style = MaterialTheme.typography.bodyMedium)
+            Text("Нажмите `Обновить нагрузку`, чтобы загрузить вопросы.", style = MaterialTheme.typography.bodyMedium)
         } else {
             questions.forEachIndexed { index, question ->
                 Text("${index + 1}. $question", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
@@ -1702,7 +1708,7 @@ private fun CbiCard(
                 enabled = answers.isNotEmpty() && answers.all { it in 0..4 },
                 onClick = onSubmit,
             ) {
-                Text("Сохранить CBI")
+                Text("Сохранить индекс восст.")
             }
         }
     }
@@ -1732,7 +1738,7 @@ private fun FatigueCorrelationCard(
         }
         if (report == null) {
             Text(
-                "Матрица станет полезной после 2-4 недель данных по усталости, вождению, сну и расходам.",
+                "Матрица станет полезной после 2-4 недель данных по нагрузке, вождению, сну и расходам.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1776,6 +1782,7 @@ private fun SettingsScreen(
 ) {
     ScreenColumn {
         GpsSettingsCard(settingsState)
+        OrderSourceCard()
         AppSettingsCard(
             appSettings = appSettings,
             onRefresh = workActions.onRefreshAppSettings,
@@ -1793,7 +1800,24 @@ private fun SettingsScreen(
         )
         CompactCard(
             title = "Что здесь важно",
-            body = "URL сервера и API ключ нужны для расчёта маршрутов, отчётов, усталости и синхронизации. Настройки экономики, авто, клиник и районов теперь редактируются здесь и уходят на сервер без Telegram.",
+            body = "URL сервера и API ключ нужны для расчёта маршрутов, отчётов, нагрузки и синхронизации. Настройки экономики, авто, компаний и районов теперь редактируются здесь и уходят на сервер без Telegram.",
+        )
+    }
+}
+
+@Composable
+private fun OrderSourceCard() {
+    InputCard("Название источника заказов") {
+        Text(
+            "Как называть тех, от кого приходят заказы, под вашу сферу. Подписи в отчётах и формах подстроятся под выбранное слово.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OptionGrid(
+            options = OrderSource.presets,
+            selected = OrderSource.current,
+            label = { it.nomSingle },
+            onSelect = { OrderSource.current = it },
         )
     }
 }
@@ -1836,7 +1860,7 @@ private fun AppSettingsCard(
         ) {
             Text("Настройки приложения", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "Экономика, авто, клиники, базовые районы, маршрутизация, GPS и усталость. Значения хранятся на сервере и применяются к расчётам.",
+                "Экономика, авто, компании, базовые районы, маршрутизация, GPS и нагрузка. Значения хранятся на сервере и применяются к расчётам.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -2014,9 +2038,9 @@ private fun QuickActions(onOpenWork: () -> Unit) {
     SectionHeader("Быстрые действия")
     ActionGrid(
         actions = listOf(
-            "+ Адрес" to "Домашний вызов с расчетом.",
-            "ОФИС" to "Прием на предприятии.",
-            "Телемед" to "ПСК или ДНД.",
+            "+ Адрес" to "Выездной заказ с расчетом.",
+            "На точке" to "Заказ на точке (офис/пункт).",
+            "Удалённо" to "Онлайн-заказ без выезда.",
             "Расход" to "Еда, кофе, парковка.",
         ),
         onClick = onOpenWork,
@@ -2080,7 +2104,7 @@ private fun VisitInputCard(
     val routeMinutes = parseNumber(routeMinutesText)
     val hasManualRoute = routeKm != null && routeMinutes != null
 
-    InputCard("Домашний вызов") {
+    InputCard("Выездной заказ") {
         OutlinedTextField(
             modifier = Modifier.fillMaxWidth(),
             value = address,
@@ -2117,7 +2141,7 @@ private fun VisitInputCard(
                 )
             },
         ) {
-            Text(if (candidate.isLoading) "Считаю..." else "Рассчитать вызов")
+            Text(if (candidate.isLoading) "Считаю..." else "Рассчитать заказ")
         }
         CandidateResultCard(candidate = candidate, onAccept = onAccept, onReject = onReject)
     }
@@ -2144,7 +2168,7 @@ private fun CandidateResultCard(candidate: CandidateUiState, onAccept: () -> Uni
             }
             if (candidate.needsManualRoute) {
                 Text(
-                    "Заполните поля `Км вручную` и `Мин вручную`, затем нажмите `Рассчитать вызов` ещё раз.",
+                    "Заполните поля `Км вручную` и `Мин вручную`, затем нажмите `Рассчитать заказ` ещё раз.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -2162,7 +2186,7 @@ private fun CandidateResultCard(candidate: CandidateUiState, onAccept: () -> Uni
                 )
                 if (estimate.fatigueExtraPayment > 0 || estimate.fatigueLevel.isNotBlank()) {
                     Text(
-                        "Усталость: ${estimate.fatigueLevel.ifBlank { "без отдельного уровня" }}, надбавка ${money(estimate.fatigueExtraPayment)}.",
+                        "Нагрузка: ${estimate.fatigueLevel.ifBlank { "без отдельного уровня" }}, надбавка ${money(estimate.fatigueExtraPayment)}.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -2197,7 +2221,7 @@ private fun OfficeInputCard(clinics: List<String>, onSubmit: (String, Double, Do
     val minutes = parseNumber(minutesText)
     val income = parseNumber(incomeText)
 
-    InputCard("ОФИС") {
+    InputCard("На точке") {
         OutlinedTextField(
             modifier = Modifier.fillMaxWidth(),
             value = address,
@@ -2218,7 +2242,7 @@ private fun OfficeInputCard(clinics: List<String>, onSubmit: (String, Double, Do
                 incomeText = ""
             },
         ) {
-            Text("Сохранить офис")
+            Text("Сохранить заказ на точке")
         }
     }
 }
@@ -2231,7 +2255,7 @@ private fun TelemedInputCard(clinics: List<String>, onSubmit: (Double, Double, S
     val minutes = parseNumber(minutesText)
     val income = parseNumber(incomeText)
 
-    InputCard("Телемедицина") {
+    InputCard("Удалённые заказы") {
         MoneyField(value = incomeText, onValueChange = { incomeText = it }, label = "Стоимость")
         MoneyField(value = minutesText, onValueChange = { minutesText = it }, label = "Минуты")
         ClinicPicker(clinics = clinics, selected = clinic, onSelect = { clinic = it })
@@ -2243,7 +2267,7 @@ private fun TelemedInputCard(clinics: List<String>, onSubmit: (Double, Double, S
                 incomeText = ""
             },
         ) {
-            Text("Сохранить телемедицину")
+            Text("Сохранить удалённый заказ")
         }
     }
 }
@@ -2327,7 +2351,7 @@ private fun ClinicPicker(
 ) {
     if (clinics.isEmpty()) {
         Text(
-            "Список клиник пуст. Добавьте клиники в разделе «Настройки» → «Клиники».",
+            "Список пуст. Добавьте ${OrderSource.current.nomPlural} в разделе «Настройки» → «Настройки приложения».",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -2582,7 +2606,7 @@ private fun SyncControlCard(
                 Text("Очистить кэш адресов")
             }
             Text(
-                "Удаляет офлайн-копии маршрута, отчётов и усталости. Свежие данные подтянутся при следующем обновлении со связью.",
+                "Удаляет офлайн-копии маршрута, отчётов и нагрузки. Свежие данные подтянутся при следующем обновлении со связью.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -2673,8 +2697,8 @@ private fun WorkDayStatus.title(): String = when (this) {
 
 private fun WorkForm.title(): String = when (this) {
     WorkForm.Visit -> "Адрес"
-    WorkForm.Office -> "ОФИС"
-    WorkForm.Telemed -> "Телемед"
+    WorkForm.Office -> "На точке"
+    WorkForm.Telemed -> "Удалённо"
     WorkForm.Expense -> "Расход"
 }
 
@@ -2748,10 +2772,10 @@ private fun fatigueFeatureTitle(value: String): String = when (value) {
 }
 
 private fun fatigueTargetTitle(value: String): String = when (value) {
-    "fatigue_score" -> "усталость"
+    "fatigue_score" -> "нагрузка"
     "recovery_debt" -> "долг"
-    "user_fatigue_score" -> "оценка врача"
-    "burnout_score" -> "CBI"
+    "user_fatigue_score" -> "оценка исполнителя"
+    "burnout_score" -> "Индекс восст."
     else -> value
 }
 

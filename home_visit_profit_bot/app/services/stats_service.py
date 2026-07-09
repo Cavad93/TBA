@@ -37,7 +37,7 @@ def finalize_day(
     )
     service_minutes_total = total_work_minutes - route_minutes - data.telemed_minutes - data.office_minutes
     if service_minutes_total < 0:
-        raise ValueError("Время дороги, телемедицины и офиса больше общего рабочего времени.")
+        raise ValueError("Время дороги, удалённых заказов и работы на точке больше общего рабочего времени.")
     service_per_visit = (
         service_minutes_total / data.completed_visits_count
         if data.completed_visits_count > 0

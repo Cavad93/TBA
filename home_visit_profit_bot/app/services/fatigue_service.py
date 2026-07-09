@@ -389,11 +389,11 @@ def _fatigue_reason(
     markup: float,
 ) -> str:
     if markup <= 0:
-        return "нагрузка по дню и 7-дневной средней пока без отдельной усталостной надбавки"
+        return "нагрузка по дню и 7-дневной средней пока без отдельной надбавки"
     return (
         f"нагрузка меняется {before_score:.0f} -> {after_score:.0f}, "
         f"7-дневная средняя {weekly_average:.0f}, долг восстановления {recovery_debt:.0f}, "
-        f"циркадный риск {circadian_risk_minutes:.0f} мин, CBI {burnout_score:.0f}; "
+        f"циркадный риск {circadian_risk_minutes:.0f} мин, индекс восст. {burnout_score:.0f}; "
         "надбавка считается отдельно от экономики"
     )
 
