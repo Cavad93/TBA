@@ -10,8 +10,10 @@ SCHEMA = """
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
+    user_id BIGINT NOT NULL DEFAULT 0,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (user_id, key)
 );
 
 CREATE TABLE IF NOT EXISTS work_days (
@@ -376,9 +378,10 @@ def _split_statements(ddl: str) -> list[str]:
     return [statement.strip() for statement in ddl.split(";") if statement.strip()]
 
 
-# Таблицы с пользовательскими данными: изолируются по user_id (Фаза 3a).
-# settings и address_cache пока общие (per-user настройки — Фаза 3b).
+# Таблицы с пользовательскими данными: изолируются по user_id (RLS в PostgreSQL).
+# settings — per-user (Фаза 3b). address_cache пока общий (кэш геокодирования).
 ISOLATED_TABLES = [
+    "settings",
     "work_days", "visits", "expenses", "telemed_entries", "office_entries",
     "daily_stats", "visit_location_events", "location_samples",
     "work_day_location_state", "burnout_surveys", "driving_behavior_daily",
@@ -394,7 +397,10 @@ def init_db(config: AppConfig) -> None:
         _apply_schema(db)
         _ensure_columns(db)
         _ensure_isolation(db)
-        _seed_settings(db, config)
+        # На SQLite настройки сидятся сразу (одно-пользовательский режим, user_id=0).
+        # На PostgreSQL — per-user при регистрации (seed_default_settings с app.user_id).
+        if db.dialect != "postgres":
+            seed_default_settings(db, config)
 
 
 def _ensure_isolation(db: Database) -> None:
@@ -526,7 +532,7 @@ def _ensure_column(db: Database, table: str, column: str, definition: str) -> No
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
-def _seed_settings(db: Database, config: AppConfig) -> None:
+def seed_default_settings(db: Database, config: AppConfig) -> None:
     defaults = {
         "home_address": "Дом",
         "default_start_address": "Дом",
@@ -564,6 +570,6 @@ def _seed_settings(db: Database, config: AppConfig) -> None:
         "location_notification_cooldown_minutes": str(config.location_api.notification_cooldown_minutes),
     }
     db.executemany(
-        "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING",
+        "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(user_id, key) DO NOTHING",
         defaults.items(),
     )

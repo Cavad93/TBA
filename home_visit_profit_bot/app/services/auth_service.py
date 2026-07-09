@@ -53,6 +53,7 @@ def _seconds_since(iso_str: str | None) -> float:
 class AuthService:
     def __init__(self, connection: Any, config: AppConfig) -> None:
         self.config = config
+        self.connection = connection
         self.users = UserRepository(connection)
         self.verifications = EmailVerificationRepository(connection)
         self.sessions = SessionRepository(connection)
@@ -85,8 +86,17 @@ class AuthService:
                 password_hash=auth.hash_password(password),
                 occupation=occupation, consent_version=consent_version,
             )
+        self._seed_user_settings(user_id)
         self._issue_email_code(user_id, email)
         return {"ok": True, "message": "Код подтверждения отправлен на почту"}
+
+    def _seed_user_settings(self, user_id: int) -> None:
+        # Настройки по умолчанию для нового пользователя (клиники/цены/авто/гео).
+        # На PostgreSQL user_id берётся из app.user_id; на SQLite — user_id=0 (тесты).
+        from app.db import seed_default_settings
+
+        self.connection.set_user(user_id)
+        seed_default_settings(self.connection, self.config)
 
     def verify_email(self, email: str, code: str) -> dict[str, Any]:
         user = self._require_user(email)

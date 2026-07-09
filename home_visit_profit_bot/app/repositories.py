@@ -112,7 +112,7 @@ class SettingsRepository:
 
     def set(self, key: str, value: str) -> None:
         self.connection.execute(
-            "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value",
             (key, value),
         )
         self.connection.commit()

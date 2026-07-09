@@ -19,7 +19,7 @@ from app.config import (
 )
 from app.database import current_user_id
 from app.db import connect, init_db
-from app.repositories import VisitRepository, WorkDayRepository
+from app.repositories import SettingsRepository, VisitRepository, WorkDayRepository
 from app.services import auth_service as auth_service_module
 from app.services.auth_service import AuthService
 
@@ -113,5 +113,35 @@ def test_rls_isolates_work_data(monkeypatch) -> None:
         with connect(config) as conn:
             row = conn.execute("SELECT start_address FROM work_days WHERE id = ?", (day_a.id,)).fetchone()
             assert row is not None and row["start_address"] == "Дом"
+    finally:
+        current_user_id.set(None)
+
+
+def test_rls_isolates_settings(monkeypatch) -> None:
+    monkeypatch.setattr(auth_service_module, "send_code", lambda *a, **k: None)
+    monkeypatch.setattr(auth, "new_numeric_code", lambda digits=6: "123456")
+    config = _config()
+    _reset_and_init(config)
+    user_a = _make_user(config, "sa@x.com")
+    user_b = _make_user(config, "sb@x.com")
+
+    try:
+        # A меняет цену за км.
+        current_user_id.set(user_a)
+        with connect(config) as conn:
+            SettingsRepository(conn).set("car_cost_per_km", "999")
+            assert SettingsRepository(conn).get("car_cost_per_km") == "999"
+
+        # B видит СВОЮ настройку (дефолт), а не значение A.
+        current_user_id.set(user_b)
+        with connect(config) as conn:
+            b_value = SettingsRepository(conn).get("car_cost_per_km")
+            assert b_value != "999", f"B видит настройку A: {b_value}"
+            assert b_value == "17.05", f"у B не дефолт: {b_value}"
+
+        # У A по-прежнему 999.
+        current_user_id.set(user_a)
+        with connect(config) as conn:
+            assert SettingsRepository(conn).get("car_cost_per_km") == "999"
     finally:
         current_user_id.set(None)

@@ -666,13 +666,16 @@ def _authorize_request(handler: BaseHTTPRequestHandler, config: AppConfig) -> bo
     return True
 
 
+LEGACY_OWNER_EMAIL = "owner@vizitorkrut.ru"
+
+
 def _resolve_user(connection: Any, config: AppConfig, token: str) -> int | None:
     # Старый общий ключ приложения -> аккаунт-владелец (обратная совместимость).
     if config.location_api.api_key and token == config.location_api.api_key:
         row = connection.execute(
-            "SELECT value FROM settings WHERE key = 'legacy_owner_user_id'"
+            "SELECT id FROM users WHERE email = ?", (LEGACY_OWNER_EMAIL,)
         ).fetchone()
-        return int(row["value"]) if row and row["value"] else None
+        return int(row["id"]) if row else None
     # Иначе — персональный токен сессии.
     return AuthService(connection, config).authenticate(token)
 
