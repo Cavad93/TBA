@@ -10,13 +10,6 @@ from dotenv import load_dotenv
 
 
 @dataclass(frozen=True)
-class BotConfig:
-    timezone: str
-    language: str
-    token: str | None
-
-
-@dataclass(frozen=True)
 class FinanceConfig:
     min_hourly_income: float
     currency: str
@@ -76,7 +69,6 @@ class LocationApiConfig:
 class AppConfig:
     project_dir: Path
     database_path: Path
-    bot: BotConfig
     finance: FinanceConfig
     car: CarConfig
     defaults: DefaultsConfig
@@ -103,11 +95,6 @@ def load_config(project_dir: Path | None = None) -> AppConfig:
     return AppConfig(
         project_dir=project_dir,
         database_path=database_path,
-        bot=BotConfig(
-            timezone=str(raw.get("bot", {}).get("timezone", "Europe/Moscow")),
-            language=str(raw.get("bot", {}).get("language", "ru")),
-            token=os.getenv("TELEGRAM_BOT_TOKEN"),
-        ),
         finance=FinanceConfig(
             min_hourly_income=float(raw.get("finance", {}).get("min_hourly_income", 600)),
             currency=str(raw.get("finance", {}).get("currency", "RUB")),

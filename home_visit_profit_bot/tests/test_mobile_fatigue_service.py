@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.config import AppConfig, BotConfig, CarConfig, DefaultsConfig, FinanceConfig, GeoConfig, LocationApiConfig, RouteConfig, RoutingConfig
+from app.config import AppConfig, CarConfig, DefaultsConfig, FinanceConfig, GeoConfig, LocationApiConfig, RouteConfig, RoutingConfig
 from app.db import connect, init_db
 from app.models import DailyStats
 from app.repositories import DailyStatsRepository, DrivingBehaviorRepository, FatigueFeedbackRepository, SettingsRepository, WorkDayRepository
@@ -145,7 +145,6 @@ def _config(tmp_path):
     return AppConfig(
         project_dir=tmp_path,
         database_path=tmp_path / "data.sqlite3",
-        bot=BotConfig(timezone="Europe/Moscow", language="ru", token="test"),
         finance=FinanceConfig(min_hourly_income=600, currency="RUB"),
         car=CarConfig(car_cost_per_km=17.05, amortization_factor=0.8, fuel_price_per_liter=70, fuel_consumption_l_per_100km=10),
         defaults=DefaultsConfig(avg_speed_kmh=30, service_minutes=20, telemed_minutes=3, route_time_factor=1),

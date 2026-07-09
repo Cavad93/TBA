@@ -10,8 +10,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-import httpx
-
 from app.config import AppConfig
 from app.db import connect
 from app.repositories import (
@@ -38,9 +36,6 @@ def start_location_api(config: AppConfig) -> ThreadingHTTPServer | None:
     if not config.location_api.enabled:
         logger.info("Location API is disabled")
         return None
-    if not config.bot.token:
-        logger.warning("Telegram token is missing; app API and GPS intake will start without Telegram notifications")
-
     server = ThreadingHTTPServer(
         (config.location_api.host, config.location_api.port),
         _handler_factory(config),
@@ -169,20 +164,9 @@ def _handler_factory(config: AppConfig):
                     location_state=location_state,
                     settings=settings,
                 )
-                chat_id = settings.get("telegram_chat_id")
 
-            notified = False
-            if result.should_notify and result.visit and chat_id:
-                notified = _send_visit_notification(
-                    token=config.bot.token or "",
-                    chat_id=chat_id,
-                    visit_id=result.visit.id,
-                    order_number=result.visit.order_number,
-                    address=result.visit.address,
-                    distance_m=result.distance_m,
-                    dwell_minutes=result.dwell_minutes,
-                )
-
+            # Проактивное уведомление теперь тянет приложение через
+            # GET /api/visits/current-gps (pull вместо Telegram push).
             self._json_response(
                 {
                     "ok": True,
@@ -192,7 +176,7 @@ def _handler_factory(config: AppConfig):
                     "dwell_minutes": round(result.dwell_minutes, 1),
                     "avg_speed_kmh": round(result.avg_speed_kmh, 1),
                     "sample_valid": result.sample_valid,
-                    "notified": notified,
+                    "ready_to_complete": result.should_notify,
                 }
             )
 
@@ -612,43 +596,3 @@ def _timestamp_ms_to_datetime(value: object) -> datetime | None:
     if timestamp_ms <= 0:
         return None
     return datetime.fromtimestamp(timestamp_ms / 1000)
-
-
-def _send_visit_notification(
-    *,
-    token: str,
-    chat_id: str,
-    visit_id: int,
-    order_number: int | None,
-    address: str,
-    distance_m: float,
-    dwell_minutes: float,
-) -> bool:
-    order_text = f"№{order_number}" if order_number else f"ID {visit_id}"
-    text = (
-        f"Похоже, вы уже {dwell_minutes:.0f} мин рядом с адресом {order_text}.\n"
-        f"{address}\n"
-        f"Расстояние до точки: {distance_m:.0f} м.\n\n"
-        "Закрыть заявку?"
-    )
-    reply_markup = {
-        "inline_keyboard": [
-            [
-                {"text": "Да, закрыть", "callback_data": f"location_complete:{visit_id}"},
-                {"text": "Нет", "callback_data": f"location_ignore:{visit_id}"},
-            ]
-        ]
-    }
-    try:
-        response = httpx.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "reply_markup": reply_markup},
-            timeout=10,
-        )
-        if response.status_code >= 400:
-            logger.warning("Telegram location notification failed: %s %s", response.status_code, response.text)
-            return False
-        return True
-    except httpx.HTTPError:
-        logger.exception("Telegram location notification failed")
-        return False

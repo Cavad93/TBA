@@ -1,7 +1,3 @@
-bot:
-  timezone: "Europe/Moscow"
-  language: "ru"
-
 finance:
   min_hourly_income: 600
   currency: "RUB"
