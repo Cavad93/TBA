@@ -1319,7 +1319,19 @@ class HomeVisitRepository private constructor(
 
     private fun id(): String = UUID.randomUUID().toString()
 
+    /**
+     * Очищает офлайн-кэш ответов сервера (маршрут, отчёты, усталость) — все ключи
+     * с префиксом `cache_`, где хранятся адреса и снимки данных. Возвращает число
+     * удалённых записей для показа пользователю.
+     */
+    suspend fun clearAddressCache(): Int = withContext(Dispatchers.IO) {
+        val count = dao.countSettingsByPrefix(CACHE_PREFIX)
+        dao.deleteSettingsByPrefix(CACHE_PREFIX)
+        count
+    }
+
     companion object {
+        private const val CACHE_PREFIX = "cache_"
         private const val CACHE_KEY_APP_SETTINGS = "app_settings_cache"
         private const val CACHE_KEY_CLINICS = "clinics"
         private const val CACHE_KEY_TELEMED_CLINICS = "telemed_clinics"

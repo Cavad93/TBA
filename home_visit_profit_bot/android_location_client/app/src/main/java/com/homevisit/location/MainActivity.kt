@@ -161,6 +161,7 @@ class MainActivity : ComponentActivity() {
                     onBackupExportHandled = viewModel::clearBackupExport,
                     onRefreshSyncConflicts = viewModel::refreshSyncConflicts,
                     onCheckConnection = viewModel::checkConnection,
+                    onClearCache = viewModel::clearCache,
                     onImportBackup = viewModel::importBackup,
                     onAddOffice = viewModel::addOffice,
                     onAddTelemed = viewModel::addTelemed,
@@ -300,6 +301,7 @@ private data class WorkActions(
     val onExportBackup: () -> Unit,
     val onRefreshSyncConflicts: () -> Unit,
     val onCheckConnection: () -> Unit,
+    val onClearCache: () -> Unit,
     val onImportBackup: (String) -> Unit,
     val onAddOffice: (String, Double, Double, String) -> Unit,
     val onAddTelemed: (Double, Double, String) -> Unit,
@@ -311,25 +313,55 @@ private data class WorkActions(
 private val LightColors = lightColorScheme(
     primary = Color(0xFF176B52),
     onPrimary = Color(0xFFFFFFFF),
-    secondary = Color(0xFF50645B),
+    primaryContainer = Color(0xFFA2F2D0),
+    onPrimaryContainer = Color(0xFF002117),
+    secondary = Color(0xFF4C6359),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFCEE9DB),
+    onSecondaryContainer = Color(0xFF092018),
     tertiary = Color(0xFF38656B),
-    surface = Color(0xFFF7FAF8),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFBCEBF1),
+    onTertiaryContainer = Color(0xFF001F23),
+    surface = Color(0xFFF6FBF7),
     onSurface = Color(0xFF15201B),
     onSurfaceVariant = Color(0xFF44514B),
-    background = Color(0xFFF2F6F4),
+    surfaceVariant = Color(0xFFDBE5DE),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFF0F5F1),
+    surfaceContainer = Color(0xFFEAF0EB),
+    surfaceContainerHigh = Color(0xFFE4EAE5),
+    surfaceContainerHighest = Color(0xFFDEE4DF),
+    outline = Color(0xFF6F7C74),
+    outlineVariant = Color(0xFFBFC9C1),
+    background = Color(0xFFF6FBF7),
     onBackground = Color(0xFF15201B),
 )
 
 private val DarkColors = darkColorScheme(
     primary = Color(0xFF6FD9B4),
     onPrimary = Color(0xFF00382A),
+    primaryContainer = Color(0xFF00513C),
+    onPrimaryContainer = Color(0xFF8CF6CE),
     secondary = Color(0xFFB4CCC0),
     onSecondary = Color(0xFF1E352C),
+    secondaryContainer = Color(0xFF344B42),
+    onSecondaryContainer = Color(0xFFD0E8DC),
     tertiary = Color(0xFF8FD0D8),
     onTertiary = Color(0xFF00363C),
+    tertiaryContainer = Color(0xFF1E4D53),
+    onTertiaryContainer = Color(0xFFABE9F1),
     surface = Color(0xFF141B18),
     onSurface = Color(0xFFE1E4E0),
     onSurfaceVariant = Color(0xFFBEC9C2),
+    surfaceVariant = Color(0xFF3F4A44),
+    surfaceContainerLowest = Color(0xFF0B120F),
+    surfaceContainerLow = Color(0xFF161D1A),
+    surfaceContainer = Color(0xFF1A211E),
+    surfaceContainerHigh = Color(0xFF242B28),
+    surfaceContainerHighest = Color(0xFF2F3633),
+    outline = Color(0xFF89938C),
+    outlineVariant = Color(0xFF3F4A44),
     background = Color(0xFF0E1512),
     onBackground = Color(0xFFE1E4E0),
 )
@@ -378,6 +410,7 @@ private fun HomeVisitApp(
     onBackupExportHandled: () -> Unit,
     onRefreshSyncConflicts: (String, String) -> Unit,
     onCheckConnection: (String, String) -> Unit,
+    onClearCache: () -> Unit,
     onImportBackup: (String) -> Unit,
     onAddOffice: (String, Double, Double, String) -> Unit,
     onAddTelemed: (Double, Double, String) -> Unit,
@@ -440,6 +473,7 @@ private fun HomeVisitApp(
         onExportBackup = onExportBackup,
         onRefreshSyncConflicts = { onRefreshSyncConflicts(serverUrl, apiKey) },
         onCheckConnection = { onCheckConnection(serverUrl, apiKey) },
+        onClearCache = onClearCache,
         onImportBackup = onImportBackup,
         onAddOffice = onAddOffice,
         onAddTelemed = onAddTelemed,
@@ -524,7 +558,7 @@ private fun AppScaffold(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             )
         },
         bottomBar = bottomBar,
@@ -549,7 +583,7 @@ private fun AppScaffold(
 
 @Composable
 private fun AppNavigationBar(selected: AppDestination, onSelect: (AppDestination) -> Unit) {
-    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
         AppDestination.entries.forEach { destination ->
             NavigationBarItem(
                 selected = selected == destination,
@@ -565,7 +599,7 @@ private fun AppNavigationBar(selected: AppDestination, onSelect: (AppDestination
 private fun AppNavigationRail(selected: AppDestination, onSelect: (AppDestination) -> Unit) {
     NavigationRail(
         modifier = Modifier.fillMaxHeight(),
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
     ) {
         Spacer(Modifier.height(12.dp))
         AppDestination.entries.forEach { destination ->
@@ -611,6 +645,7 @@ private fun TodayScreen(uiState: HomeVisitUiState, workActions: WorkActions, set
             onExportBackup = workActions.onExportBackup,
             onRefreshConflicts = workActions.onRefreshSyncConflicts,
             onCheckConnection = workActions.onCheckConnection,
+            onClearCache = workActions.onClearCache,
             onImportBackup = workActions.onImportBackup,
         )
         CompactCard(
@@ -958,8 +993,8 @@ private fun ActiveVisitCard(
     onCancel: () -> Unit,
 ) {
     Card(
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(
             modifier = Modifier
@@ -1047,8 +1082,8 @@ private fun GpsHintBlock(gpsHint: GpsHintUiState, onRefresh: () -> Unit, onCompl
 @Composable
 private fun ServerRouteCard(route: RouteUiState, onRefresh: () -> Unit) {
     Card(
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(
             modifier = Modifier
@@ -1153,8 +1188,8 @@ private fun StopClassificationCard(activeVisit: RouteVisitUi?, isLoading: Boolea
 @Composable
 private fun RouteListCard(routeVisits: List<RouteVisitUi>) {
     Card(
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(
             modifier = Modifier
@@ -1252,8 +1287,8 @@ private fun ClinicFilterCard(
     val allLabel = "Все"
     val options = listOf(allLabel) + clinics
     Card(
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(
             modifier = Modifier
@@ -1320,7 +1355,7 @@ private fun ClinicBreakdownCard(rows: List<ClinicReportRow>) {
 @Composable
 private fun ClinicReportItem(row: ClinicReportRow) {
     Card(
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f)),
     ) {
         Column(
@@ -1380,8 +1415,8 @@ private fun ReportMetricGrid(metrics: List<Pair<String, String>>) {
 private fun ReportMetric(label: String, value: String, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -1752,6 +1787,7 @@ private fun SettingsScreen(
             onExportBackup = workActions.onExportBackup,
             onRefreshConflicts = workActions.onRefreshSyncConflicts,
             onCheckConnection = workActions.onCheckConnection,
+            onClearCache = workActions.onClearCache,
             onImportBackup = workActions.onImportBackup,
             showImport = true,
         )
@@ -1789,8 +1825,8 @@ private fun AppSettingsCard(
     }
 
     Card(
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(
             modifier = Modifier
@@ -2094,7 +2130,7 @@ private fun CandidateResultCard(candidate: CandidateUiState, onAccept: () -> Uni
         return
     }
     Card(
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)),
     ) {
         Column(
@@ -2251,8 +2287,8 @@ private fun ExpenseInputCard(onSubmit: (ExpenseCategory, Double, String) -> Unit
 @Composable
 private fun InputCard(title: String, content: @Composable ColumnScope.() -> Unit) {
     Card(
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(
             modifier = Modifier
@@ -2358,15 +2394,15 @@ private fun ActionGrid(actions: List<Pair<String, String>>, onClick: (() -> Unit
 private fun ActionCard(title: String, body: String, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
     Card(
         modifier = (if (onClick != null) modifier.clickable { onClick() } else modifier).height(116.dp),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSecondaryContainer)
+            Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.75f))
         }
     }
 }
@@ -2374,7 +2410,7 @@ private fun ActionCard(title: String, body: String, modifier: Modifier = Modifie
 @Composable
 private fun StatusCard(title: String, value: String, body: String) {
     Card(
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
     ) {
         Column(
@@ -2393,8 +2429,8 @@ private fun StatusCard(title: String, value: String, body: String) {
 @Composable
 private fun CompactCard(title: String, body: String) {
     Card(
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(
             modifier = Modifier
@@ -2411,7 +2447,7 @@ private fun CompactCard(title: String, body: String) {
 @Composable
 private fun OfflineBadge() {
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.tertiaryContainer,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -2438,8 +2474,8 @@ private fun SectionHeader(text: String) {
 @Composable
 private fun GpsControlCard(settingsState: GpsSettingsState) {
     Card(
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(
             modifier = Modifier
@@ -2490,13 +2526,14 @@ private fun SyncControlCard(
     onExportBackup: () -> Unit,
     onRefreshConflicts: () -> Unit,
     onCheckConnection: () -> Unit,
+    onClearCache: () -> Unit,
     onImportBackup: (String) -> Unit,
     showImport: Boolean = false,
 ) {
     var importJson by rememberSaveable { mutableStateOf("") }
     Card(
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(
             modifier = Modifier
@@ -2541,6 +2578,14 @@ private fun SyncControlCard(
                     Text("Журнал конфликтов")
                 }
             }
+            OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onClearCache) {
+                Text("Очистить кэш адресов")
+            }
+            Text(
+                "Удаляет офлайн-копии маршрута, отчётов и усталости. Свежие данные подтянутся при следующем обновлении со связью.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             syncState.conflicts.take(3).forEach { conflict ->
                 CompactCard(
                     title = conflict.conflictType,
@@ -2575,8 +2620,8 @@ private fun SyncControlCard(
 @Composable
 private fun GpsSettingsCard(settingsState: GpsSettingsState) {
     Card(
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(
             modifier = Modifier

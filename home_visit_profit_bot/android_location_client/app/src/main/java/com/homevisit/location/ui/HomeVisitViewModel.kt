@@ -573,6 +573,18 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun clearCache() {
+        viewModelScope.launch {
+            syncMessageState.value = "Очищаю кэш адресов..."
+            val cleared = repository.clearAddressCache()
+            syncMessageState.value = if (cleared > 0) {
+                "Кэш адресов очищен: удалено записей — $cleared"
+            } else {
+                "Кэш адресов уже пуст"
+            }
+        }
+    }
+
     fun refreshSyncConflicts(serverUrl: String, apiKey: String) {
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) {

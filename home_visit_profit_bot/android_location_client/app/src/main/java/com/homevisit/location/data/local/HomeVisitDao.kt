@@ -61,6 +61,12 @@ interface HomeVisitDao {
     @Query("SELECT * FROM settings WHERE key = :key LIMIT 1")
     suspend fun getSetting(key: String): SettingEntity?
 
+    @Query("SELECT COUNT(*) FROM settings WHERE key LIKE :prefix || '%'")
+    suspend fun countSettingsByPrefix(prefix: String): Int
+
+    @Query("DELETE FROM settings WHERE key LIKE :prefix || '%'")
+    suspend fun deleteSettingsByPrefix(prefix: String)
+
     @Query("SELECT * FROM sync_queue ORDER BY createdAtEpochMillis ASC")
     suspend fun getAllSyncQueue(): List<SyncQueueEntity>
 
