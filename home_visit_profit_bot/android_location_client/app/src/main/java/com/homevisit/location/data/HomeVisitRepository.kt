@@ -393,6 +393,30 @@ class HomeVisitRepository private constructor(
         imported
     }
 
+    suspend fun checkConnection(serverUrl: String, apiKey: String): String = withContext(Dispatchers.IO) {
+        if (serverUrl.isBlank() || apiKey.isBlank()) {
+            return@withContext "Заполните URL сервера и API ключ"
+        }
+        var connection: HttpURLConnection? = null
+        try {
+            connection = (URL(normalizeApiUrl(serverUrl, "/api/day/active")).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 10_000
+                readTimeout = 10_000
+                setRequestProperty("Authorization", "Bearer $apiKey")
+            }
+            when (val code = connection.responseCode) {
+                in 200..299 -> "Связь есть: сервер отвечает и ключ принят"
+                401, 403 -> "Сервер отвечает, но API ключ неверный"
+                else -> "Сервер вернул код $code"
+            }
+        } catch (_: Exception) {
+            "Сервер недоступен по этому URL"
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
     suspend fun fetchSyncConflicts(serverUrl: String, apiKey: String): List<SyncConflict>? = withContext(Dispatchers.IO) {
         val response = getJson(normalizeApiUrl(serverUrl, "/api/sync/conflicts?limit=10"), apiKey) ?: return@withContext null
         if (!response.optBoolean("ok", false)) {

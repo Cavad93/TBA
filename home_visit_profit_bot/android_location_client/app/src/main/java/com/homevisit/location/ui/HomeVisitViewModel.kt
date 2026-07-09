@@ -546,6 +546,13 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun checkConnection(serverUrl: String, apiKey: String) {
+        viewModelScope.launch {
+            syncMessageState.value = "Проверяю связь..."
+            syncMessageState.value = repository.checkConnection(serverUrl, apiKey)
+        }
+    }
+
     fun refreshSyncConflicts(serverUrl: String, apiKey: String) {
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) {

@@ -157,6 +157,7 @@ class MainActivity : ComponentActivity() {
                     onExportBackup = viewModel::exportBackup,
                     onBackupExportHandled = viewModel::clearBackupExport,
                     onRefreshSyncConflicts = viewModel::refreshSyncConflicts,
+                    onCheckConnection = viewModel::checkConnection,
                     onImportBackup = viewModel::importBackup,
                     onAddOffice = viewModel::addOffice,
                     onAddTelemed = viewModel::addTelemed,
@@ -294,6 +295,7 @@ private data class WorkActions(
     val onSubmitCbi: (List<Int>) -> Unit,
     val onExportBackup: () -> Unit,
     val onRefreshSyncConflicts: () -> Unit,
+    val onCheckConnection: () -> Unit,
     val onImportBackup: (String) -> Unit,
     val onAddOffice: (String, Double, Double, Clinic) -> Unit,
     val onAddTelemed: (Double, Double, Clinic) -> Unit,
@@ -361,6 +363,7 @@ private fun HomeVisitApp(
     onExportBackup: () -> Unit,
     onBackupExportHandled: () -> Unit,
     onRefreshSyncConflicts: (String, String) -> Unit,
+    onCheckConnection: (String, String) -> Unit,
     onImportBackup: (String) -> Unit,
     onAddOffice: (String, Double, Double, Clinic) -> Unit,
     onAddTelemed: (Double, Double, Clinic) -> Unit,
@@ -421,6 +424,7 @@ private fun HomeVisitApp(
         onSubmitCbi = { answers -> onSubmitCbi(serverUrl, apiKey, answers) },
         onExportBackup = onExportBackup,
         onRefreshSyncConflicts = { onRefreshSyncConflicts(serverUrl, apiKey) },
+        onCheckConnection = { onCheckConnection(serverUrl, apiKey) },
         onImportBackup = onImportBackup,
         onAddOffice = onAddOffice,
         onAddTelemed = onAddTelemed,
@@ -585,6 +589,7 @@ private fun TodayScreen(uiState: HomeVisitUiState, workActions: WorkActions, set
             onSync = onSync,
             onExportBackup = workActions.onExportBackup,
             onRefreshConflicts = workActions.onRefreshSyncConflicts,
+            onCheckConnection = workActions.onCheckConnection,
             onImportBackup = workActions.onImportBackup,
         )
         CompactCard(
@@ -1719,6 +1724,7 @@ private fun SettingsScreen(
             onSync = onSync,
             onExportBackup = workActions.onExportBackup,
             onRefreshConflicts = workActions.onRefreshSyncConflicts,
+            onCheckConnection = workActions.onCheckConnection,
             onImportBackup = workActions.onImportBackup,
             showImport = true,
         )
@@ -2394,6 +2400,7 @@ private fun SyncControlCard(
     onSync: () -> Unit,
     onExportBackup: () -> Unit,
     onRefreshConflicts: () -> Unit,
+    onCheckConnection: () -> Unit,
     onImportBackup: (String) -> Unit,
     showImport: Boolean = false,
 ) {
@@ -2437,8 +2444,13 @@ private fun SyncControlCard(
                     Text("Экспорт JSON")
                 }
             }
-            OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onRefreshConflicts) {
-                Text("Журнал конфликтов")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(modifier = Modifier.weight(1f), onClick = onCheckConnection) {
+                    Text("Проверить связь")
+                }
+                OutlinedButton(modifier = Modifier.weight(1f), onClick = onRefreshConflicts) {
+                    Text("Журнал конфликтов")
+                }
             }
             syncState.conflicts.take(3).forEach { conflict ->
                 CompactCard(
