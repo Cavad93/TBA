@@ -39,7 +39,18 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Today
+import androidx.compose.material.icons.filled.Work
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -62,6 +73,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -230,15 +242,15 @@ class MainActivity : ComponentActivity() {
 
 private enum class AppDestination(
     val label: String,
-    val shortLabel: String,
+    val icon: ImageVector,
     val title: String,
 ) {
-    Today("Сегодня", "С", "Сегодня"),
-    Work("Работа", "Р", "Работа"),
-    Route("Маршрут", "М", "Маршрут и GPS"),
-    Reports("Отчеты", "О", "Отчеты"),
-    Fatigue("Усталость", "У", "Усталость"),
-    Settings("Настройки", "Н", "Настройки"),
+    Today("Сегодня", Icons.Filled.Today, "Сегодня"),
+    Work("Работа", Icons.Filled.Work, "Работа"),
+    Route("Маршрут", Icons.Filled.Map, "Маршрут и GPS"),
+    Reports("Отчеты", Icons.Filled.BarChart, "Отчеты"),
+    Fatigue("Усталость", Icons.Filled.MonitorHeart, "Усталость"),
+    Settings("Настройки", Icons.Filled.Settings, "Настройки"),
 }
 
 private enum class WorkForm {
@@ -287,16 +299,26 @@ private data class WorkActions(
     val onSaveAppSettings: (Map<String, Any?>) -> Unit,
 )
 
+private val LightColors = lightColorScheme(
+    primary = Color(0xFF176B52),
+    secondary = Color(0xFF50645B),
+    tertiary = Color(0xFF38656B),
+    surface = Color(0xFFF7FAF8),
+    background = Color(0xFFF2F6F4),
+)
+
+private val DarkColors = darkColorScheme(
+    primary = Color(0xFF6FD9B4),
+    secondary = Color(0xFFB4CCC0),
+    tertiary = Color(0xFF8FD0D8),
+    surface = Color(0xFF141B18),
+    background = Color(0xFF0E1512),
+)
+
 @Composable
 private fun HomeVisitTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = androidx.compose.material3.lightColorScheme(
-            primary = Color(0xFF176B52),
-            secondary = Color(0xFF50645B),
-            tertiary = Color(0xFF38656B),
-            surface = Color(0xFFF7FAF8),
-            background = Color(0xFFF2F6F4),
-        ),
+        colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors,
         content = content,
     )
 }
@@ -526,20 +548,10 @@ private fun AppNavigationRail(selected: AppDestination, onSelect: (AppDestinatio
 
 @Composable
 private fun DestinationIcon(destination: AppDestination) {
-    Box(
-        modifier = Modifier
-            .size(28.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            destination.shortLabel,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-        )
-    }
+    Icon(
+        imageVector = destination.icon,
+        contentDescription = destination.label,
+    )
 }
 
 @Composable
