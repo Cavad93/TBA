@@ -1,3 +1,4 @@
+// Клиники динамические: список приходит из настроек сервера (см. ClinicPicker/uiState.clinics).
 package com.homevisit.location
 
 import android.Manifest
