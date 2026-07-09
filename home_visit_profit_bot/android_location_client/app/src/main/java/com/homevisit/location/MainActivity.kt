@@ -1086,6 +1086,7 @@ private fun ServerRouteCard(route: RouteUiState, onRefresh: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
+                if (snapshot.fromCache) OfflineBadge()
                 Text(
                     "Адресов: ${snapshot.visitsCount}. Всего: ${oneDecimal(snapshot.totalKm)} км, ${oneDecimal(snapshot.totalMinutes)} мин.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -1232,6 +1233,7 @@ private fun ReportsScreen(reportState: ReportUiState, workActions: WorkActions) 
             CompactCard(title = "Статус", body = reportState.message)
         }
         if (snapshot != null) {
+            if (snapshot.fromCache) OfflineBadge()
             ReportSummaryCard(snapshot)
             ClinicBreakdownCard(snapshot.clinics)
             ExpenseBreakdownCard(snapshot.summary)
@@ -1429,6 +1431,7 @@ private fun FatigueScreen(fatigueState: FatigueUiState, workActions: WorkActions
             CompactCard(title = "Статус", body = fatigueState.message)
         }
         if (snapshot != null) {
+            if (snapshot.fromCache) OfflineBadge()
             FatigueSummaryCard(snapshot)
             FatigueFeedbackCard(
                 snapshot = snapshot,
@@ -1495,6 +1498,7 @@ private fun FatigueTrendCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
+            if (trend?.fromCache == true) OfflineBadge()
             Text(
                 "Индекс усталости (сплошная) и 7-дневная средняя (светлая). Точек: ${points.size}.",
                 style = MaterialTheme.typography.bodySmall,
@@ -1698,6 +1702,7 @@ private fun FatigueCorrelationCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
+            if (report.fromCache) OfflineBadge()
             Text(
                 "Дней: ${report.days}, строк данных: ${report.rowsUsed}. Чем ближе коэффициент к +1/-1, тем сильнее связь.",
                 style = MaterialTheme.typography.bodySmall,
@@ -2400,6 +2405,23 @@ private fun CompactCard(title: String, body: String) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+
+@Composable
+private fun OfflineBadge() {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            "⚠ Офлайн: показаны последние сохранённые данные (нет связи с сервером).",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+        )
     }
 }
 

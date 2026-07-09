@@ -99,6 +99,7 @@ data class ServerRouteSnapshot(
     val totalKm: Double,
     val totalMinutes: Double,
     val legs: List<ServerRouteLeg>,
+    val fromCache: Boolean = false,
 )
 
 data class ServerRouteLeg(
@@ -158,6 +159,7 @@ data class ReportSnapshot(
     val endDate: String,
     val summary: ReportSummary,
     val clinics: List<ClinicReportRow>,
+    val fromCache: Boolean = false,
 )
 
 data class ReportSummary(
@@ -209,6 +211,7 @@ data class FatigueSnapshot(
     val summary: FatigueSummary?,
     val latestFeedback: FatigueFeedback?,
     val cbi: CbiInfo,
+    val fromCache: Boolean = false,
 )
 
 data class FatigueSummary(
@@ -252,6 +255,7 @@ data class FatigueCorrelationReport(
     val days: Int,
     val rowsUsed: Int,
     val cells: List<FatigueCorrelationCell>,
+    val fromCache: Boolean = false,
 )
 
 data class FatigueCorrelationCell(
@@ -272,6 +276,7 @@ data class FatigueTrendPoint(
 data class FatigueTrendReport(
     val days: Int,
     val points: List<FatigueTrendPoint>,
+    val fromCache: Boolean = false,
 )
 
 data class SyncQueueStats(

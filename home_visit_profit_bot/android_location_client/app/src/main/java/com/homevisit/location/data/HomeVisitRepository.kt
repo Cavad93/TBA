@@ -504,7 +504,7 @@ class HomeVisitRepository private constructor(
     suspend fun fetchActiveRoute(serverUrl: String, apiKey: String): ServerRouteSnapshot? = withContext(Dispatchers.IO) {
         val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/route/active"), apiKey, "cache_route_active")
             ?: return@withContext null
-        parseServerRoute(response.optJSONObject("route"))
+        parseServerRoute(response.optJSONObject("route"))?.copy(fromCache = response.optBoolean("_from_cache", false))
     }
 
     suspend fun fetchGpsDayEstimate(serverUrl: String, apiKey: String): GpsDayEstimate? = withContext(Dispatchers.IO) {
@@ -677,7 +677,9 @@ class HomeVisitRepository private constructor(
     suspend fun fetchFatigueTrend(serverUrl: String, apiKey: String, days: Int): FatigueTrendReport? = withContext(Dispatchers.IO) {
         val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/fatigue/trend?days=$days"), apiKey, "cache_fatigue_trend_$days")
             ?: return@withContext null
-        val pointsJson = response.optJSONArray("points") ?: return@withContext FatigueTrendReport(response.optInt("days", days), emptyList())
+        val fromCache = response.optBoolean("_from_cache", false)
+        val pointsJson = response.optJSONArray("points")
+            ?: return@withContext FatigueTrendReport(response.optInt("days", days), emptyList(), fromCache)
         val points = (0 until pointsJson.length()).mapNotNull { index ->
             val obj = pointsJson.optJSONObject(index) ?: return@mapNotNull null
             FatigueTrendPoint(
@@ -687,7 +689,7 @@ class HomeVisitRepository private constructor(
                 recoveryDebt = obj.optDouble("recovery_debt", 0.0),
             )
         }
-        FatigueTrendReport(days = response.optInt("days", days), points = points)
+        FatigueTrendReport(days = response.optInt("days", days), points = points, fromCache = fromCache)
     }
 
     suspend fun saveFatigueFeedback(
@@ -1156,6 +1158,7 @@ class HomeVisitRepository private constructor(
                 recoveryDebt = summary.optDouble("recovery_debt", 0.0),
             ),
             clinics = clinics,
+            fromCache = response.optBoolean("_from_cache", false),
         )
     }
 
@@ -1169,6 +1172,7 @@ class HomeVisitRepository private constructor(
             summary = parseFatigueSummary(response.optJSONObject("summary")),
             latestFeedback = parseFatigueFeedback(response.optJSONObject("latest_feedback")),
             cbi = cbi,
+            fromCache = response.optBoolean("_from_cache", false),
         )
     }
 
@@ -1241,6 +1245,7 @@ class HomeVisitRepository private constructor(
             days = response.optInt("days", 0),
             rowsUsed = response.optInt("rows_used", 0),
             cells = cells,
+            fromCache = response.optBoolean("_from_cache", false),
         )
     }
 
