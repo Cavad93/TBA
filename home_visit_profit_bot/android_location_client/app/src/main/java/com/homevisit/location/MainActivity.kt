@@ -43,13 +43,16 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -307,18 +310,28 @@ private data class WorkActions(
 
 private val LightColors = lightColorScheme(
     primary = Color(0xFF176B52),
+    onPrimary = Color(0xFFFFFFFF),
     secondary = Color(0xFF50645B),
     tertiary = Color(0xFF38656B),
     surface = Color(0xFFF7FAF8),
+    onSurface = Color(0xFF15201B),
+    onSurfaceVariant = Color(0xFF44514B),
     background = Color(0xFFF2F6F4),
+    onBackground = Color(0xFF15201B),
 )
 
 private val DarkColors = darkColorScheme(
     primary = Color(0xFF6FD9B4),
+    onPrimary = Color(0xFF00382A),
     secondary = Color(0xFFB4CCC0),
+    onSecondary = Color(0xFF1E352C),
     tertiary = Color(0xFF8FD0D8),
+    onTertiary = Color(0xFF00363C),
     surface = Color(0xFF141B18),
+    onSurface = Color(0xFFE1E4E0),
+    onSurfaceVariant = Color(0xFFBEC9C2),
     background = Color(0xFF0E1512),
+    onBackground = Color(0xFFE1E4E0),
 )
 
 @Composable
@@ -1848,12 +1861,12 @@ private fun AppSettingsSection(
                 )
             }
             SettingType.ListValue -> {
-                OutlinedTextField(
-                    modifier = Modifier.fillMaxWidth(),
-                    value = textEdits[field.key] ?: field.listValue.joinToString(", "),
-                    onValueChange = { textEdits[field.key] = it },
-                    singleLine = false,
-                    label = { Text("${field.label} (через запятую)") },
+                val raw = textEdits[field.key] ?: field.listValue.joinToString(", ")
+                val items = if (raw.isBlank()) emptyList() else raw.split(",").map { it.trim() }
+                ListFieldEditor(
+                    label = field.label,
+                    items = items,
+                    onItemsChange = { newItems -> textEdits[field.key] = newItems.joinToString(", ") },
                 )
             }
             else -> {
@@ -1865,6 +1878,46 @@ private fun AppSettingsSection(
                     label = { Text(field.label) },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ListFieldEditor(
+    label: String,
+    items: List<String>,
+    onItemsChange: (List<String>) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        if (items.isEmpty()) {
+            Text(
+                "Список пуст. Нажмите «Добавить».",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        items.forEachIndexed { index, item ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    modifier = Modifier.weight(1f),
+                    value = item,
+                    onValueChange = { value -> onItemsChange(items.toMutableList().also { it[index] = value }) },
+                    singleLine = true,
+                )
+                IconButton(onClick = { onItemsChange(items.toMutableList().also { it.removeAt(index) }) }) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Удалить")
+                }
+            }
+        }
+        OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = { onItemsChange(items + "") }) {
+            Icon(Icons.Filled.Add, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text("Добавить")
         }
     }
 }
