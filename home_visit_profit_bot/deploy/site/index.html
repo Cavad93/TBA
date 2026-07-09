@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Визиторкрут — стоит ли ехать на заказ</title>
+<meta name="description" content="Навигатор показывает, куда ехать. Визиторкрут показывает, стоит ли ехать: считает выгоду заказа с учётом дороги, времени, расходов и нагрузки. Для врачей на выезде, таксистов, курьеров и мастеров на дом.">
+<style>
+  :root {
+    --bg: #f6f7fb;
+    --card: #ffffff;
+    --fg: #16181d;
+    --muted: #5a6272;
+    --brand: #1f6feb;
+    --brand-2: #12b3c9;
+    --border: #e5e8ef;
+    --shadow: 0 8px 30px rgba(20,30,50,.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1116;
+      --card: #161a22;
+      --fg: #eef1f6;
+      --muted: #9aa3b2;
+      --brand: #5b9bff;
+      --brand-2: #34c6dd;
+      --border: #262c38;
+      --shadow: 0 8px 30px rgba(0,0,0,.35);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 20px; }
+  header.hero {
+    text-align: center;
+    padding: 72px 20px 56px;
+    background:
+      radial-gradient(1200px 400px at 50% -10%, color-mix(in srgb, var(--brand) 18%, transparent), transparent);
+  }
+  .logo {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-weight: 800; font-size: 20px; letter-spacing: .2px;
+  }
+  .logo .dot {
+    width: 34px; height: 34px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 18px;
+  }
+  .slogan {
+    font-size: clamp(26px, 5.2vw, 40px);
+    line-height: 1.2; margin: 28px 0 8px; font-weight: 800;
+  }
+  .slogan .accent { color: var(--brand); }
+  .lead { font-size: clamp(16px, 2.6vw, 19px); color: var(--muted); max-width: 640px; margin: 14px auto 30px; }
+  .cta {
+    display: inline-flex; align-items: center; gap: 10px;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    color: #fff; text-decoration: none; font-weight: 700; font-size: 17px;
+    padding: 14px 26px; border-radius: 12px; box-shadow: var(--shadow);
+    transition: transform .12s ease;
+  }
+  .cta:hover { transform: translateY(-2px); }
+  .cta-note { display: block; margin-top: 12px; font-size: 13px; color: var(--muted); }
+
+  .who {
+    display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 26px 0 0;
+  }
+  .who span {
+    background: var(--card); border: 1px solid var(--border); border-radius: 999px;
+    padding: 7px 15px; font-size: 14px; color: var(--fg); box-shadow: var(--shadow);
+  }
+
+  section { padding: 40px 0; }
+  h2 { font-size: clamp(22px, 4vw, 28px); margin: 0 0 24px; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px;
+  }
+  .feature {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 22px; box-shadow: var(--shadow);
+  }
+  .feature .ico { font-size: 26px; margin-bottom: 10px; }
+  .feature h3 { margin: 0 0 6px; font-size: 17px; }
+  .feature p { margin: 0; color: var(--muted); font-size: 15px; }
+
+  .policy {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px; box-shadow: var(--shadow);
+  }
+  .policy h3 { margin: 20px 0 8px; font-size: 17px; }
+  .policy p, .policy li { color: var(--muted); font-size: 15px; }
+  .policy ul { padding-left: 20px; }
+
+  footer {
+    text-align: center; padding: 40px 20px 56px; color: var(--muted); font-size: 14px;
+    border-top: 1px solid var(--border); margin-top: 20px;
+  }
+  a { color: var(--brand); }
+</style>
+</head>
+<body>
+
+  <header class="hero">
+    <div class="wrap">
+      <div class="logo"><span class="dot">🧭</span> Визиторкрут</div>
+      <p class="slogan">Навигатор показывает, <span class="accent">куда</span> ехать.<br>Приложение показывает — <span class="accent">стоит ли</span> ехать.</p>
+      <p class="lead">
+        Считает выгоду заказа <b>до того, как вы согласитесь</b>: дорога, время,
+        расходы и нагрузка. Меньше пустых километров — больше чистого дохода.
+      </p>
+      <a class="cta" href="/app-release.apk" download>⬇️ Скачать приложение (APK)</a>
+      <span class="cta-note">Android · установка из файла (вне Google Play)</span>
+      <div class="who">
+        <span>🩺 Врачи на выезде</span>
+        <span>🚕 Таксисты</span>
+        <span>📦 Курьеры</span>
+        <span>🔧 Мастера на дом</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <section>
+      <h2>Что умеет</h2>
+      <div class="grid">
+        <div class="feature">
+          <div class="ico">💰</div>
+          <h3>Стоит ли ехать</h3>
+          <p>Считает прибыль по заказу с учётом дороги и времени — до того, как вы его приняли.</p>
+        </div>
+        <div class="feature">
+          <div class="ico">🗺️</div>
+          <h3>Маршрут и время</h3>
+          <p>Оптимальный объезд адресов по GPS и честная оценка времени в пути.</p>
+        </div>
+        <div class="feature">
+          <div class="ico">📊</div>
+          <h3>Отчёты по деньгам</h3>
+          <p>Доход, расходы и чистыми — по дням и по источникам заказов.</p>
+        </div>
+        <div class="feature">
+          <div class="ico">🔋</div>
+          <h3>Нагрузка и восстановление</h3>
+          <p>Индекс нагрузки и режим труда и отдыха — чтобы график был посильным и безопасным за рулём.</p>
+        </div>
+        <div class="feature">
+          <div class="ico">📥</div>
+          <h3>Работа офлайн</h3>
+          <p>Отчёты, нагрузка и маршрут доступны для просмотра без сети.</p>
+        </div>
+        <div class="feature">
+          <div class="ico">🔒</div>
+          <h3>Защищённая связь</h3>
+          <p>Данные передаются по HTTPS с персональным доступом.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacy">
+      <h2>Политика конфиденциальности</h2>
+      <div class="policy">
+        <p>
+          «Визиторкрут» — инструмент для персонального учёта рентабельности заказов
+          выездного исполнителя (врача на выезде, таксиста, курьера, мастера).
+          Ниже — какие данные обрабатываются и зачем.
+        </p>
+
+        <h3>Какие данные обрабатываются</h3>
+        <ul>
+          <li><b>Аккаунт.</b> E-mail и никнейм — для входа в приложение.</li>
+          <li><b>Геолокация (GPS).</b> Для построения маршрута и оценки времени в пути.
+            Координаты передаются на сервер сервиса и не публикуются третьим лицам.</li>
+          <li><b>Данные о заказах.</b> Адреса, суммы, время — вводятся исполнителем и
+            хранятся для расчёта выгоды и отчётов.</li>
+          <li><b>Режим труда и отдыха.</b> Часы отдыха и перерывы между сменами — как
+            операционная метрика нагрузки и безопасности (не медицинские данные).</li>
+        </ul>
+
+        <h3>Как используются данные</h3>
+        <p>
+          Только для работы функций приложения: расчёта рентабельности заказов, маршрута,
+          отчётов и оценки нагрузки. Данные не продаются и не передаются в рекламные сети.
+        </p>
+
+        <h3>Хранение и защита</h3>
+        <p>
+          Данные хранятся на сервере в РФ и передаются по защищённому соединению (HTTPS)
+          с персональным доступом. Доступ к своим данным есть только у их владельца.
+        </p>
+
+        <h3>Удаление данных</h3>
+        <p>
+          Вы можете удалить свой аккаунт и все связанные данные из приложения либо по
+          запросу на контакт ниже.
+        </p>
+
+        <h3>Контакты</h3>
+        <p>По вопросам конфиденциальности: <a href="mailto:cavad.1993@gmail.com">cavad.1993@gmail.com</a></p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    © 2026 Визиторкрут · <a href="#privacy">Политика конфиденциальности</a>
+  </footer>
+
+</body>
+</html>

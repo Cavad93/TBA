@@ -1,27 +1,37 @@
-# Caddyfile — обратный прокси с автоматическим HTTPS (Let's Encrypt).
+# Caddyfile — сайт + API с автоматическим HTTPS (Let's Encrypt).
 #
-# Caddy сам получает и продлевает TLS-сертификат для указанных ниже имён,
-# поэтому приложение ходит на https://<имя> без предупреждений о сертификате.
+# Caddy сам получает и продлевает TLS-сертификаты для указанных имён.
 #
 # Требования:
-#   * DNS-запись A (и/или AAAA) указанного имени указывает на IP этого сервера;
-#   * порты 80 и 443 открыты в firewall и проброшены на сервер;
+#   * A-записи vizitorkrut.ru, www.vizitorkrut.ru, api.vizitorkrut.ru → IP этого сервера;
+#   * порты 80 и 443 открыты в firewall;
 #   * backend (python -m app.main) слушает 127.0.0.1:8088 (см. env.production.example).
-#
-# СЕЙЧАС — бесплатное имя DuckDNS (или любое, что резолвится в ваш IP).
-# ПОЗЖЕ — просто допишите купленный домен через запятую и выполните
-#         `sudo systemctl reload caddy` (или `caddy reload`). Сертификат на
-#         новый домен выпустится автоматически, приложение переключается сменой
-#         URL в настройках — пересборка не нужна.
 
-# tba.duckdns.org, api.example.com {
-tba.duckdns.org {
-	# Сжатие ответов (отчёты/усталость — это JSON, хорошо жмётся).
+# --- Лендинг (статический сайт) на корневом домене ---
+vizitorkrut.ru, www.vizitorkrut.ru {
 	encode zstd gzip
 
-	# Единственный публичный вход: всё уходит на локальный Python-backend,
-	# который наружу НЕ смотрит. Токен (Authorization: Bearer ...) приложение
-	# шлёт как есть — Caddy его не трогает.
+	# Папка со статикой. Путь укажите под свой сервер (см. DEPLOYMENT.md).
+	root * /opt/tba/home_visit_profit_bot/deploy/site
+	file_server
+
+	# www.vizitorkrut.ru → без www.
+	@www host www.vizitorkrut.ru
+	redir @www https://vizitorkrut.ru{uri} permanent
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+}
+
+# --- Backend (API) на поддомене api.* — сюда ходит Android-приложение ---
+api.vizitorkrut.ru {
+	encode zstd gzip
+
+	# Единственный публичный вход к backend, который наружу НЕ смотрит.
+	# Токен (Authorization: Bearer ...) приложение шлёт как есть — Caddy его не трогает.
 	reverse_proxy 127.0.0.1:8088 {
 		# Пассивный health-check: если backend отвечает не 2xx на /api/health,
 		# Caddy временно пометит апстрим нездоровым.
@@ -30,17 +40,9 @@ tba.duckdns.org {
 		health_timeout 5s
 	}
 
-	# Разумные заголовки безопасности для API поверх HTTPS.
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		-Server
-	}
-
-	log {
-		output file /var/log/caddy/tba-access.log {
-			roll_size 10MiB
-			roll_keep 10
-		}
 	}
 }
