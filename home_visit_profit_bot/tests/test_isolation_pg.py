@@ -145,3 +145,32 @@ def test_rls_isolates_settings(monkeypatch) -> None:
             assert SettingsRepository(conn).get("car_cost_per_km") == "999"
     finally:
         current_user_id.set(None)
+
+
+def test_delete_account_purges_all_data(monkeypatch) -> None:
+    monkeypatch.setattr(auth_service_module, "send_code", lambda *a, **k: None)
+    monkeypatch.setattr(auth, "new_numeric_code", lambda digits=6: "123456")
+    config = _config()
+    _reset_and_init(config)
+    user_a = _make_user(config, "del@x.com")
+
+    try:
+        # У A появляются данные и изменённая настройка.
+        current_user_id.set(user_a)
+        with connect(config) as conn:
+            WorkDayRepository(conn).create("Дом", "Дом", 30, 20)
+            SettingsRepository(conn).set("car_cost_per_km", "111")
+
+        # Удаление аккаунта.
+        current_user_id.set(None)
+        with connect(config) as conn:
+            AuthService(conn, config).delete_account(user_a)
+
+        # Данных A не осталось (RLS-скоуп на A), и самого пользователя нет.
+        current_user_id.set(user_a)
+        with connect(config) as conn:
+            assert conn.execute("SELECT count(*) AS c FROM work_days").fetchone()["c"] == 0
+            assert conn.execute("SELECT count(*) AS c FROM settings").fetchone()["c"] == 0
+            assert conn.execute("SELECT count(*) AS c FROM users WHERE id = ?", (user_a,)).fetchone()["c"] == 0
+    finally:
+        current_user_id.set(None)

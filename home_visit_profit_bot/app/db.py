@@ -429,6 +429,16 @@ def _ensure_isolation(db: Database) -> None:
             f"USING (user_id = current_setting('app.user_id', true)::bigint) "
             f"WITH CHECK (user_id = current_setting('app.user_id', true)::bigint)"
         )
+        # FK с каскадом: удаление пользователя стирает все его данные (право на удаление).
+        constraint = f"{table}_user_fk"
+        exists = db.execute(
+            "SELECT 1 FROM pg_constraint WHERE conname = ?", (constraint,)
+        ).fetchone()
+        if not exists:
+            db.execute(
+                f"ALTER TABLE {table} ADD CONSTRAINT {constraint} "
+                f"FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+            )
 
 
 def _apply_schema(db: Database) -> None:
