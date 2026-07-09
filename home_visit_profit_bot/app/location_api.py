@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from app.config import AppConfig
+from app.database import current_user_id
 from app.db import connect
 from app.repositories import (
     DrivingBehaviorRepository,
@@ -170,7 +171,7 @@ def _handler_factory(config: AppConfig):
             if path != "/location":
                 self._json_response({"error": "not_found"}, HTTPStatus.NOT_FOUND)
                 return
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
@@ -221,7 +222,7 @@ def _handler_factory(config: AppConfig):
             )
 
         def _handle_active_day(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             with connect(config) as connection:
@@ -229,7 +230,7 @@ def _handler_factory(config: AppConfig):
                 self._json_response({"ok": True, "day": _day_payload(day)})
 
         def _handle_day_start(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
@@ -253,7 +254,7 @@ def _handler_factory(config: AppConfig):
             self._json_response({"ok": True, "day": _day_payload(day)})
 
         def _handle_day_gps_estimate(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             with connect(config) as connection:
@@ -284,7 +285,7 @@ def _handler_factory(config: AppConfig):
             )
 
         def _handle_day_end(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             with connect(config) as connection:
@@ -302,7 +303,7 @@ def _handler_factory(config: AppConfig):
             self._json_response({"ok": True, "day": _day_payload(closed)})
 
         def _handle_sync(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
@@ -326,7 +327,7 @@ def _handler_factory(config: AppConfig):
             )
 
         def _handle_settings_read(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             with connect(config) as connection:
@@ -334,7 +335,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(result)
 
         def _handle_settings_update(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
@@ -347,7 +348,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(result)
 
         def _handle_sync_conflicts(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             query = parse_qs(urlparse(self.path).query)
@@ -361,7 +362,7 @@ def _handler_factory(config: AppConfig):
             self._json_response({"ok": True, "conflicts": conflicts})
 
         def _handle_visit_candidate(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
@@ -377,7 +378,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(candidate_result_payload(result), status)
 
         def _handle_visit_action(self, visit_id: int, action: str) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
@@ -397,7 +398,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(payload)
 
         def _handle_active_route(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
@@ -409,7 +410,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(payload)
 
         def _handle_day_finish(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
@@ -422,7 +423,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(result)
 
         def _handle_current_gps_hint(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
@@ -434,7 +435,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(payload)
 
         def _handle_report_summary(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             query = parse_qs(urlparse(self.path).query)
@@ -444,7 +445,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(payload)
 
         def _handle_report_stats(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             query = parse_qs(urlparse(self.path).query)
@@ -460,7 +461,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(payload)
 
         def _handle_fatigue_summary(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             with connect(config) as connection:
@@ -468,7 +469,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(payload)
 
         def _handle_fatigue_correlation(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             query = parse_qs(urlparse(self.path).query)
@@ -482,7 +483,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(payload)
 
         def _handle_fatigue_trend(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             query = parse_qs(urlparse(self.path).query)
@@ -496,7 +497,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(payload)
 
         def _handle_fatigue_cbi_form(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             with connect(config) as connection:
@@ -504,7 +505,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(payload)
 
         def _handle_fatigue_feedback(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
@@ -517,7 +518,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(result)
 
         def _handle_fatigue_cbi_save(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
@@ -531,7 +532,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(result)
 
         def _handle_visit_stop_label(self, visit_id: int) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
@@ -545,7 +546,7 @@ def _handler_factory(config: AppConfig):
             self._json_response(result)
 
         def _handle_driving(self) -> None:
-            if not _is_authorized(self, config.location_api.api_key):
+            if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
@@ -643,11 +644,37 @@ def _path_only(path: str) -> str:
     return urlparse(path).path
 
 
-def _is_authorized(handler: BaseHTTPRequestHandler, api_key: str | None) -> bool:
-    if not api_key:
+def _authorize_request(handler: BaseHTTPRequestHandler, config: AppConfig) -> bool:
+    """Определить пользователя запроса и включить его для изоляции данных (RLS).
+
+    Токен Bearer — это либо персональный токен сессии (аккаунт), либо старый общий
+    LOCATION_API_KEY (тогда используем аккаунт-владельца). Установленный
+    current_user_id применит connect() ко всем последующим соединениям запроса.
+    """
+    header = handler.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
         return False
-    auth = handler.headers.get("Authorization", "")
-    return auth == f"Bearer {api_key}"
+    token = header[len("Bearer "):].strip()
+    if not token:
+        return False
+
+    with connect(config) as connection:
+        user_id = _resolve_user(connection, config, token)
+    if user_id is None:
+        return False
+    current_user_id.set(user_id)
+    return True
+
+
+def _resolve_user(connection: Any, config: AppConfig, token: str) -> int | None:
+    # Старый общий ключ приложения -> аккаунт-владелец (обратная совместимость).
+    if config.location_api.api_key and token == config.location_api.api_key:
+        row = connection.execute(
+            "SELECT value FROM settings WHERE key = 'legacy_owner_user_id'"
+        ).fetchone()
+        return int(row["value"]) if row and row["value"] else None
+    # Иначе — персональный токен сессии.
+    return AuthService(connection, config).authenticate(token)
 
 
 def _day_payload(day: Any) -> dict[str, Any] | None:

@@ -16,10 +16,19 @@ psycopg импортируется лениво, поэтому для SQLite-т
 """
 from __future__ import annotations
 
+import contextvars
 import sqlite3
 from typing import Any, Iterable, Sequence
 
 from app.config import AppConfig
+
+# Текущий пользователь запроса. Устанавливается на время обработки запроса
+# (см. location_api._authorize_request). connect() применяет его к соединению —
+# так data-эндпоинтам не нужно вручную звать set_user в каждом обработчике.
+# ThreadingHTTPServer создаёт поток на запрос, поэтому значение не «протекает».
+current_user_id: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "current_user_id", default=None
+)
 
 
 class Database:
@@ -53,6 +62,16 @@ class Database:
             return int(row["id"])
         cursor.execute(self._sql(sql), tuple(params))
         return int(cursor.lastrowid)
+
+    def set_user(self, user_id: int) -> None:
+        """Установить текущего пользователя для изоляции строк (RLS).
+
+        PostgreSQL: задаёт GUC app.user_id — по нему работают RLS-политики и
+        DEFAULT для колонок user_id. SQLite: no-op (RLS нет, тесты одно-пользовательские).
+        """
+        if self.dialect == "postgres":
+            cursor = self._raw.cursor()
+            cursor.execute("SELECT set_config('app.user_id', %s, false)", (str(int(user_id)),))
 
     def minutes_between(self, later: str, earlier: str) -> str:
         """SQL-выражение разницы двух ISO-времён (столбцов) в минутах."""
@@ -90,9 +109,14 @@ def connect(config: AppConfig) -> Database:
         from psycopg.rows import dict_row
 
         raw = psycopg.connect(config.database_url, row_factory=dict_row)
-        return Database(raw, "postgres")
+        db = Database(raw, "postgres")
+    else:
+        raw = sqlite3.connect(config.database_path)
+        raw.row_factory = sqlite3.Row
+        raw.execute("PRAGMA foreign_keys = ON")
+        db = Database(raw, "sqlite")
 
-    raw = sqlite3.connect(config.database_path)
-    raw.row_factory = sqlite3.Row
-    raw.execute("PRAGMA foreign_keys = ON")
-    return Database(raw, "sqlite")
+    user_id = current_user_id.get()
+    if user_id is not None:
+        db.set_user(user_id)
+    return db

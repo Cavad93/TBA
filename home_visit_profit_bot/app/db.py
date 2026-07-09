@@ -376,13 +376,53 @@ def _split_statements(ddl: str) -> list[str]:
     return [statement.strip() for statement in ddl.split(";") if statement.strip()]
 
 
+# Таблицы с пользовательскими данными: изолируются по user_id (Фаза 3a).
+# settings и address_cache пока общие (per-user настройки — Фаза 3b).
+ISOLATED_TABLES = [
+    "work_days", "visits", "expenses", "telemed_entries", "office_entries",
+    "daily_stats", "visit_location_events", "location_samples",
+    "work_day_location_state", "burnout_surveys", "driving_behavior_daily",
+    "fatigue_feedback", "mobile_client_entities", "mobile_sync_events",
+    "mobile_sync_conflicts",
+]
+
+
 def init_db(config: AppConfig) -> None:
     if not config.database_url:
         config.database_path.parent.mkdir(parents=True, exist_ok=True)
     with connect(config) as db:
         _apply_schema(db)
         _ensure_columns(db)
+        _ensure_isolation(db)
         _seed_settings(db, config)
+
+
+def _ensure_isolation(db: Database) -> None:
+    """Добавить user_id во все пользовательские таблицы; на PostgreSQL — включить RLS.
+
+    RLS в PostgreSQL гарантирует, что каждый видит и меняет только свои строки —
+    даже если запрос забыл фильтр. DEFAULT берёт user_id из app.user_id (см.
+    Database.set_user). На SQLite (тесты) — только колонка, без RLS.
+    """
+    for table in ISOLATED_TABLES:
+        _ensure_column(db, table, "user_id", "BIGINT")
+
+    if db.dialect != "postgres":
+        return
+
+    for table in ISOLATED_TABLES:
+        db.execute(
+            f"ALTER TABLE {table} ALTER COLUMN user_id "
+            f"SET DEFAULT current_setting('app.user_id', true)::bigint"
+        )
+        db.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+        db.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
+        db.execute(f"DROP POLICY IF EXISTS {table}_isolation ON {table}")
+        db.execute(
+            f"CREATE POLICY {table}_isolation ON {table} "
+            f"USING (user_id = current_setting('app.user_id', true)::bigint) "
+            f"WITH CHECK (user_id = current_setting('app.user_id', true)::bigint)"
+        )
 
 
 def _apply_schema(db: Database) -> None:
