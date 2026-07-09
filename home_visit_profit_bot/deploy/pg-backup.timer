@@ -1,0 +1,11 @@
+# Ежедневный запуск бэкапа PostgreSQL в 03:30 UTC.
+# Persistent=true — если сервер был выключен, пропущенный бэкап выполнится после старта.
+[Unit]
+Description=Daily encrypted PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

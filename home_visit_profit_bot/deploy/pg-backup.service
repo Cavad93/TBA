@@ -1,0 +1,14 @@
+# systemd-сервис ежедневного бэкапа PostgreSQL (запускается таймером pg-backup.timer).
+#
+# Установка:
+#   sudo cp deploy/pg-backup.service deploy/pg-backup.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now pg-backup.timer
+[Unit]
+Description=Encrypted PostgreSQL backup (vizitor)
+After=postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/tba/home_visit_profit_bot/deploy/pg_backup.sh
