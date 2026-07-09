@@ -75,6 +75,24 @@ class LocationApiConfig:
 
 
 @dataclass(frozen=True)
+class EmailConfig:
+    # Если SMTP не задан — коды подтверждения пишутся в лог (dev-режим).
+    smtp_host: str | None
+    smtp_port: int
+    smtp_user: str | None
+    smtp_password: str | None
+    mail_from: str
+    app_name: str
+
+
+def _default_email() -> "EmailConfig":
+    return EmailConfig(
+        smtp_host=None, smtp_port=465, smtp_user=None, smtp_password=None,
+        mail_from="Визиторкрут <noreply@vizitorkrut.ru>", app_name="Визиторкрут",
+    )
+
+
+@dataclass(frozen=True)
 class AppConfig:
     project_dir: Path
     database_path: Path
@@ -88,6 +106,7 @@ class AppConfig:
     # Если задан DATABASE_URL (postgresql://...), backend работает на PostgreSQL;
     # иначе — на SQLite по database_path (по умолчанию для тестов и локальной разработки).
     database_url: str | None = None
+    email: EmailConfig = field(default_factory=_default_email)
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -104,11 +123,20 @@ def load_config(project_dir: Path | None = None) -> AppConfig:
     if not database_path.is_absolute():
         database_path = project_dir / database_path
     database_url = os.getenv("DATABASE_URL") or None
+    email = EmailConfig(
+        smtp_host=os.getenv("SMTP_HOST") or None,
+        smtp_port=int(os.getenv("SMTP_PORT", "465")),
+        smtp_user=os.getenv("SMTP_USER") or None,
+        smtp_password=os.getenv("SMTP_PASSWORD") or None,
+        mail_from=os.getenv("MAIL_FROM", "Визиторкрут <noreply@vizitorkrut.ru>"),
+        app_name=os.getenv("APP_NAME", "Визиторкрут"),
+    )
 
     return AppConfig(
         project_dir=project_dir,
         database_path=database_path,
         database_url=database_url,
+        email=email,
         finance=FinanceConfig(
             min_hourly_income=float(raw.get("finance", {}).get("min_hourly_income", 600)),
             currency=str(raw.get("finance", {}).get("currency", "RUB")),

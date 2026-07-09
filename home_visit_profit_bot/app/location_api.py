@@ -21,6 +21,7 @@ from app.repositories import (
     WorkDayLocationRepository,
     WorkDayRepository,
 )
+from app.services.auth_service import AuthError, AuthService
 from app.services.location_service import calculate_location_day_estimate, process_location_update
 from app.services.mobile_api_service import MobileApiService
 from app.services.mobile_fatigue_service import MobileFatigueService
@@ -91,10 +92,46 @@ def _handler_factory(config: AppConfig):
             if path == "/api/settings":
                 self._handle_settings_read()
                 return
+            if path == "/api/auth/me":
+                self._auth_protected(lambda service, user_id: service.me(user_id))
+                return
+            self._json_response({"error": "not_found"}, HTTPStatus.NOT_FOUND)
+
+        def do_DELETE(self) -> None:
+            path = _path_only(self.path)
+            if path == "/api/auth/account":
+                self._auth_protected(lambda service, user_id: service.delete_account(user_id))
+                return
             self._json_response({"error": "not_found"}, HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
             path = _path_only(self.path)
+            if path == "/api/auth/register":
+                self._auth_public(lambda s, p: s.register(
+                    email=str(p.get("email", "")), password=str(p.get("password", "")),
+                    nickname=str(p.get("nickname", "")), occupation=p.get("occupation"),
+                    consent_version=p.get("consent_version")))
+                return
+            if path == "/api/auth/verify-email":
+                self._auth_public(lambda s, p: s.verify_email(str(p.get("email", "")), str(p.get("code", ""))))
+                return
+            if path == "/api/auth/resend-code":
+                self._auth_public(lambda s, p: s.resend_code(str(p.get("email", ""))))
+                return
+            if path == "/api/auth/login":
+                self._auth_public(lambda s, p: s.login(str(p.get("email", "")), str(p.get("password", ""))))
+                return
+            if path == "/api/auth/password/forgot":
+                self._auth_public(lambda s, p: s.forgot_password(str(p.get("email", ""))))
+                return
+            if path == "/api/auth/password/reset":
+                self._auth_public(lambda s, p: s.reset_password(
+                    str(p.get("email", "")), str(p.get("code", "")), str(p.get("password", ""))))
+                return
+            if path == "/api/auth/logout":
+                token = self._bearer_token()
+                self._auth_protected(lambda s, user_id: s.logout(token))
+                return
             if path == "/api/sync":
                 self._handle_sync()
                 return
@@ -550,6 +587,41 @@ def _handler_factory(config: AppConfig):
 
         def log_message(self, format: str, *args: Any) -> None:
             logger.info("Location API: " + format, *args)
+
+        def _bearer_token(self) -> str | None:
+            header = self.headers.get("Authorization", "")
+            if header.startswith("Bearer "):
+                return header[len("Bearer "):].strip() or None
+            return None
+
+        def _auth_public(self, action) -> None:
+            """Публичный auth-эндпоинт: читает JSON, вызывает action(service, payload)."""
+            try:
+                payload = self._read_json()
+            except json.JSONDecodeError:
+                self._json_response({"error": "Некорректный запрос"}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                with connect(config) as connection:
+                    result = action(AuthService(connection, config), payload)
+                self._json_response(result)
+            except AuthError as error:
+                self._json_response({"error": error.message}, HTTPStatus(error.status))
+
+        def _auth_protected(self, action) -> None:
+            """Эндпоинт, требующий токен: action(service, user_id)."""
+            token = self._bearer_token()
+            try:
+                with connect(config) as connection:
+                    service = AuthService(connection, config)
+                    user_id = service.authenticate(token)
+                    if user_id is None:
+                        self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                        return
+                    result = action(service, user_id)
+                self._json_response(result)
+            except AuthError as error:
+                self._json_response({"error": error.message}, HTTPStatus(error.status))
 
         def _read_json(self) -> dict[str, Any]:
             length = int(self.headers.get("Content-Length", "0"))
