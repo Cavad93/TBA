@@ -299,3 +299,34 @@ data class ExpenseDraft(
     val amount: Double = 0.0,
     val comment: String = "",
 )
+
+enum class SettingType(val wire: String) {
+    Number("number"),
+    Text("text"),
+    Bool("bool"),
+    ListValue("list"),
+    Unknown("");
+
+    companion object {
+        fun fromWire(value: String): SettingType = entries.firstOrNull { it.wire == value } ?: Unknown
+    }
+}
+
+data class SettingField(
+    val key: String,
+    val label: String,
+    val type: SettingType,
+    val textValue: String = "",
+    val boolValue: Boolean = false,
+    val listValue: List<String> = emptyList(),
+)
+
+data class SettingsSection(
+    val key: String,
+    val title: String,
+    val fields: List<SettingField>,
+)
+
+data class AppSettingsSnapshot(
+    val sections: List<SettingsSection>,
+)

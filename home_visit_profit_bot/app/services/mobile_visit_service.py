@@ -22,6 +22,7 @@ from app.services.geocoding_service import (
 )
 from app.services.profitability_service import calculate_candidate_impact, calculate_remaining_route_summary
 from app.services.routing_service import RoutingError
+from app.services.settings_service import allowed_clinics
 
 
 VALID_CLINICS = {"Династия", "ПСК", "ВИТАМЕД", "ДНД"}
@@ -52,7 +53,7 @@ class MobileVisitService:
 
         address = _required_str(payload, "address")
         income = _positive_float(payload.get("income"))
-        clinic = _clinic(payload)
+        clinic = _clinic(payload, allowed_clinics(self.settings))
         route_km = _optional_non_negative_float(payload.get("route_km"))
         route_minutes = _optional_non_negative_float(payload.get("route_minutes"))
         manual_district = _optional_str(payload.get("district"))
@@ -376,8 +377,8 @@ def _optional_non_negative_float(value: Any) -> float | None:
     return result
 
 
-def _clinic(payload: dict[str, Any]) -> str:
+def _clinic(payload: dict[str, Any], allowed: set[str]) -> str:
     clinic = _required_str(payload, "clinic")
-    if clinic not in VALID_CLINICS:
+    if clinic not in allowed:
         raise ValueError(f"unsupported clinic: {clinic}")
     return clinic

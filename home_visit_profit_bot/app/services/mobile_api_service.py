@@ -17,6 +17,11 @@ from app.repositories import (
     WorkDayRepository,
     now_iso,
 )
+from app.services.settings_service import (
+    SettingsService,
+    allowed_clinics,
+    allowed_telemed_clinics,
+)
 from app.services.stats_service import finalize_day
 
 
@@ -176,6 +181,9 @@ class MobileApiService:
             return self._save_telemed(client_entity_id, payload)
         if event_type == "expense_saved" and entity_type == "expense":
             return self._save_expense(client_entity_id, payload)
+        if event_type == "settings_saved" and entity_type == "settings":
+            SettingsService(self.connection).update(payload)
+            return 0
         raise ValueError(f"unsupported event: {event_type}/{entity_type}")
 
     def conflicts(self, limit: int = 20) -> list[dict[str, Any]]:
@@ -265,7 +273,7 @@ class MobileApiService:
         if mapped is not None:
             self._log_mapped_entity_conflict(client_entity_id, "visit", mapped, payload)
             return mapped
-        clinic = _clinic(payload)
+        clinic = _clinic(payload, allowed_clinics(self.settings))
         day_id = self._require_day_id(_required_str(payload, "work_day_id"))
         visit = self.visits.create_candidate(
             day_id=day_id,
@@ -292,7 +300,7 @@ class MobileApiService:
         self.office.add(
             day_id=day_id,
             address=_required_str(payload, "address"),
-            clinic=_clinic(payload),
+            clinic=_clinic(payload, allowed_clinics(self.settings)),
             income=income,
             minutes=minutes,
         )
@@ -308,9 +316,10 @@ class MobileApiService:
             self._log_mapped_entity_conflict(client_entity_id, "telemed_entry", mapped, payload)
             return mapped
         day_id = self._require_day_id(_required_str(payload, "work_day_id"))
-        clinic = _clinic(payload)
-        if clinic not in TELEMED_CLINICS:
-            raise ValueError("telemed clinic must be ПСК or ДНД")
+        telemed_clinics = allowed_telemed_clinics(self.settings)
+        clinic = _clinic(payload, allowed_clinics(self.settings) | telemed_clinics)
+        if clinic not in telemed_clinics:
+            raise ValueError(f"telemed clinic must be one of: {', '.join(sorted(telemed_clinics))}")
         income = _non_negative_float(payload.get("income"))
         minutes = _non_negative_float(payload.get("minutes"))
         self.telemed.add(day_id=day_id, clinic=clinic, income=income, minutes=minutes)
@@ -505,8 +514,8 @@ def _end_day_data_from_payload(day: Any, payload: dict[str, Any]) -> EndDayData:
     )
 
 
-def _clinic(payload: dict[str, Any]) -> str:
+def _clinic(payload: dict[str, Any], allowed: set[str]) -> str:
     clinic = _required_str(payload, "clinic")
-    if clinic not in VALID_CLINICS:
+    if clinic not in allowed:
         raise ValueError(f"unsupported clinic: {clinic}")
     return clinic

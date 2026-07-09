@@ -11,6 +11,7 @@ import com.homevisit.location.data.local.SyncStatus
 import com.homevisit.location.data.local.TelemedEntryEntity
 import com.homevisit.location.data.local.VisitEntity
 import com.homevisit.location.data.local.WorkDayEntity
+import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.CandidateEstimate
 import com.homevisit.location.domain.CandidateRequestResult
 import com.homevisit.location.domain.CbiInfo
@@ -31,6 +32,9 @@ import com.homevisit.location.domain.ReportSnapshot
 import com.homevisit.location.domain.ReportSummary
 import com.homevisit.location.domain.ServerRouteLeg
 import com.homevisit.location.domain.ServerRouteSnapshot
+import com.homevisit.location.domain.SettingField
+import com.homevisit.location.domain.SettingType
+import com.homevisit.location.domain.SettingsSection
 import com.homevisit.location.domain.StopLabel
 import com.homevisit.location.domain.SyncConflict
 import com.homevisit.location.domain.SyncQueueStats
@@ -512,6 +516,88 @@ class HomeVisitRepository private constructor(
             return@withContext null
         }
         parseFatigueSnapshot(response)
+    }
+
+    suspend fun fetchAppSettings(serverUrl: String, apiKey: String): AppSettingsSnapshot? = withContext(Dispatchers.IO) {
+        val response = getJson(normalizeApiUrl(serverUrl, "/api/settings"), apiKey)
+        if (response == null || !response.optBoolean("ok", false)) {
+            return@withContext loadCachedAppSettings()
+        }
+        val snapshot = parseAppSettings(response) ?: return@withContext loadCachedAppSettings()
+        dao.saveSetting(SettingEntity(key = CACHE_KEY_APP_SETTINGS, value = response.toString(), updatedAtEpochMillis = now()))
+        snapshot
+    }
+
+    private suspend fun loadCachedAppSettings(): AppSettingsSnapshot? {
+        val cached = dao.getSetting(CACHE_KEY_APP_SETTINGS) ?: return null
+        return try {
+            parseAppSettings(JSONObject(cached.value))
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun queueAppSettingsUpdate(values: Map<String, Any?>) = withContext(Dispatchers.IO) {
+        val now = now()
+        val valuesJson = JSONObject()
+        values.forEach { (key, value) ->
+            when (value) {
+                null -> {}
+                is List<*> -> valuesJson.put(key, JSONArray(value.map { it.toString() }))
+                else -> valuesJson.put(key, value)
+            }
+        }
+        val payload = JSONObject().put("values", valuesJson).toString()
+        dao.enqueueSync(sync("settings_saved", "settings", "settings", now, payload))
+    }
+
+    private fun parseAppSettings(response: JSONObject): AppSettingsSnapshot? {
+        val sectionsJson = response.optJSONArray("sections") ?: return null
+        val sections = mutableListOf<SettingsSection>()
+        for (i in 0 until sectionsJson.length()) {
+            val sectionJson = sectionsJson.optJSONObject(i) ?: continue
+            val fieldsJson = sectionJson.optJSONArray("fields") ?: JSONArray()
+            val fields = mutableListOf<SettingField>()
+            for (j in 0 until fieldsJson.length()) {
+                val fieldJson = fieldsJson.optJSONObject(j) ?: continue
+                val type = SettingType.fromWire(fieldJson.optString("type"))
+                fields.add(
+                    SettingField(
+                        key = fieldJson.optString("key"),
+                        label = fieldJson.optString("label"),
+                        type = type,
+                        textValue = when (type) {
+                            SettingType.Number -> formatSettingNumber(fieldJson.optDouble("value", 0.0))
+                            SettingType.Text -> fieldJson.optString("value")
+                            else -> ""
+                        },
+                        boolValue = type == SettingType.Bool && fieldJson.optBoolean("value", false),
+                        listValue = if (type == SettingType.ListValue) {
+                            val arr = fieldJson.optJSONArray("value") ?: JSONArray()
+                            (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
+                        } else {
+                            emptyList()
+                        },
+                    )
+                )
+            }
+            sections.add(
+                SettingsSection(
+                    key = sectionJson.optString("key"),
+                    title = sectionJson.optString("title"),
+                    fields = fields,
+                )
+            )
+        }
+        return AppSettingsSnapshot(sections = sections)
+    }
+
+    private fun formatSettingNumber(value: Double): String {
+        return if (value == Math.floor(value) && !value.isInfinite()) {
+            value.toLong().toString()
+        } else {
+            value.toString()
+        }
     }
 
     suspend fun fetchFatigueCorrelation(serverUrl: String, apiKey: String, days: Int): FatigueCorrelationReport? = withContext(Dispatchers.IO) {
@@ -1136,6 +1222,8 @@ class HomeVisitRepository private constructor(
     private fun id(): String = UUID.randomUUID().toString()
 
     companion object {
+        private const val CACHE_KEY_APP_SETTINGS = "app_settings_cache"
+
         fun create(context: Context): HomeVisitRepository {
             return HomeVisitRepository(HomeVisitDatabase.getInstance(context))
         }

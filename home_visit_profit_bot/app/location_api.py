@@ -28,6 +28,7 @@ from app.services.mobile_api_service import MobileApiService
 from app.services.mobile_fatigue_service import MobileFatigueService
 from app.services.mobile_report_service import MobileReportService
 from app.services.mobile_visit_service import MobileVisitService, candidate_result_payload
+from app.services.settings_service import SettingsService
 
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,9 @@ def _handler_factory(config: AppConfig):
             if path == "/api/fatigue/cbi":
                 self._handle_fatigue_cbi_form()
                 return
+            if path == "/api/settings":
+                self._handle_settings_read()
+                return
             self._json_response({"error": "not_found"}, HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
@@ -118,6 +122,9 @@ def _handler_factory(config: AppConfig):
                 return
             if path == "/api/fatigue/cbi":
                 self._handle_fatigue_cbi_save()
+                return
+            if path == "/api/settings":
+                self._handle_settings_update()
                 return
             if path == "/driving":
                 self._handle_driving()
@@ -290,6 +297,27 @@ def _handler_factory(config: AppConfig):
                     "reason": result.reason,
                 }
             )
+
+        def _handle_settings_read(self) -> None:
+            if not _is_authorized(self, config.location_api.api_key):
+                self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            with connect(config.database_path) as connection:
+                result = SettingsService(connection).read()
+            self._json_response(result)
+
+        def _handle_settings_update(self) -> None:
+            if not _is_authorized(self, config.location_api.api_key):
+                self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                payload = self._read_json()
+                with connect(config.database_path) as connection:
+                    result = SettingsService(connection).update(payload)
+            except (ValueError, TypeError, json.JSONDecodeError) as error:
+                self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            self._json_response(result)
 
         def _handle_sync_conflicts(self) -> None:
             if not _is_authorized(self, config.location_api.api_key):

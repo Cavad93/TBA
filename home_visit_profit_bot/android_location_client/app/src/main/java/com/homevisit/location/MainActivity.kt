@@ -41,13 +41,16 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -63,6 +66,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.homevisit.location.domain.Clinic
 import com.homevisit.location.domain.ClinicReportRow
+import com.homevisit.location.domain.SettingField
+import com.homevisit.location.domain.SettingType
+import com.homevisit.location.domain.SettingsSection
 import com.homevisit.location.domain.EndDayDetails
 import com.homevisit.location.domain.ExpenseCategory
 import com.homevisit.location.domain.FatigueCorrelationCell
@@ -74,6 +80,7 @@ import com.homevisit.location.domain.ReportSummary
 import com.homevisit.location.domain.StopLabel
 import com.homevisit.location.domain.WorkDayStatus
 import com.homevisit.location.sync.SyncScheduler
+import com.homevisit.location.ui.AppSettingsUiState
 import com.homevisit.location.ui.CandidateUiState
 import com.homevisit.location.ui.FatigueUiState
 import com.homevisit.location.ui.GpsEstimateUiState
@@ -133,6 +140,8 @@ class MainActivity : ComponentActivity() {
                     onAddTelemed = viewModel::addTelemed,
                     onAddExpense = viewModel::addExpense,
                     onSync = viewModel::syncPending,
+                    onRefreshAppSettings = viewModel::refreshAppSettings,
+                    onSaveAppSettings = viewModel::saveAppSettings,
                 )
             }
         }
@@ -265,6 +274,8 @@ private data class WorkActions(
     val onAddOffice: (String, Double, Double, Clinic) -> Unit,
     val onAddTelemed: (Double, Double, Clinic) -> Unit,
     val onAddExpense: (ExpenseCategory, Double, String) -> Unit,
+    val onRefreshAppSettings: () -> Unit,
+    val onSaveAppSettings: (Map<String, Any?>) -> Unit,
 )
 
 @Composable
@@ -319,6 +330,8 @@ private fun HomeVisitApp(
     onAddTelemed: (Double, Double, Clinic) -> Unit,
     onAddExpense: (ExpenseCategory, Double, String) -> Unit,
     onSync: (String, String) -> Unit,
+    onRefreshAppSettings: (String, String) -> Unit,
+    onSaveAppSettings: (String, String, Map<String, Any?>) -> Unit,
 ) {
     var selected by rememberSaveable { mutableStateOf(AppDestination.Today) }
     var serverUrl by rememberSaveable { mutableStateOf(initialServerUrl) }
@@ -374,6 +387,8 @@ private fun HomeVisitApp(
         onAddOffice = onAddOffice,
         onAddTelemed = onAddTelemed,
         onAddExpense = onAddExpense,
+        onRefreshAppSettings = { onRefreshAppSettings(serverUrl, apiKey) },
+        onSaveAppSettings = { values -> onSaveAppSettings(serverUrl, apiKey, values) },
     )
     val syncNow = { onSync(serverUrl, apiKey) }
     LaunchedEffect(uiState.sync.backupJson) {
@@ -460,7 +475,7 @@ private fun AppScaffold(
                 AppDestination.Route -> RouteScreen(uiState, workActions, settingsState)
                 AppDestination.Reports -> ReportsScreen(uiState.report, workActions)
                 AppDestination.Fatigue -> FatigueScreen(uiState.fatigue, workActions)
-                AppDestination.Settings -> SettingsScreen(settingsState, uiState.sync, workActions, onSync)
+                AppDestination.Settings -> SettingsScreen(settingsState, uiState.sync, uiState.appSettings, workActions, onSync)
             }
         }
     }
@@ -1475,9 +1490,20 @@ private fun CorrelationRow(cell: FatigueCorrelationCell) {
 }
 
 @Composable
-private fun SettingsScreen(settingsState: GpsSettingsState, syncState: SyncUiState, workActions: WorkActions, onSync: () -> Unit) {
+private fun SettingsScreen(
+    settingsState: GpsSettingsState,
+    syncState: SyncUiState,
+    appSettings: AppSettingsUiState,
+    workActions: WorkActions,
+    onSync: () -> Unit,
+) {
     ScreenColumn {
         GpsSettingsCard(settingsState)
+        AppSettingsCard(
+            appSettings = appSettings,
+            onRefresh = workActions.onRefreshAppSettings,
+            onSave = workActions.onSaveAppSettings,
+        )
         SyncControlCard(
             syncState = syncState,
             onSync = onSync,
@@ -1488,9 +1514,168 @@ private fun SettingsScreen(settingsState: GpsSettingsState, syncState: SyncUiSta
         )
         CompactCard(
             title = "Что здесь важно",
-            body = "URL сервера и API ключ нужны для расчёта маршрутов, отчётов, усталости и синхронизации. Экспорт/импорт JSON помогает перенести локальные данные без Telegram.",
+            body = "URL сервера и API ключ нужны для расчёта маршрутов, отчётов, усталости и синхронизации. Настройки экономики, авто, клиник и районов теперь редактируются здесь и уходят на сервер без Telegram.",
         )
     }
+}
+
+@Composable
+private fun AppSettingsCard(
+    appSettings: AppSettingsUiState,
+    onRefresh: () -> Unit,
+    onSave: (Map<String, Any?>) -> Unit,
+) {
+    val snapshot = appSettings.snapshot
+    // Локальное редактируемое состояние, пересобирается при новой загрузке с сервера.
+    val textEdits = remember(snapshot) { mutableStateMapOf<String, String>() }
+    val boolEdits = remember(snapshot) { mutableStateMapOf<String, Boolean>() }
+    LaunchedEffect(snapshot) {
+        if (snapshot != null) {
+            textEdits.clear()
+            boolEdits.clear()
+            snapshot.sections.forEach { section ->
+                section.fields.forEach { field ->
+                    when (field.type) {
+                        SettingType.Bool -> boolEdits[field.key] = field.boolValue
+                        SettingType.ListValue -> textEdits[field.key] = field.listValue.joinToString(", ")
+                        else -> textEdits[field.key] = field.textValue
+                    }
+                }
+            }
+        }
+    }
+
+    Card(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("Настройки приложения", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Экономика, авто, клиники, базовые районы, маршрутизация, GPS и усталость. Значения хранятся на сервере и применяются к расчётам.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (appSettings.message.isNotBlank()) {
+                Text(appSettings.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            if (snapshot == null) {
+                Button(modifier = Modifier.fillMaxWidth(), enabled = !appSettings.isLoading, onClick = onRefresh) {
+                    Text(if (appSettings.isLoading) "Загружаю..." else "Загрузить настройки")
+                }
+            } else {
+                snapshot.sections.forEach { section ->
+                    AppSettingsSection(section = section, textEdits = textEdits, boolEdits = boolEdits)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        enabled = !appSettings.isLoading,
+                        onClick = { onSave(collectSettingsChanges(snapshot.sections, textEdits, boolEdits)) },
+                    ) {
+                        Text(if (appSettings.isLoading) "Сохраняю..." else "Сохранить настройки")
+                    }
+                    OutlinedButton(modifier = Modifier.width(132.dp), enabled = !appSettings.isLoading, onClick = onRefresh) {
+                        Text("Обновить")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppSettingsSection(
+    section: SettingsSection,
+    textEdits: MutableMap<String, String>,
+    boolEdits: MutableMap<String, Boolean>,
+) {
+    SectionHeader(section.title)
+    section.fields.forEach { field ->
+        when (field.type) {
+            SettingType.Bool -> {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(field.label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = boolEdits[field.key] ?: field.boolValue,
+                        onCheckedChange = { boolEdits[field.key] = it },
+                    )
+                }
+            }
+            SettingType.Number -> {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = textEdits[field.key] ?: field.textValue,
+                    onValueChange = { textEdits[field.key] = it },
+                    singleLine = true,
+                    label = { Text(field.label) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+            }
+            SettingType.ListValue -> {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = textEdits[field.key] ?: field.listValue.joinToString(", "),
+                    onValueChange = { textEdits[field.key] = it },
+                    singleLine = false,
+                    label = { Text("${field.label} (через запятую)") },
+                )
+            }
+            else -> {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = textEdits[field.key] ?: field.textValue,
+                    onValueChange = { textEdits[field.key] = it },
+                    singleLine = true,
+                    label = { Text(field.label) },
+                )
+            }
+        }
+    }
+}
+
+/** Собрать только изменённые поля в payload для `/api/settings`. */
+private fun collectSettingsChanges(
+    sections: List<SettingsSection>,
+    textEdits: Map<String, String>,
+    boolEdits: Map<String, Boolean>,
+): Map<String, Any?> {
+    val changes = mutableMapOf<String, Any?>()
+    sections.forEach { section ->
+        section.fields.forEach { field ->
+            when (field.type) {
+                SettingType.Bool -> {
+                    val edited = boolEdits[field.key] ?: field.boolValue
+                    if (edited != field.boolValue) changes[field.key] = edited
+                }
+                SettingType.Number -> {
+                    val edited = (textEdits[field.key] ?: field.textValue).trim()
+                    val number = edited.replace(',', '.').toDoubleOrNull()
+                    if (number != null && edited != field.textValue) changes[field.key] = number
+                }
+                SettingType.ListValue -> {
+                    val editedRaw = textEdits[field.key] ?: field.listValue.joinToString(", ")
+                    val editedList = editedRaw.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                    if (editedList != field.listValue) changes[field.key] = editedList
+                }
+                else -> {
+                    val edited = (textEdits[field.key] ?: field.textValue).trim()
+                    if (edited.isNotEmpty() && edited != field.textValue) changes[field.key] = edited
+                }
+            }
+        }
+    }
+    return changes
 }
 
 @Composable

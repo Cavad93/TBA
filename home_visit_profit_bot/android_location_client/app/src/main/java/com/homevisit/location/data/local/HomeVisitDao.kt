@@ -58,6 +58,9 @@ interface HomeVisitDao {
     @Query("SELECT * FROM settings ORDER BY key ASC")
     suspend fun getAllSettings(): List<SettingEntity>
 
+    @Query("SELECT * FROM settings WHERE key = :key LIMIT 1")
+    suspend fun getSetting(key: String): SettingEntity?
+
     @Query("SELECT * FROM sync_queue ORDER BY createdAtEpochMillis ASC")
     suspend fun getAllSyncQueue(): List<SyncQueueEntity>
 

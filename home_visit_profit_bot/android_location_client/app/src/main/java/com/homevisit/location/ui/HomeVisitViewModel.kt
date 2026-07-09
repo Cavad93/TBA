@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.homevisit.location.data.HomeVisitRepository
+import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.CandidateEstimate
 import com.homevisit.location.domain.Clinic
 import com.homevisit.location.domain.EndDayDetails
@@ -40,6 +41,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     private val gpsHintState = MutableStateFlow(GpsHintUiState())
     private val reportState = MutableStateFlow(ReportUiState())
     private val fatigueState = MutableStateFlow(FatigueUiState())
+    private val appSettingsState = MutableStateFlow(AppSettingsUiState())
     private val syncMessageState = MutableStateFlow("")
     private val backupExportState = MutableStateFlow<String?>(null)
     private val syncConflictState = MutableStateFlow<List<SyncConflict>>(emptyList())
@@ -94,7 +96,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         OperationalUiState(route, gpsEstimate, gpsHint, report, fatigue)
     }
 
-    val uiState: StateFlow<HomeVisitUiState> = combine(dayState, candidateState, operationalState, syncState) { day, candidate, operational, sync ->
+    val uiState: StateFlow<HomeVisitUiState> = combine(dayState, candidateState, operationalState, syncState, appSettingsState) { day, candidate, operational, sync, appSettings ->
         day.copy(
             candidate = candidate,
             serverRoute = operational.route,
@@ -103,6 +105,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             report = operational.report,
             fatigue = operational.fatigue,
             sync = sync,
+            appSettings = appSettings,
         )
     }
         .stateIn(
@@ -507,6 +510,46 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun refreshAppSettings(serverUrl: String, apiKey: String) {
+        viewModelScope.launch {
+            if (serverUrl.isBlank() || apiKey.isBlank()) {
+                appSettingsState.update { it.copy(message = "Заполните URL сервера и API ключ") }
+                return@launch
+            }
+            appSettingsState.update { it.copy(isLoading = true, message = "Загружаю настройки...") }
+            val snapshot = repository.fetchAppSettings(serverUrl, apiKey)
+            appSettingsState.value = if (snapshot == null) {
+                AppSettingsUiState(message = "Не удалось получить настройки")
+            } else {
+                AppSettingsUiState(snapshot = snapshot, message = "Настройки обновлены")
+            }
+        }
+    }
+
+    fun saveAppSettings(serverUrl: String, apiKey: String, values: Map<String, Any?>) {
+        viewModelScope.launch {
+            if (values.isEmpty()) {
+                appSettingsState.update { it.copy(message = "Нет изменений для сохранения") }
+                return@launch
+            }
+            appSettingsState.update { it.copy(isLoading = true, message = "Сохраняю настройки...") }
+            repository.queueAppSettingsUpdate(values)
+            if (serverUrl.isBlank() || apiKey.isBlank()) {
+                appSettingsState.update {
+                    it.copy(isLoading = false, message = "Настройки поставлены в очередь. Заполните URL/ключ для синхронизации.")
+                }
+                return@launch
+            }
+            repository.syncPending(serverUrl, apiKey)
+            val snapshot = repository.fetchAppSettings(serverUrl, apiKey)
+            appSettingsState.value = if (snapshot == null) {
+                appSettingsState.value.copy(isLoading = false, message = "Настройки отправлены, но не удалось обновить экран")
+            } else {
+                AppSettingsUiState(snapshot = snapshot, message = "Настройки сохранены")
+            }
+        }
+    }
+
     private suspend fun refreshRouteInternal(serverUrl: String, apiKey: String) {
         if (serverUrl.isBlank() || apiKey.isBlank()) {
             routeState.value = RouteUiState(message = "Заполните URL сервера и API ключ")
@@ -555,6 +598,7 @@ data class HomeVisitUiState(
     val report: ReportUiState = ReportUiState(),
     val fatigue: FatigueUiState = FatigueUiState(),
     val sync: SyncUiState = SyncUiState(),
+    val appSettings: AppSettingsUiState = AppSettingsUiState(),
 ) {
     val netIncome: Double
         get() = grossIncome - expensesAmount
@@ -631,4 +675,10 @@ data class SyncUiState(
     val message: String = "",
     val backupJson: String? = null,
     val conflicts: List<SyncConflict> = emptyList(),
+)
+
+data class AppSettingsUiState(
+    val isLoading: Boolean = false,
+    val snapshot: AppSettingsSnapshot? = null,
+    val message: String = "",
 )
