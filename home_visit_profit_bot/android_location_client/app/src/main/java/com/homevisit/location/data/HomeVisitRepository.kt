@@ -1138,8 +1138,8 @@ class HomeVisitRepository private constructor(
                 FatigueCorrelationCell(
                     feature = cell.optString("feature"),
                     target = cell.optString("target"),
-                    pearson = nullableDouble(cell, "pearson"),
-                    spearman = nullableDouble(cell, "spearman"),
+                    pearson = cell.nullableDouble("pearson"),
+                    spearman = cell.nullableDouble("spearman"),
                     n = cell.optInt("n", 0),
                 )
             )
@@ -1149,13 +1149,6 @@ class HomeVisitRepository private constructor(
             rowsUsed = response.optInt("rows_used", 0),
             cells = cells,
         )
-    }
-
-    private fun nullableDouble(json: JSONObject, key: String): Double? {
-        if (json.isNull(key)) {
-            return null
-        }
-        return json.optDouble(key)
     }
 
     private fun normalizeSyncUrl(value: String): String {
