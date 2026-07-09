@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+# Начальный список клиник живёт в конфигурации (config.yaml), а не в бизнес-логике.
+# Это лишь seed: во время работы список полностью редактируется через настройки
+# (ключи `clinics` / `telemed_clinics`) и может содержать любое число клиник.
+_DEFAULT_CLINICS = ["Династия", "ПСК", "ВИТАМЕД", "ДНД"]
+_DEFAULT_TELEMED_CLINICS = ["ПСК", "ДНД"]
 
 import yaml
 from dotenv import load_dotenv
@@ -44,6 +51,8 @@ class GeoConfig:
     base_districts: list[str]
     nominatim_url: str
     user_agent: str
+    clinics: list[str] = field(default_factory=lambda: list(_DEFAULT_CLINICS))
+    telemed_clinics: list[str] = field(default_factory=lambda: list(_DEFAULT_TELEMED_CLINICS))
 
 
 @dataclass(frozen=True)
@@ -121,6 +130,8 @@ def load_config(project_dir: Path | None = None) -> AppConfig:
             base_districts=list(raw.get("geo", {}).get("base_districts", [])),
             nominatim_url=str(raw.get("geo", {}).get("nominatim_url", "https://nominatim.openstreetmap.org")),
             user_agent=str(raw.get("geo", {}).get("user_agent", "home-visit-profit-bot/1.0")),
+            clinics=[str(item).strip() for item in raw.get("geo", {}).get("clinics", _DEFAULT_CLINICS) if str(item).strip()],
+            telemed_clinics=[str(item).strip() for item in raw.get("geo", {}).get("telemed_clinics", _DEFAULT_TELEMED_CLINICS) if str(item).strip()],
         ),
         routing=RoutingConfig(
             osrm_url=str(raw.get("routing", {}).get("osrm_url", "https://router.project-osrm.org")),

@@ -15,13 +15,16 @@ from app.config import (
 from app.db import connect, init_db
 from app.services.mobile_api_service import MobileApiService
 from app.services.settings_service import (
-    DEFAULT_CLINICS,
-    DEFAULT_TELEMED_CLINICS,
     SettingsService,
     allowed_clinics,
     allowed_telemed_clinics,
 )
 from app.repositories import SettingsRepository
+
+
+# Клиники сеедятся init_db из config.geo (дефолт config.py).
+SEEDED_CLINICS = ["Династия", "ПСК", "ВИТАМЕД", "ДНД"]
+SEEDED_TELEMED_CLINICS = ["ПСК", "ДНД"]
 
 
 def _config(tmp_path):
@@ -55,8 +58,8 @@ def test_read_returns_defaults_on_empty_db(tmp_path) -> None:
     assert result["ok"] is True
     assert _field(result, "min_hourly_income")["value"] == 600
     assert _field(result, "fatigue_enabled")["value"] is True
-    # clinics/telemed_clinics не засеваются init_db, поэтому берутся из каталога
-    assert _field(result, "clinics")["value"] == DEFAULT_CLINICS
+    # clinics/telemed_clinics сеедятся init_db из config.geo
+    assert _field(result, "clinics")["value"] == SEEDED_CLINICS
     assert _field(result, "base_districts")["value"] == []
     # osrm_url засевается из config (в тестовом конфиге пустой), но каталожный default известен
     assert _field(result, "osrm_url")["default"] == "https://router.project-osrm.org"
@@ -127,8 +130,8 @@ def test_clinic_helpers_follow_settings(tmp_path) -> None:
     init_db(config)
     with connect(config.database_path) as connection:
         settings = SettingsRepository(connection)
-        assert allowed_clinics(settings) == set(DEFAULT_CLINICS)
-        assert allowed_telemed_clinics(settings) == set(DEFAULT_TELEMED_CLINICS)
+        assert allowed_clinics(settings) == set(SEEDED_CLINICS)
+        assert allowed_telemed_clinics(settings) == set(SEEDED_TELEMED_CLINICS)
 
         SettingsService(connection).update(
             {"clinics": ["Альфа", "Бета"], "telemed_clinics": ["Альфа"]}

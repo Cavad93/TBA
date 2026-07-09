@@ -16,8 +16,9 @@ from typing import Any
 from app.repositories import SettingsRepository
 
 
-DEFAULT_CLINICS: list[str] = ["Династия", "ПСК", "ВИТАМЕД", "ДНД"]
-DEFAULT_TELEMED_CLINICS: list[str] = ["ПСК", "ДНД"]
+# Имена клиник не захардкожены: список полностью задаётся настройками
+# (ключи `clinics` / `telemed_clinics`), которые сеедятся из config.yaml при
+# инициализации БД и дальше редактируются пользователем. Число клиник любое.
 
 _TRUE_VALUES = {"true", "1", "yes", "on", "да"}
 _FALSE_VALUES = {"false", "0", "no", "off", "нет"}
@@ -60,9 +61,9 @@ SETTINGS_CATALOG: list[SettingField] = [
     SettingField("home_address", "addresses", "Дом", "text", "Дом"),
     SettingField("default_start_address", "addresses", "Старт по умолчанию", "text", "Дом"),
     SettingField("default_finish_address", "addresses", "Финиш по умолчанию", "text", "Дом"),
-    # Клиники
-    SettingField("clinics", "clinics", "Клиники", "list", list(DEFAULT_CLINICS)),
-    SettingField("telemed_clinics", "clinics", "Клиники телемедицины", "list", list(DEFAULT_TELEMED_CLINICS)),
+    # Клиники (значения сеедятся из config.yaml, дальше редактируются пользователем)
+    SettingField("clinics", "clinics", "Клиники", "list", []),
+    SettingField("telemed_clinics", "clinics", "Клиники телемедицины", "list", []),
     # Базовые районы
     SettingField("base_districts", "districts", "Базовые районы", "list", []),
     # Маршрутизация и OSRM
@@ -153,19 +154,11 @@ def _coerce(field: SettingField, value: Any) -> str:
 
 
 def allowed_clinics(settings: SettingsRepository) -> set[str]:
-    raw = settings.get("clinics")
-    if raw is None:
-        return set(DEFAULT_CLINICS)
-    parsed = _parse_list(raw)
-    return set(parsed) if parsed else set(DEFAULT_CLINICS)
+    return set(_parse_list(settings.get("clinics") or ""))
 
 
 def allowed_telemed_clinics(settings: SettingsRepository) -> set[str]:
-    raw = settings.get("telemed_clinics")
-    if raw is None:
-        return set(DEFAULT_TELEMED_CLINICS)
-    parsed = _parse_list(raw)
-    return set(parsed) if parsed else set(DEFAULT_TELEMED_CLINICS)
+    return set(_parse_list(settings.get("telemed_clinics") or ""))
 
 
 class SettingsService:

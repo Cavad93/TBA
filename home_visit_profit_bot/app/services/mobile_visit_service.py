@@ -25,7 +25,7 @@ from app.services.routing_service import RoutingError
 from app.services.settings_service import allowed_clinics
 
 
-VALID_CLINICS = {"Династия", "ПСК", "ВИТАМЕД", "ДНД"}
+# Допустимые клиники читаются из настроек (allowed_clinics), не из константы.
 STOP_LABELS = {"pause", "waiting", "normal", "heavy", "conflict"}
 
 

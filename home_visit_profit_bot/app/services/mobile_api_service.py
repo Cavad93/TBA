@@ -25,8 +25,8 @@ from app.services.settings_service import (
 from app.services.stats_service import finalize_day
 
 
-VALID_CLINICS = {"Династия", "ПСК", "ВИТАМЕД", "ДНД"}
-TELEMED_CLINICS = {"ПСК", "ДНД"}
+# Допустимые клиники не захардкожены — читаются из настроек через
+# allowed_clinics()/allowed_telemed_clinics() (см. settings_service).
 
 EXPENSE_FIELD_BY_CATEGORY = {
     "Еда": "food_meal_expenses",

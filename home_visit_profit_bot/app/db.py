@@ -433,6 +433,8 @@ def _seed_settings(connection: sqlite3.Connection, config: AppConfig) -> None:
         "fatigue_learning_enabled": "true",
         "fatigue_learning_weights_json": "{}",
         "base_districts": ", ".join(config.geo.base_districts),
+        "clinics": ", ".join(config.geo.clinics),
+        "telemed_clinics": ", ".join(config.geo.telemed_clinics),
         "default_avg_speed_kmh": str(config.defaults.avg_speed_kmh),
         "default_service_minutes": str(config.defaults.service_minutes),
         "default_telemed_minutes": str(config.defaults.telemed_minutes),
