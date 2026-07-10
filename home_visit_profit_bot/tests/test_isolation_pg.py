@@ -18,7 +18,7 @@ from app.config import (
     LocationApiConfig, RouteConfig, RoutingConfig,
 )
 from app.database import current_user_id
-from app.db import connect, init_db
+from app.db import ISOLATED_TABLES, connect, init_db, rls_enforcement_status
 from app.repositories import SettingsRepository, VisitRepository, WorkDayRepository
 from app.services import auth_service as auth_service_module
 from app.services.auth_service import AuthService
@@ -143,6 +143,122 @@ def test_rls_isolates_settings(monkeypatch) -> None:
         current_user_id.set(user_a)
         with connect(config) as conn:
             assert SettingsRepository(conn).get("car_cost_per_km") == "999"
+    finally:
+        current_user_id.set(None)
+
+
+def _seed_two_users(monkeypatch, prefix: str) -> tuple[object, int, int]:
+    monkeypatch.setattr(auth_service_module, "send_code", lambda *a, **k: None)
+    monkeypatch.setattr(auth, "new_numeric_code", lambda digits=6: "123456")
+    config = _config()
+    _reset_and_init(config)
+    return config, _make_user(config, f"{prefix}a@x.com"), _make_user(config, f"{prefix}b@x.com")
+
+
+def test_role_is_not_superuser_or_bypassrls(monkeypatch) -> None:
+    """#1 footgun: под superuser/BYPASSRLS политики молча игнорируются."""
+    config, _, _ = _seed_two_users(monkeypatch, "role")
+    with connect(config) as conn:
+        status = rls_enforcement_status(conn)
+    assert status["role_safe"], f"роль приложения обходит RLS: {status['issues']}"
+    assert status["enforced"], f"RLS не в полной силе: {status['issues']}"
+
+
+def test_all_isolated_tables_force_rls_and_have_policy(monkeypatch) -> None:
+    """Каждая пользовательская таблица: ENABLE + FORCE RLS + политика изоляции."""
+    config, _, _ = _seed_two_users(monkeypatch, "force")
+    with connect(config) as conn:
+        for table in ISOLATED_TABLES:
+            r = conn.execute(
+                "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = ?",
+                (table,),
+            ).fetchone()
+            assert r and r["relrowsecurity"], f"{table}: RLS не включён"
+            assert r["relforcerowsecurity"], f"{table}: RLS не FORCED (владелец обойдёт)"
+            pol = conn.execute(
+                "SELECT qual, with_check FROM pg_policies WHERE tablename = ? AND policyname = ?",
+                (table, f"{table}_isolation"),
+            ).fetchone()
+            assert pol, f"{table}: нет политики изоляции"
+            assert pol["with_check"], f"{table}: нет WITH CHECK (можно вставить чужую строку)"
+
+
+def test_fail_closed_when_user_unset(monkeypatch) -> None:
+    """Если app.user_id не задан — запрос возвращает 0 строк, а не все (fail-closed)."""
+    config, user_a, _ = _seed_two_users(monkeypatch, "closed")
+    try:
+        current_user_id.set(user_a)
+        with connect(config) as conn:
+            WorkDayRepository(conn).create("Дом", "Дом", 30, 20)
+        # Без пользователя (GUC не установлен) — не должно быть видно НИЧЕГО.
+        current_user_id.set(None)
+        with connect(config) as conn:
+            c = conn.execute("SELECT count(*) AS c FROM work_days").fetchone()["c"]
+            assert c == 0, f"без пользователя видно {c} чужих строк — это утечка!"
+    finally:
+        current_user_id.set(None)
+
+
+def test_with_check_blocks_insert_for_other_user(monkeypatch) -> None:
+    """B не может вставить строку с чужим user_id (WITH CHECK)."""
+    import psycopg
+    config, user_a, user_b = _seed_two_users(monkeypatch, "ins")
+    try:
+        current_user_id.set(user_b)
+        with connect(config) as conn:
+            with pytest.raises(psycopg.Error):
+                conn.execute(
+                    "INSERT INTO settings(user_id, key, value) VALUES(?, ?, ?)",
+                    (user_a, "hack", "1"),
+                )
+                conn.commit()
+    finally:
+        current_user_id.set(None)
+
+
+def test_with_check_blocks_moving_row_to_other_user(monkeypatch) -> None:
+    """A не может «подарить» свою строку пользователю B через UPDATE user_id."""
+    import psycopg
+    config, user_a, user_b = _seed_two_users(monkeypatch, "move")
+    try:
+        current_user_id.set(user_a)
+        with connect(config) as conn:
+            SettingsRepository(conn).set("car_cost_per_km", "1")
+            with pytest.raises(psycopg.Error):
+                conn.execute("UPDATE settings SET user_id = ? WHERE key = ?", (user_b, "car_cost_per_km"))
+                conn.commit()
+    finally:
+        current_user_id.set(None)
+
+
+def test_default_injects_current_user(monkeypatch) -> None:
+    """Вставка без user_id проставляет user_id текущего пользователя (DEFAULT из GUC)."""
+    config, user_a, _ = _seed_two_users(monkeypatch, "def")
+    try:
+        current_user_id.set(user_a)
+        with connect(config) as conn:
+            conn.execute("INSERT INTO settings(key, value) VALUES(?, ?)", ("marker", "1"))
+            row = conn.execute("SELECT user_id FROM settings WHERE key = 'marker'").fetchone()
+            assert row["user_id"] == user_a
+    finally:
+        current_user_id.set(None)
+
+
+def test_fresh_connection_does_not_inherit_previous_user(monkeypatch) -> None:
+    """Новое соединение без установленного пользователя не наследует контекст (анти-leak)."""
+    config, user_a, user_b = _seed_two_users(monkeypatch, "leak")
+    try:
+        current_user_id.set(user_a)
+        with connect(config) as conn:
+            WorkDayRepository(conn).create("A-день", "A", 30, 20)
+        # Эмулируем «следующий запрос забыл выставить пользователя».
+        current_user_id.set(None)
+        with connect(config) as conn:
+            assert conn.execute("SELECT count(*) AS c FROM work_days").fetchone()["c"] == 0
+        # А корректный B видит только своё (пусто).
+        current_user_id.set(user_b)
+        with connect(config) as conn:
+            assert conn.execute("SELECT count(*) AS c FROM work_days").fetchone()["c"] == 0
     finally:
         current_user_id.set(None)
 

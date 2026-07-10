@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import logging
+import os
 import re
 
 from app.config import AppConfig
 from app.database import Database, connect
+
+logger = logging.getLogger(__name__)
+
+
+class RlsRoleError(RuntimeError):
+    """Роль БД обходит RLS (superuser/BYPASSRLS) — изоляция ПДн под угрозой."""
 
 
 SCHEMA = """
@@ -398,10 +406,62 @@ def init_db(config: AppConfig) -> None:
         _apply_schema(db)
         _ensure_columns(db)
         _ensure_isolation(db)
+        _verify_isolation_or_die(db)
         # На SQLite настройки сидятся сразу (одно-пользовательский режим, user_id=0).
         # На PostgreSQL — per-user при регистрации (seed_default_settings с app.user_id).
         if db.dialect != "postgres":
             seed_default_settings(db, config)
+
+
+def rls_enforcement_status(db: Database) -> dict:
+    """Диагностика изоляции ПДн (PostgreSQL).
+
+    Проверяет два фатальных условия из research по RLS:
+    1) роль приложения НЕ superuser и НЕ имеет BYPASSRLS (иначе RLS игнорируется);
+    2) на каждой изолированной таблице включён И forced RLS + есть политика.
+    """
+    if db.dialect != "postgres":
+        return {"dialect": "sqlite", "role_safe": True, "enforced": True, "issues": []}
+    issues: list[str] = []
+    role = db.execute(
+        "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
+    ).fetchone()
+    role_safe = bool(role) and not role["rolsuper"] and not role["rolbypassrls"]
+    if role and role["rolsuper"]:
+        issues.append(f"роль {role['rolname']} — SUPERUSER: RLS не применяется")
+    if role and role["rolbypassrls"]:
+        issues.append(f"роль {role['rolname']} имеет BYPASSRLS: RLS не применяется")
+    for table in ISOLATED_TABLES:
+        r = db.execute(
+            "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = ?",
+            (table,),
+        ).fetchone()
+        if not r or not r["relrowsecurity"] or not r["relforcerowsecurity"]:
+            issues.append(f"{table}: RLS не включён/не forced")
+        pol = db.execute(
+            "SELECT 1 FROM pg_policies WHERE tablename = ? AND policyname = ?",
+            (table, f"{table}_isolation"),
+        ).fetchone()
+        if not pol:
+            issues.append(f"{table}: нет политики изоляции")
+    return {"dialect": "postgres", "role_safe": role_safe, "enforced": role_safe and not issues, "issues": issues}
+
+
+def _verify_isolation_or_die(db: Database) -> None:
+    """Отказаться работать, если роль обходит RLS. Лучше упасть, чем утечь ПДн.
+
+    Аварийный обход: ALLOW_RLS_BYPASS_ROLE=1 (только для осознанной отладки).
+    """
+    if db.dialect != "postgres":
+        return
+    status = rls_enforcement_status(db)
+    if not status["role_safe"]:
+        message = "КРИТИЧНО: изоляция ПДн отключена — " + "; ".join(status["issues"])
+        logger.critical(message)
+        if os.getenv("ALLOW_RLS_BYPASS_ROLE") != "1":
+            raise RlsRoleError(message)
+    elif status["issues"]:
+        logger.error("RLS-замечания (изоляция ослаблена): %s", "; ".join(status["issues"]))
 
 
 def _ensure_isolation(db: Database) -> None:

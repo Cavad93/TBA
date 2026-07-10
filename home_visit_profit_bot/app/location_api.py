@@ -695,9 +695,10 @@ def _current_nickname(connection: Any) -> str | None:
 def _authorize_request(handler: BaseHTTPRequestHandler, config: AppConfig) -> bool:
     """Определить пользователя запроса и включить его для изоляции данных (RLS).
 
-    Токен Bearer — это либо персональный токен сессии (аккаунт), либо старый общий
-    LOCATION_API_KEY (тогда используем аккаунт-владельца). Установленный
-    current_user_id применит connect() ко всем последующим соединениям запроса.
+    Токен Bearer — ТОЛЬКО персональный токен сессии (аккаунт). Общий
+    LOCATION_API_KEY больше не принимается: раньше он мапился на аккаунт-владельца
+    и был обходным путём мимо изоляции — удалён ради безопасности ПДн (152-ФЗ).
+    Установленный current_user_id применит connect() ко всем соединениям запроса.
     """
     header = handler.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
@@ -707,25 +708,11 @@ def _authorize_request(handler: BaseHTTPRequestHandler, config: AppConfig) -> bo
         return False
 
     with connect(config) as connection:
-        user_id = _resolve_user(connection, config, token)
+        user_id = AuthService(connection, config).authenticate(token)
     if user_id is None:
         return False
     current_user_id.set(user_id)
     return True
-
-
-LEGACY_OWNER_EMAIL = "owner@vizitorkrut.ru"
-
-
-def _resolve_user(connection: Any, config: AppConfig, token: str) -> int | None:
-    # Старый общий ключ приложения -> аккаунт-владелец (обратная совместимость).
-    if config.location_api.api_key and token == config.location_api.api_key:
-        row = connection.execute(
-            "SELECT id FROM users WHERE email = ?", (LEGACY_OWNER_EMAIL,)
-        ).fetchone()
-        return int(row["id"]) if row else None
-    # Иначе — персональный токен сессии.
-    return AuthService(connection, config).authenticate(token)
 
 
 def _day_payload(day: Any) -> dict[str, Any] | None:
