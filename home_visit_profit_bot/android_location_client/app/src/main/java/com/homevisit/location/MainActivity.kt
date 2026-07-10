@@ -148,8 +148,7 @@ class MainActivity : ComponentActivity() {
                             sessionToken = token
                         },
                     )
-                    return@HomeVisitTheme
-                }
+                } else {
                 val viewModel: HomeVisitViewModel = viewModel()
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 // Персист выбранного пресета источника заказов при его смене.
@@ -204,6 +203,7 @@ class MainActivity : ComponentActivity() {
                     onSaveAppSettings = viewModel::saveAppSettings,
                     onRefreshClinics = viewModel::refreshClinics,
                 )
+                }
             }
         }
     }
@@ -2772,7 +2772,7 @@ private fun GpsSettingsCard(settingsState: GpsSettingsState) {
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 label = { Text("URL сервера") },
-                placeholder = { Text(DEFAULT_SERVER_URL) },
+                placeholder = { Text(MainActivity.DEFAULT_SERVER_URL) },
             )
             OutlinedTextField(
                 value = settingsState.intervalSeconds,
