@@ -31,7 +31,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -61,6 +63,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -85,7 +88,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.homevisit.location.data.HomeVisitRepository
+import com.homevisit.location.domain.AuthUser
+import com.homevisit.location.ui.AuthFlow
+import com.homevisit.location.ui.AuthViewModel
 import com.homevisit.location.domain.ClinicReportRow
 import com.homevisit.location.domain.SettingField
 import com.homevisit.location.domain.SettingType
@@ -115,6 +123,7 @@ import com.homevisit.location.ui.RouteUiState
 import com.homevisit.location.ui.RouteVisitUi
 import com.homevisit.location.ui.SyncUiState
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var prefs: SharedPreferences
@@ -126,6 +135,21 @@ class MainActivity : ComponentActivity() {
         SyncScheduler.schedule(this)
         setContent {
             HomeVisitTheme {
+                var sessionToken by rememberSaveable {
+                    mutableStateOf(prefs.getString(KEY_SESSION_TOKEN, "").orEmpty())
+                }
+                if (sessionToken.isBlank()) {
+                    val authViewModel: AuthViewModel = viewModel()
+                    authViewModel.serverUrl = DEFAULT_SERVER_URL
+                    AuthFlow(
+                        viewModel = authViewModel,
+                        onAuthenticated = { token, user ->
+                            persistSession(token, user)
+                            sessionToken = token
+                        },
+                    )
+                    return@HomeVisitTheme
+                }
                 val viewModel: HomeVisitViewModel = viewModel()
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 // Персист выбранного пресета источника заказов при его смене.
@@ -134,9 +158,13 @@ class MainActivity : ComponentActivity() {
                 }
                 HomeVisitApp(
                     uiState = uiState,
-                    initialServerUrl = prefs.getString(KEY_SERVER_URL, "").orEmpty(),
-                    initialApiKey = prefs.getString(KEY_API_KEY, "").orEmpty(),
+                    initialServerUrl = prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL).orEmpty(),
+                    initialApiKey = sessionToken,
                     initialInterval = prefs.getInt(KEY_INTERVAL_SECONDS, 60).toString(),
+                    accountEmail = prefs.getString(KEY_USER_EMAIL, "").orEmpty(),
+                    accountNickname = prefs.getString(KEY_USER_NICKNAME, "").orEmpty(),
+                    onLogout = { signOut(sessionToken) { sessionToken = "" } },
+                    onDeleteAccount = { deleteAccountAndSignOut(sessionToken) { sessionToken = "" } },
                     onSaveSettings = ::saveSettings,
                     onStartGps = ::startTracking,
                     onStopGps = ::stopTracking,
@@ -219,6 +247,53 @@ class MainActivity : ComponentActivity() {
         Toast.makeText(this, "Отправка GPS остановлена", Toast.LENGTH_SHORT).show()
     }
 
+    /** Сохраняет токен сессии как Bearer для всех запросов + данные аккаунта. */
+    private fun persistSession(token: String, user: AuthUser?) {
+        prefs.edit()
+            .putString(KEY_SESSION_TOKEN, token)
+            .putString(KEY_API_KEY, token)
+            .putString(KEY_SERVER_URL, DEFAULT_SERVER_URL)
+            .putString(KEY_USER_EMAIL, user?.email.orEmpty())
+            .putString(KEY_USER_NICKNAME, user?.nickname.orEmpty())
+            .apply()
+    }
+
+    private fun clearSession() {
+        prefs.edit()
+            .remove(KEY_SESSION_TOKEN)
+            .remove(KEY_API_KEY)
+            .remove(KEY_USER_EMAIL)
+            .remove(KEY_USER_NICKNAME)
+            .apply()
+    }
+
+    /** Выход: гасит GPS, отзывает сессию на сервере (best-effort), чистит prefs. */
+    private fun signOut(token: String, onSignedOut: () -> Unit) {
+        stopTracking()
+        lifecycleScope.launch {
+            runCatching { HomeVisitRepository.create(applicationContext).logout(DEFAULT_SERVER_URL, token) }
+            clearSession()
+            onSignedOut()
+        }
+    }
+
+    /** Удаление аккаунта: только при успехе на сервере чистим prefs и выходим. */
+    private fun deleteAccountAndSignOut(token: String, onSignedOut: () -> Unit) {
+        lifecycleScope.launch {
+            val ok = runCatching {
+                HomeVisitRepository.create(applicationContext).deleteAccount(DEFAULT_SERVER_URL, token)
+            }.getOrDefault(false)
+            if (ok) {
+                stopTracking()
+                clearSession()
+                Toast.makeText(this@MainActivity, "Аккаунт и данные удалены", Toast.LENGTH_LONG).show()
+                onSignedOut()
+            } else {
+                Toast.makeText(this@MainActivity, "Не удалось удалить аккаунт. Проверьте интернет.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     private fun hasRequiredPermissions(): Boolean {
         val locationGranted = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val notificationsGranted = Build.VERSION.SDK_INT < 33 ||
@@ -250,6 +325,10 @@ class MainActivity : ComponentActivity() {
         const val KEY_API_KEY = "api_key"
         const val KEY_INTERVAL_SECONDS = "interval_seconds"
         const val KEY_ORDER_SOURCE = "order_source"
+        const val KEY_SESSION_TOKEN = "session_token"
+        const val KEY_USER_EMAIL = "user_email"
+        const val KEY_USER_NICKNAME = "user_nickname"
+        const val DEFAULT_SERVER_URL = "https://api.vizitorkrut.ru"
         private const val PERMISSION_REQUEST = 1001
     }
 }
@@ -387,6 +466,10 @@ private fun HomeVisitApp(
     initialServerUrl: String,
     initialApiKey: String,
     initialInterval: String,
+    accountEmail: String,
+    accountNickname: String,
+    onLogout: () -> Unit,
+    onDeleteAccount: () -> Unit,
     onSaveSettings: (String, String, String) -> Unit,
     onStartGps: (String, String, String) -> Unit,
     onStopGps: () -> Unit,
@@ -437,6 +520,8 @@ private fun HomeVisitApp(
         serverUrl = serverUrl,
         apiKey = apiKey,
         intervalSeconds = intervalSeconds,
+        accountEmail = accountEmail,
+        accountNickname = accountNickname,
         onServerUrlChange = { serverUrl = it },
         onApiKeyChange = { apiKey = it },
         onIntervalChange = { intervalSeconds = it },
@@ -449,6 +534,8 @@ private fun HomeVisitApp(
             onStopGps()
             gpsRunning = false
         },
+        onLogout = onLogout,
+        onDeleteAccount = onDeleteAccount,
         gpsRunning = gpsRunning,
     )
     val workActions = WorkActions(
@@ -1800,7 +1887,7 @@ private fun SettingsScreen(
         )
         CompactCard(
             title = "Что здесь важно",
-            body = "URL сервера и API ключ нужны для расчёта маршрутов, отчётов, нагрузки и синхронизации. Настройки экономики, авто, компаний и районов теперь редактируются здесь и уходят на сервер без Telegram.",
+            body = "Вход выполняется по вашему аккаунту — данные видны только вам. Адрес сервера подставлен автоматически и нужен для расчёта маршрутов, отчётов, нагрузки и синхронизации. Настройки экономики, авто, компаний и районов редактируются здесь и уходят на сервер.",
         )
     }
 }
@@ -2643,6 +2730,7 @@ private fun SyncControlCard(
 
 @Composable
 private fun GpsSettingsCard(settingsState: GpsSettingsState) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -2653,6 +2741,30 @@ private fun GpsSettingsCard(settingsState: GpsSettingsState) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            Text("Аккаунт", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (settingsState.accountNickname.isNotBlank()) {
+                Text(settingsState.accountNickname, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+            }
+            if (settingsState.accountEmail.isNotBlank()) {
+                Text(
+                    settingsState.accountEmail,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(modifier = Modifier.weight(1f), onClick = settingsState.onLogout) {
+                    Text("Выйти")
+                }
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    onClick = { showDeleteConfirm = true },
+                ) {
+                    Text("Удалить аккаунт")
+                }
+            }
+
             Text("Подключение к серверу", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             OutlinedTextField(
                 value = settingsState.serverUrl,
@@ -2660,14 +2772,7 @@ private fun GpsSettingsCard(settingsState: GpsSettingsState) {
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 label = { Text("URL сервера") },
-                placeholder = { Text("https://example.com:8088/location") },
-            )
-            OutlinedTextField(
-                value = settingsState.apiKey,
-                onValueChange = settingsState.onApiKeyChange,
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                label = { Text("API ключ") },
+                placeholder = { Text(DEFAULT_SERVER_URL) },
             )
             OutlinedTextField(
                 value = settingsState.intervalSeconds,
@@ -2686,6 +2791,25 @@ private fun GpsSettingsCard(settingsState: GpsSettingsState) {
                 }
             }
         }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Удалить аккаунт?") },
+            text = { Text("Аккаунт и все связанные данные будут удалены безвозвратно. Это действие нельзя отменить.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    settingsState.onDeleteAccount()
+                }) {
+                    Text("Удалить", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Отмена") }
+            },
+        )
     }
 }
 
@@ -2783,6 +2907,8 @@ private data class GpsSettingsState(
     val serverUrl: String,
     val apiKey: String,
     val intervalSeconds: String,
+    val accountEmail: String,
+    val accountNickname: String,
     val gpsRunning: Boolean,
     val onServerUrlChange: (String) -> Unit,
     val onApiKeyChange: (String) -> Unit,
@@ -2790,4 +2916,6 @@ private data class GpsSettingsState(
     val onSave: () -> Unit,
     val onStartGps: () -> Unit,
     val onStopGps: () -> Unit,
+    val onLogout: () -> Unit,
+    val onDeleteAccount: () -> Unit,
 )

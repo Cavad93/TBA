@@ -12,6 +12,8 @@ import com.homevisit.location.data.local.TelemedEntryEntity
 import com.homevisit.location.data.local.VisitEntity
 import com.homevisit.location.data.local.WorkDayEntity
 import com.homevisit.location.domain.AppSettingsSnapshot
+import com.homevisit.location.domain.AuthOutcome
+import com.homevisit.location.domain.AuthUser
 import com.homevisit.location.domain.CandidateEstimate
 import com.homevisit.location.domain.CandidateRequestResult
 import com.homevisit.location.domain.CbiInfo
@@ -412,6 +414,151 @@ class HomeVisitRepository private constructor(
         } finally {
             connection?.disconnect()
         }
+    }
+
+    // ---- Аккаунты (регистрация/вход/сессии) ----
+
+    suspend fun register(
+        serverUrl: String,
+        email: String,
+        password: String,
+        nickname: String,
+        occupation: String? = null,
+    ): AuthOutcome = withContext(Dispatchers.IO) {
+        val payload = JSONObject()
+            .put("email", email.trim())
+            .put("password", password)
+            .put("nickname", nickname.trim())
+        if (!occupation.isNullOrBlank()) {
+            payload.put("occupation", occupation.trim())
+        }
+        val (code, body) = authPost(normalizeApiUrl(serverUrl, "/api/auth/register"), payload)
+        authOutcome(code, body, "Код подтверждения отправлен на почту")
+    }
+
+    suspend fun verifyEmail(serverUrl: String, email: String, verificationCode: String): AuthOutcome =
+        withContext(Dispatchers.IO) {
+            val payload = JSONObject().put("email", email.trim()).put("code", verificationCode.trim())
+            val (code, body) = authPost(normalizeApiUrl(serverUrl, "/api/auth/verify-email"), payload)
+            authOutcome(code, body, "E-mail подтверждён")
+        }
+
+    suspend fun resendCode(serverUrl: String, email: String): AuthOutcome = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("email", email.trim())
+        val (code, body) = authPost(normalizeApiUrl(serverUrl, "/api/auth/resend-code"), payload)
+        authOutcome(code, body, "Код отправлен повторно")
+    }
+
+    suspend fun login(serverUrl: String, email: String, password: String): AuthOutcome =
+        withContext(Dispatchers.IO) {
+            val payload = JSONObject().put("email", email.trim()).put("password", password)
+            val (code, body) = authPost(normalizeApiUrl(serverUrl, "/api/auth/login"), payload)
+            if (code == HTTP_NO_CONNECTION || body == null) {
+                return@withContext AuthOutcome(false, NO_CONNECTION_MESSAGE)
+            }
+            val error = body.optString("error").ifBlank { null }
+            if (code in 200..299 && error == null) {
+                val token = body.optString("token").ifBlank { null }
+                    ?: return@withContext AuthOutcome(false, "Сервер не выдал токен сессии")
+                return@withContext AuthOutcome(true, "Вход выполнен", token, parseAuthUser(body.optJSONObject("user")))
+            }
+            AuthOutcome(false, error ?: "Не удалось войти (код $code)")
+        }
+
+    suspend fun forgotPassword(serverUrl: String, email: String): AuthOutcome = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("email", email.trim())
+        val (code, body) = authPost(normalizeApiUrl(serverUrl, "/api/auth/password/forgot"), payload)
+        authOutcome(code, body, "Если аккаунт существует, код для сброса отправлен")
+    }
+
+    suspend fun resetPassword(serverUrl: String, email: String, verificationCode: String, newPassword: String): AuthOutcome =
+        withContext(Dispatchers.IO) {
+            val payload = JSONObject()
+                .put("email", email.trim())
+                .put("code", verificationCode.trim())
+                .put("password", newPassword)
+            val (code, body) = authPost(normalizeApiUrl(serverUrl, "/api/auth/password/reset"), payload)
+            authOutcome(code, body, "Пароль изменён")
+        }
+
+    suspend fun fetchMe(serverUrl: String, token: String): AuthUser? = withContext(Dispatchers.IO) {
+        val response = getJson(normalizeApiUrl(serverUrl, "/api/auth/me"), token) ?: return@withContext null
+        if (!response.optBoolean("ok", false)) return@withContext null
+        parseAuthUser(response.optJSONObject("user"))
+    }
+
+    suspend fun logout(serverUrl: String, token: String): Boolean = withContext(Dispatchers.IO) {
+        if (token.isBlank()) return@withContext true
+        authPost(normalizeApiUrl(serverUrl, "/api/auth/logout"), JSONObject(), token).first in 200..299
+    }
+
+    suspend fun deleteAccount(serverUrl: String, token: String): Boolean = withContext(Dispatchers.IO) {
+        if (token.isBlank()) return@withContext false
+        var connection: HttpURLConnection? = null
+        try {
+            connection = (URL(normalizeApiUrl(serverUrl, "/api/auth/account")).openConnection() as HttpURLConnection).apply {
+                requestMethod = "DELETE"
+                connectTimeout = 10_000
+                readTimeout = 20_000
+                setRequestProperty("Authorization", "Bearer $token")
+            }
+            connection.responseCode in 200..299
+        } catch (_: Exception) {
+            false
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    /** POST на auth-эндпоинт. Возвращает (HTTP-код, тело JSON) — тело читается и при ошибке. */
+    private fun authPost(url: String, payload: JSONObject, token: String? = null): Pair<Int, JSONObject?> {
+        if (url.isBlank()) return HTTP_NO_CONNECTION to null
+        var connection: HttpURLConnection? = null
+        return try {
+            val body = payload.toString().toByteArray(StandardCharsets.UTF_8)
+            connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 10_000
+                readTimeout = 20_000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                if (token != null) {
+                    setRequestProperty("Authorization", "Bearer $token")
+                }
+            }
+            connection.outputStream.use { it.write(body) }
+            val responseCode = connection.responseCode
+            val stream = if (responseCode in 200..399) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() }.orEmpty()
+            responseCode to (if (text.isBlank()) null else JSONObject(text))
+        } catch (_: Exception) {
+            HTTP_NO_CONNECTION to null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    private fun authOutcome(code: Int, body: JSONObject?, successMessage: String): AuthOutcome {
+        if (code == HTTP_NO_CONNECTION || body == null) {
+            return AuthOutcome(false, NO_CONNECTION_MESSAGE)
+        }
+        val error = body.optString("error").ifBlank { null }
+        if (code in 200..299 && error == null) {
+            return AuthOutcome(true, body.optString("message").ifBlank { successMessage })
+        }
+        return AuthOutcome(false, error ?: "Ошибка сервера (код $code)")
+    }
+
+    private fun parseAuthUser(user: JSONObject?): AuthUser? {
+        if (user == null) return null
+        return AuthUser(
+            id = user.optInt("id"),
+            email = user.optString("email"),
+            nickname = user.optString("nickname"),
+            emailVerified = user.optBoolean("email_verified", false),
+            orderSourceLabel = user.optString("order_source_label").ifBlank { "Компания" },
+            occupation = user.optString("occupation").ifBlank { null },
+        )
     }
 
     suspend fun fetchSyncConflicts(serverUrl: String, apiKey: String): List<SyncConflict>? = withContext(Dispatchers.IO) {
@@ -1331,6 +1478,8 @@ class HomeVisitRepository private constructor(
     }
 
     companion object {
+        private const val HTTP_NO_CONNECTION = -1
+        private const val NO_CONNECTION_MESSAGE = "Нет связи с сервером. Проверьте интернет."
         private const val CACHE_PREFIX = "cache_"
         private const val CACHE_KEY_APP_SETTINGS = "app_settings_cache"
         private const val CACHE_KEY_CLINICS = "clinics"
