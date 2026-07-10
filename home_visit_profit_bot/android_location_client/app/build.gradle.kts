@@ -13,8 +13,11 @@ android {
         applicationId = "com.homevisit.location"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        // versionCode берётся из номера сборки CI (монотонно растёт) — чтобы каждое
+        // обновление было «новее» предыдущего. Локально (без CI) — 1.
+        val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = buildNumber
+        versionName = "1.0.$buildNumber"
     }
 
     buildFeatures {
