@@ -52,9 +52,14 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Today
@@ -353,12 +358,10 @@ private enum class AppDestination(
     val title: String,
 ) {
     Home("Главная", Icons.Filled.Home, "Штурвал"),
-    Today("Сегодня", Icons.Filled.Today, "Сегодня"),
-    Work("Работа", Icons.Filled.Work, "Работа"),
-    Route("Маршрут", Icons.Filled.Map, "Маршрут и GPS"),
-    Reports("Отчеты", Icons.Filled.BarChart, "Отчеты"),
-    Fatigue("Нагрузка", Icons.Filled.MonitorHeart, "Нагрузка"),
-    Settings("Настройки", Icons.Filled.Settings, "Настройки"),
+    Work("Оценка", Icons.Filled.Speed, "Оценка заказа"),
+    Route("Лента", Icons.AutoMirrored.Filled.FormatListBulleted, "Лента"),
+    Shift("Смена", Icons.Filled.AccountBalanceWallet, "Смена"),
+    Profile("Профиль", Icons.Filled.Person, "Профиль"),
 }
 
 private enum class WorkForm {
@@ -553,6 +556,7 @@ private fun HomeVisitApp(
     onRefreshClinics: (String, String) -> Unit,
 ) {
     var selected by rememberSaveable { mutableStateOf(AppDestination.Home) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
     var serverUrl by rememberSaveable { mutableStateOf(initialServerUrl) }
     var apiKey by rememberSaveable { mutableStateOf(initialApiKey) }
     var intervalSeconds by rememberSaveable { mutableStateOf(initialInterval) }
@@ -637,6 +641,18 @@ private fun HomeVisitApp(
         onBackupExportHandled()
     }
 
+    if (showSettings) {
+        SettingsOverlay(
+            settingsState = settingsState,
+            syncState = uiState.sync,
+            appSettings = uiState.appSettings,
+            workActions = workActions,
+            onSync = syncNow,
+            onBack = { showSettings = false },
+        )
+        return
+    }
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -653,6 +669,7 @@ private fun HomeVisitApp(
                     settingsState = settingsState,
                     onSync = syncNow,
                     onSelectDestination = { selected = it },
+                    onOpenSettings = { showSettings = true },
                     bottomBar = {},
                 )
             }
@@ -664,10 +681,44 @@ private fun HomeVisitApp(
                 settingsState = settingsState,
                 onSync = syncNow,
                 onSelectDestination = { selected = it },
+                onOpenSettings = { showSettings = true },
                 bottomBar = {
                     AppNavigationBar(selected = selected, onSelect = { selected = it })
                 },
             )
+        }
+    }
+}
+
+/** Экран настроек как оверлей (открывается шестерёнкой), с кнопкой «назад». */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsOverlay(
+    settingsState: GpsSettingsState,
+    syncState: SyncUiState,
+    appSettings: AppSettingsUiState,
+    workActions: WorkActions,
+    onSync: () -> Unit,
+    onBack: () -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Настройки") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            )
+        },
+    ) { padding ->
+        Surface(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            SettingsScreen(settingsState, syncState, appSettings, workActions, onSync)
         }
     }
 }
@@ -681,19 +732,16 @@ private fun AppScaffold(
     settingsState: GpsSettingsState,
     onSync: () -> Unit,
     onSelectDestination: (AppDestination) -> Unit,
+    onOpenSettings: () -> Unit,
     bottomBar: @Composable () -> Unit,
 ) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Column {
-                        Text(selected.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            "Home Visit",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                title = { Text(selected.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Настройки")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -713,17 +761,27 @@ private fun AppScaffold(
                     shiftActive = uiState.status == WorkDayStatus.Active,
                     workActions = workActions,
                     onOpenWork = { onSelectDestination(AppDestination.Work) },
-                    onOpenReports = { onSelectDestination(AppDestination.Reports) },
+                    onOpenReports = { onSelectDestination(AppDestination.Shift) },
                 )
-                AppDestination.Today -> TodayScreen(uiState, workActions, settingsState, onSync, onOpenWork = { onSelectDestination(AppDestination.Work) })
                 AppDestination.Work -> WorkScreen(uiState, workActions)
                 AppDestination.Route -> RouteScreen(uiState, workActions, settingsState)
-                AppDestination.Reports -> ReportsScreen(uiState.report, workActions)
-                AppDestination.Fatigue -> FatigueScreen(uiState.fatigue, workActions)
-                AppDestination.Settings -> SettingsScreen(settingsState, uiState.sync, uiState.appSettings, workActions, onSync)
+                AppDestination.Shift -> ShiftScreen(uiState, workActions)
+                AppDestination.Profile -> ProfileScreen(uiState, workActions, onOpenSettings)
             }
         }
     }
+}
+
+// Временные экраны «Смена» и «Профиль»: пока переиспользуют существующие данные,
+// полноценный редизайн — в следующих под-этапах (статистика/состояние).
+@Composable
+private fun ShiftScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
+    ReportsScreen(uiState.report, workActions)
+}
+
+@Composable
+private fun ProfileScreen(uiState: HomeVisitUiState, workActions: WorkActions, onOpenSettings: () -> Unit) {
+    FatigueScreen(uiState.fatigue, workActions)
 }
 
 @Composable
