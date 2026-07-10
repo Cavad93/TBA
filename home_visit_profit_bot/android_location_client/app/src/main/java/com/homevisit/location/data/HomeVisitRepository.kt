@@ -31,6 +31,11 @@ import com.homevisit.location.domain.FatigueTrendPoint
 import com.homevisit.location.domain.FatigueTrendReport
 import com.homevisit.location.domain.GpsDayEstimate
 import com.homevisit.location.domain.GpsVisitHint
+import com.homevisit.location.domain.HomeMoney
+import com.homevisit.location.domain.HomeRecommendation
+import com.homevisit.location.domain.HomeRecovery
+import com.homevisit.location.domain.HomeSnapshot
+import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ReportPeriod
 import com.homevisit.location.domain.ReportSnapshot
 import com.homevisit.location.domain.ReportSummary
@@ -691,6 +696,12 @@ class HomeVisitRepository private constructor(
         return if (first) "?clinic=$encoded" else "&clinic=$encoded"
     }
 
+    suspend fun fetchHome(serverUrl: String, apiKey: String): HomeSnapshot? = withContext(Dispatchers.IO) {
+        val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/home"), apiKey, "cache_home")
+            ?: return@withContext null
+        parseHomeSnapshot(response)
+    }
+
     suspend fun fetchFatigueSummary(serverUrl: String, apiKey: String): FatigueSnapshot? = withContext(Dispatchers.IO) {
         val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/fatigue/summary"), apiKey, "cache_fatigue_summary")
             ?: return@withContext null
@@ -1310,6 +1321,80 @@ class HomeVisitRepository private constructor(
             ),
             clinics = clinics,
             fromCache = response.optBoolean("_from_cache", false),
+        )
+    }
+
+    private fun parseHomeSnapshot(response: JSONObject): HomeSnapshot? {
+        if (!response.optBoolean("ok", false)) {
+            return null
+        }
+        val greeting = response.optJSONObject("greeting") ?: JSONObject()
+        val shift = response.optJSONObject("shift") ?: JSONObject()
+        val start = response.optJSONObject("start_prompt") ?: JSONObject()
+        val trends = response.optJSONObject("trends") ?: JSONObject()
+        val money = response.optJSONObject("money") ?: JSONObject()
+        val recsJson = response.optJSONArray("recommendations") ?: JSONArray()
+        val recommendations = buildList {
+            for (index in 0 until recsJson.length()) {
+                val rec = recsJson.optJSONObject(index) ?: continue
+                add(
+                    HomeRecommendation(
+                        kind = rec.optString("kind"),
+                        tone = rec.optString("tone"),
+                        title = rec.optString("title"),
+                        text = rec.optString("text"),
+                    ),
+                )
+            }
+        }
+        return HomeSnapshot(
+            nickname = greeting.optString("nickname"),
+            date = greeting.optString("date"),
+            firstRun = response.optBoolean("first_run", false),
+            hasData = response.optBoolean("has_data", false),
+            shiftActive = shift.optBoolean("active", false),
+            shiftWorkDayId = shift.optInt("work_day_id", 0).takeIf { it > 0 },
+            startPrompt = HomeStartPrompt(
+                hasLastOdometer = start.optBoolean("has_last_odometer", false),
+                lastOdometer = start.optDouble("last_odometer", 0.0),
+                prevEndedAt = start.optString("prev_ended_at").ifBlank { null },
+                breakHours = start.optDouble("break_hours", 0.0),
+            ),
+            recovery = parseHomeRecovery(response.optJSONObject("recovery")),
+            monthMoney = parseHomeMoney(money.optJSONObject("month")),
+            yesterdayMoney = parseHomeMoney(money.optJSONObject("yesterday")),
+            hourlyVsMonth = trends.optDouble("hourly_vs_month", 0.0),
+            debtVsPrev = if (trends.isNull("debt_vs_prev")) null else trends.optDouble("debt_vs_prev"),
+            greenStreak = response.optInt("green_streak", 0),
+            recommendations = recommendations,
+            fromCache = response.optBoolean("_from_cache", false),
+        )
+    }
+
+    private fun parseHomeRecovery(recovery: JSONObject?): HomeRecovery? {
+        if (recovery == null) {
+            return null
+        }
+        return HomeRecovery(
+            recoveryDebt = recovery.optDouble("recovery_debt", 0.0),
+            burnoutScore = recovery.optDouble("burnout_score", 0.0),
+            fatigueScore = recovery.optDouble("fatigue_score", 0.0),
+            weeklyAverage = recovery.optDouble("weekly_average", 0.0),
+            level = recovery.optString("level"),
+            verdict = recovery.optString("verdict"),
+            source = recovery.optString("source"),
+        )
+    }
+
+    private fun parseHomeMoney(money: JSONObject?): HomeMoney {
+        if (money == null) {
+            return HomeMoney(0.0, 0.0, 0.0, 0)
+        }
+        return HomeMoney(
+            gross = money.optDouble("gross", 0.0),
+            net = money.optDouble("net", 0.0),
+            netHourly = money.optDouble("net_hourly", 0.0),
+            days = money.optInt("days", 0),
         )
     }
 

@@ -15,6 +15,7 @@ import com.homevisit.location.domain.FatigueSnapshot
 import com.homevisit.location.domain.FatigueTrendReport
 import com.homevisit.location.domain.GpsDayEstimate
 import com.homevisit.location.domain.GpsVisitHint
+import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.ReportPeriod
 import com.homevisit.location.domain.ReportSnapshot
 import com.homevisit.location.domain.ServerRouteSnapshot
@@ -48,6 +49,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     private val syncMessageState = MutableStateFlow("")
     private val backupExportState = MutableStateFlow<String?>(null)
     private val syncConflictState = MutableStateFlow<List<SyncConflict>>(emptyList())
+    private val homeStateFlow = MutableStateFlow(HomeUiState())
 
     private val syncState = combine(repository.observeSyncQueueStats(), syncMessageState, backupExportState, syncConflictState) { stats, message, backupJson, conflicts ->
         SyncUiState(stats = stats, message = message, backupJson = backupJson, conflicts = conflicts)
@@ -99,8 +101,8 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         OperationalUiState(route, gpsEstimate, gpsHint, report, fatigue)
     }
 
-    private val auxState = combine(appSettingsState, clinicsState) { appSettings, clinics ->
-        AuxUiState(appSettings, clinics)
+    private val auxState = combine(appSettingsState, clinicsState, homeStateFlow) { appSettings, clinics, home ->
+        AuxUiState(appSettings, clinics, home)
     }
 
     val uiState: StateFlow<HomeVisitUiState> = combine(dayState, candidateState, operationalState, syncState, auxState) { day, candidate, operational, sync, aux ->
@@ -114,6 +116,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             sync = sync,
             appSettings = aux.appSettings,
             clinics = aux.clinics,
+            home = aux.home,
         )
     }
         .stateIn(
@@ -133,6 +136,34 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) return@launch
             clinicsState.value = repository.fetchClinics(serverUrl, apiKey)
+        }
+    }
+
+    fun refreshHome(serverUrl: String, apiKey: String) {
+        viewModelScope.launch {
+            if (serverUrl.isBlank() || apiKey.isBlank()) {
+                homeStateFlow.update { it.copy(loading = false) }
+                return@launch
+            }
+            homeStateFlow.update { it.copy(loading = true, error = false) }
+            val snapshot = repository.fetchHome(serverUrl, apiKey)
+            homeStateFlow.value = HomeUiState(
+                loading = false,
+                snapshot = snapshot,
+                error = snapshot == null,
+            )
+        }
+    }
+
+    /** Старт смены с главного экрана: без адресов, перерыв рассчитан автоматически. */
+    fun startShift(startOdometer: Double, sleepHours: Double, sleepQuality: Double, breakHoursBefore: Double) {
+        viewModelScope.launch {
+            repository.startDay(
+                startOdometer = startOdometer,
+                sleepHours = sleepHours,
+                sleepQuality = sleepQuality,
+                breakHoursBefore = breakHoursBefore,
+            )
         }
     }
 
@@ -694,6 +725,7 @@ data class HomeVisitUiState(
     val sync: SyncUiState = SyncUiState(),
     val appSettings: AppSettingsUiState = AppSettingsUiState(),
     val clinics: ClinicOptions = ClinicOptions(),
+    val home: HomeUiState = HomeUiState(),
 ) {
     val netIncome: Double
         get() = grossIncome - expensesAmount
@@ -710,6 +742,7 @@ private data class OperationalUiState(
 private data class AuxUiState(
     val appSettings: AppSettingsUiState,
     val clinics: ClinicOptions,
+    val home: HomeUiState,
 )
 
 data class RouteVisitUi(
@@ -784,4 +817,10 @@ data class AppSettingsUiState(
     val isLoading: Boolean = false,
     val snapshot: AppSettingsSnapshot? = null,
     val message: String = "",
+)
+
+data class HomeUiState(
+    val loading: Boolean = false,
+    val snapshot: HomeSnapshot? = null,
+    val error: Boolean = false,
 )

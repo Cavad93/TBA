@@ -47,6 +47,58 @@ enum class ReportPeriod(val apiValue: String, val title: String) {
     Year("year", "Год"),
 }
 
+/** Сводка главного экрана «Штурвал» — приходит одним запросом `GET /api/home`. */
+data class HomeSnapshot(
+    val nickname: String,
+    val date: String,
+    val firstRun: Boolean,
+    val hasData: Boolean,
+    val shiftActive: Boolean,
+    val shiftWorkDayId: Int?,
+    val startPrompt: HomeStartPrompt,
+    val recovery: HomeRecovery?,
+    val monthMoney: HomeMoney,
+    val yesterdayMoney: HomeMoney,
+    val hourlyVsMonth: Double,
+    val debtVsPrev: Double?,
+    val greenStreak: Int,
+    val recommendations: List<HomeRecommendation>,
+    val fromCache: Boolean = false,
+)
+
+/** Данные для запуска смены: предзаполнение одометра и авто-перерыв. */
+data class HomeStartPrompt(
+    val hasLastOdometer: Boolean,
+    val lastOdometer: Double,
+    val prevEndedAt: String?,
+    val breakHours: Double,
+)
+
+/** Состояние восстановления. `verdict` — go/edge/skip для окраски. */
+data class HomeRecovery(
+    val recoveryDebt: Double,
+    val burnoutScore: Double,
+    val fatigueScore: Double,
+    val weeklyAverage: Double,
+    val level: String,
+    val verdict: String,
+    val source: String,
+)
+
+data class HomeMoney(
+    val gross: Double,
+    val net: Double,
+    val netHourly: Double,
+    val days: Int,
+)
+
+data class HomeRecommendation(
+    val kind: String,
+    val tone: String,
+    val title: String,
+    val text: String,
+)
+
 data class WorkDaySummary(
     val status: WorkDayStatus = WorkDayStatus.NotStarted,
     val visitsCount: Int = 0,

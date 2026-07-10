@@ -37,7 +37,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Slider
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -49,6 +53,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Settings
@@ -85,6 +90,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -170,6 +176,8 @@ class MainActivity : ComponentActivity() {
                     onStopGps = ::stopTracking,
                     onStartDay = viewModel::startDay,
                     onStartDayDetails = viewModel::startDayWithDetails,
+                    onStartShift = viewModel::startShift,
+                    onRefreshHome = viewModel::refreshHome,
                     onEndDay = viewModel::endDay,
                     onEndDayWithOdometer = viewModel::endDayWithOdometer,
                     onEndDayWithDetails = viewModel::endDayWithDetails,
@@ -339,6 +347,7 @@ private enum class AppDestination(
     val icon: ImageVector,
     val title: String,
 ) {
+    Home("Главная", Icons.Filled.Home, "Штурвал"),
     Today("Сегодня", Icons.Filled.Today, "Сегодня"),
     Work("Работа", Icons.Filled.Work, "Работа"),
     Route("Маршрут", Icons.Filled.Map, "Маршрут и GPS"),
@@ -364,6 +373,8 @@ private enum class ReportMode(val title: String) {
 private data class WorkActions(
     val onStartDay: () -> Unit,
     val onStartDayDetails: (String, String, Double, Double, Double, Double) -> Unit,
+    val onStartShift: (Double, Double, Double, Double) -> Unit,
+    val onRefreshHome: () -> Unit,
     val onEndDay: () -> Unit,
     val onEndDayWithOdometer: (Double?) -> Unit,
     val onEndDayWithDetails: (EndDayDetails) -> Unit,
@@ -500,6 +511,8 @@ private fun HomeVisitApp(
     onStopGps: () -> Unit,
     onStartDay: () -> Unit,
     onStartDayDetails: (String, String, Double, Double, Double, Double) -> Unit,
+    onStartShift: (Double, Double, Double, Double) -> Unit,
+    onRefreshHome: (String, String) -> Unit,
     onEndDay: () -> Unit,
     onEndDayWithOdometer: (Double?) -> Unit,
     onEndDayWithDetails: (EndDayDetails) -> Unit,
@@ -534,7 +547,7 @@ private fun HomeVisitApp(
     onSaveAppSettings: (String, String, Map<String, Any?>) -> Unit,
     onRefreshClinics: (String, String) -> Unit,
 ) {
-    var selected by rememberSaveable { mutableStateOf(AppDestination.Today) }
+    var selected by rememberSaveable { mutableStateOf(AppDestination.Home) }
     var serverUrl by rememberSaveable { mutableStateOf(initialServerUrl) }
     var apiKey by rememberSaveable { mutableStateOf(initialApiKey) }
     var intervalSeconds by rememberSaveable { mutableStateOf(initialInterval) }
@@ -566,6 +579,8 @@ private fun HomeVisitApp(
     val workActions = WorkActions(
         onStartDay = onStartDay,
         onStartDayDetails = onStartDayDetails,
+        onStartShift = onStartShift,
+        onRefreshHome = { onRefreshHome(serverUrl, apiKey) },
         onEndDay = onEndDay,
         onEndDayWithOdometer = onEndDayWithOdometer,
         onEndDayWithDetails = onEndDayWithDetails,
@@ -688,6 +703,13 @@ private fun AppScaffold(
             color = MaterialTheme.colorScheme.background,
         ) {
             when (selected) {
+                AppDestination.Home -> HomeScreen(
+                    home = uiState.home,
+                    shiftActive = uiState.status == WorkDayStatus.Active,
+                    workActions = workActions,
+                    onOpenWork = { onSelectDestination(AppDestination.Work) },
+                    onOpenReports = { onSelectDestination(AppDestination.Reports) },
+                )
                 AppDestination.Today -> TodayScreen(uiState, workActions, settingsState, onSync, onOpenWork = { onSelectDestination(AppDestination.Work) })
                 AppDestination.Work -> WorkScreen(uiState, workActions)
                 AppDestination.Route -> RouteScreen(uiState, workActions, settingsState)
@@ -737,6 +759,399 @@ private fun DestinationIcon(destination: AppDestination) {
         imageVector = destination.icon,
         contentDescription = destination.label,
     )
+}
+
+// --- Главный экран «Штурвал» -------------------------------------------------
+
+/** Стиль вердикта состояния: цвет + короткая фраза «стоит ли впахивать». */
+private data class HomeVerdictStyle(val accent: Color, val container: Color, val onContainer: Color, val phrase: String)
+
+private fun homeVerdictStyle(verdict: String): HomeVerdictStyle = when (verdict) {
+    "skip" -> HomeVerdictStyle(VerdictColors.skip, VerdictColors.skipContainer, VerdictColors.onSkipContainer, "Ресурс на исходе")
+    "edge" -> HomeVerdictStyle(VerdictColors.edge, VerdictColors.edgeContainer, VerdictColors.onEdgeContainer, "Восстановление на грани")
+    else -> HomeVerdictStyle(VerdictColors.go, VerdictColors.goContainer, VerdictColors.onGoContainer, "Ты хорошо отдохнул")
+}
+
+private fun recTone(tone: String): HomeVerdictStyle = when (tone) {
+    "skip" -> HomeVerdictStyle(VerdictColors.skip, VerdictColors.skipContainer, VerdictColors.onSkipContainer, "")
+    "edge" -> HomeVerdictStyle(VerdictColors.edge, VerdictColors.edgeContainer, VerdictColors.onEdgeContainer, "")
+    "go" -> HomeVerdictStyle(VerdictColors.go, VerdictColors.goContainer, VerdictColors.onGoContainer, "")
+    else -> HomeVerdictStyle(VerdictColors.edge, VerdictColors.edgeContainer, VerdictColors.onEdgeContainer, "")
+}
+
+@Composable
+private fun HomeScreen(
+    home: HomeUiState,
+    shiftActive: Boolean,
+    workActions: WorkActions,
+    onOpenWork: () -> Unit,
+    onOpenReports: () -> Unit,
+) {
+    // Тянем сводку при открытии и при смене статуса дня.
+    LaunchedEffect(Unit) { workActions.onRefreshHome() }
+    LaunchedEffect(shiftActive) { workActions.onRefreshHome() }
+
+    val snapshot = home.snapshot
+    var showStartSheet by rememberSaveable { mutableStateOf(false) }
+
+    when {
+        snapshot == null && home.loading -> HomeLoading()
+        snapshot == null -> HomeError(onRetry = { workActions.onRefreshHome() })
+        snapshot.firstRun -> HomeOnboarding(nickname = snapshot.nickname, onStart = { showStartSheet = true })
+        else -> HomeDashboard(
+            snapshot = snapshot,
+            shiftActive = shiftActive,
+            onStartShift = { showStartSheet = true },
+            onOpenWork = onOpenWork,
+            onOpenReports = onOpenReports,
+        )
+    }
+
+    if (showStartSheet) {
+        StartShiftSheet(
+            startPrompt = snapshot?.startPrompt,
+            onDismiss = { showStartSheet = false },
+            onConfirm = { odometer, sleep, quality, breakHours ->
+                workActions.onStartShift(odometer, sleep, quality, breakHours)
+                showStartSheet = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun HomeLoading() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+@Composable
+private fun HomeError(onRetry: () -> Unit) {
+    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Нет связи с сервером", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Не удалось загрузить сводку. Проверь интернет и попробуй ещё раз.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Button(onClick = onRetry) { Text("Обновить") }
+        }
+    }
+}
+
+@Composable
+private fun HomeDashboard(
+    snapshot: HomeSnapshot,
+    shiftActive: Boolean,
+    onStartShift: () -> Unit,
+    onOpenWork: () -> Unit,
+    onOpenReports: () -> Unit,
+) {
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // Приветствие.
+            val hello = if (snapshot.nickname.isNotBlank()) "Привет, ${snapshot.nickname}" else "Привет"
+            Text(hello, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            if (snapshot.fromCache) {
+                Text("Данные из кэша — обновятся при связи", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            snapshot.recovery?.let { RecoveryHeroCard(it, snapshot.debtVsPrev, snapshot.greenStreak) }
+
+            MoneySection(snapshot, onOpenReports)
+
+            if (snapshot.recommendations.isNotEmpty()) {
+                SectionHeader("Рекомендации на сегодня")
+                snapshot.recommendations.forEach { RecommendationCard(it) }
+            }
+
+            // Отступ под нижнюю кнопку, чтобы контент не прятался.
+            Spacer(Modifier.height(88.dp))
+        }
+
+        // Нижняя центральная кнопка — старт/статус смены.
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(16.dp),
+        ) {
+            if (shiftActive) {
+                Button(
+                    onClick = onOpenWork,
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                ) {
+                    Text("Смена идёт · открыть работу", style = MaterialTheme.typography.titleMedium)
+                }
+            } else {
+                Button(
+                    onClick = onStartShift,
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = VerdictColors.go),
+                ) {
+                    Text("Начать смену", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecoveryHeroCard(recovery: HomeRecovery, debtVsPrev: Double?, streak: Int) {
+    val style = homeVerdictStyle(recovery.verdict)
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = style.container),
+        border = BorderStroke(1.5.dp, style.accent),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Состояние восстановления", style = MaterialTheme.typography.labelLarge, color = style.onContainer.copy(alpha = 0.8f))
+            Text(style.phrase, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = style.onContainer)
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    oneDecimal(recovery.recoveryDebt),
+                    fontFamily = JetBrainsMono,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text("долг восстановления", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 4.dp))
+                debtVsPrev?.takeIf { it != 0.0 }?.let { delta ->
+                    // Для долга: рост — плохо (красный), снижение — хорошо (зелёный).
+                    val up = delta > 0
+                    Text(
+                        (if (up) "↑ " else "↓ ") + oneDecimal(kotlin.math.abs(delta)),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = JetBrainsMono,
+                        color = if (up) VerdictColors.skip else VerdictColors.go,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                }
+            }
+            Text(
+                "Усталость: ${recovery.level.ifBlank { "—" }} · за неделю ${oneDecimal(recovery.weeklyAverage)}/100",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (streak >= 3) {
+                Text("🟢 $streak ${dayWord(streak)} подряд в зелёной зоне", style = MaterialTheme.typography.bodyMedium, color = style.onContainer, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoneySection(snapshot: HomeSnapshot, onOpenReports: () -> Unit) {
+    SectionHeader("Деньги")
+    val month = snapshot.monthMoney
+    val yday = snapshot.yesterdayMoney
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+        MoneyTile(Modifier.weight(1f), "Доход за месяц", money(month.gross), "${month.days} ${dayWord(month.days)}")
+        MoneyTile(Modifier.weight(1f), "Чистыми за месяц", money(month.net), null)
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+        MoneyTile(Modifier.weight(1f), "₽/ч за месяц", money(month.netHourly), null)
+        MoneyTile(
+            Modifier.weight(1f),
+            "₽/ч вчера",
+            money(yday.netHourly),
+            trendLabel(snapshot.hourlyVsMonth),
+            trendColor(snapshot.hourlyVsMonth),
+        )
+    }
+    TextButton(onClick = onOpenReports) { Text("Подробные отчёты →") }
+}
+
+@Composable
+private fun MoneyTile(modifier: Modifier, label: String, value: String, sub: String?, subColor: Color? = null) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(value, fontFamily = JetBrainsMono, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+            sub?.let { Text(it, style = MaterialTheme.typography.bodySmall, fontFamily = JetBrainsMono, color = subColor ?: MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+    }
+}
+
+@Composable
+private fun RecommendationCard(rec: HomeRecommendation) {
+    val tone = recTone(rec.tone)
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Цветная риска слева по тону.
+            Box(Modifier.width(4.dp).height(40.dp).background(tone.accent, RoundedCornerShape(2.dp)))
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(rec.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(rec.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeOnboarding(nickname: String, onStart: () -> Unit) {
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (nickname.isNotBlank()) "Привет, $nickname 👋" else "Добро пожаловать 👋",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                "Навигатор показывает, куда ехать. Визиторкрут показывает — стоит ли ехать.",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OnboardingStep("1", "Начни смену", "Каждый рабочий день начинается с кнопки «Начать смену». Спросим только про сон — этого хватит для оценки восстановления.")
+            OnboardingStep("2", "Добавляй заказы", "По каждому заказу покажем ₽/ч чистыми и вердикт: стоит ехать, на грани или не стоит.")
+            OnboardingStep("3", "Следи за состоянием", "После первых смен на этом экране появятся доход за месяц, долг восстановления и персональные рекомендации.")
+            Spacer(Modifier.height(72.dp))
+        }
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp)) {
+            Button(
+                onClick = onStart,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = VerdictColors.go),
+            ) {
+                Text("Начать смену", style = MaterialTheme.typography.titleMedium, color = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+private fun OnboardingStep(number: String, title: String, body: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Box(
+            Modifier.size(36.dp).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(18.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(number, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StartShiftSheet(
+    startPrompt: HomeStartPrompt?,
+    onDismiss: () -> Unit,
+    onConfirm: (Double, Double, Double, Double) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var sleepHours by rememberSaveable { mutableStateOf(7f) }
+    var sleepQuality by rememberSaveable { mutableStateOf(3f) }
+    var odometerText by rememberSaveable {
+        mutableStateOf(
+            if (startPrompt?.hasLastOdometer == true) oneDecimal(startPrompt.lastOdometer) else "",
+        )
+    }
+    val breakHours = startPrompt?.breakHours ?: 0.0
+    val hasPrev = startPrompt?.prevEndedAt != null
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text("Начало смены", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+
+            // Сон — обязательно (кормит движок восстановления).
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Сколько спал: ${oneDecimal(sleepHours.toDouble())} ч", style = MaterialTheme.typography.titleSmall)
+                Slider(value = sleepHours, onValueChange = { sleepHours = it }, valueRange = 0f..12f, steps = 23)
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Качество сна: ${qualityWord(sleepQuality.toInt())}", style = MaterialTheme.typography.titleSmall)
+                Slider(value = sleepQuality, onValueChange = { sleepQuality = it }, valueRange = 0f..5f, steps = 4)
+            }
+
+            // Одометр — подтверждение вчерашнего значения или ввод при первом запуске.
+            OutlinedTextField(
+                value = odometerText,
+                onValueChange = { odometerText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' } },
+                label = { Text(if (startPrompt?.hasLastOdometer == true) "Одометр сейчас (был ${oneDecimal(startPrompt.lastOdometer)})" else "Одометр, км") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            // Перерыв — авто.
+            val breakText = if (hasPrev) "Перерыв с прошлой смены: ${oneDecimal(breakHours)} ч (посчитан автоматически)" else "Первая смена — перерыв не считаем"
+            Text(breakText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            Button(
+                onClick = {
+                    val odometer = odometerText.replace(',', '.').toDoubleOrNull() ?: 0.0
+                    onConfirm(odometer, sleepHours.toDouble(), sleepQuality.toDouble(), breakHours)
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = VerdictColors.go),
+            ) {
+                Text("Поехали", style = MaterialTheme.typography.titleMedium, color = Color.White)
+            }
+        }
+    }
+}
+
+private fun trendLabel(delta: Double): String? {
+    if (delta == 0.0) return null
+    return (if (delta > 0) "↑ " else "↓ ") + money(kotlin.math.abs(delta)) + "/ч к среднему"
+}
+
+private fun trendColor(delta: Double): Color = if (delta >= 0) VerdictColors.go else VerdictColors.skip
+
+private fun dayWord(count: Int): String {
+    val n = kotlin.math.abs(count) % 100
+    val d = n % 10
+    return when {
+        n in 11..14 -> "дней"
+        d == 1 -> "день"
+        d in 2..4 -> "дня"
+        else -> "дней"
+    }
+}
+
+private fun qualityWord(value: Int): String = when (value) {
+    0 -> "не спал"
+    1 -> "плохо"
+    2 -> "так себе"
+    3 -> "нормально"
+    4 -> "хорошо"
+    else -> "отлично"
 }
 
 @Composable
