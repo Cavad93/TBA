@@ -35,12 +35,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.filled.Coffee
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Slider
+import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -54,12 +55,20 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Today
@@ -921,9 +930,23 @@ private fun HomeDashboard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Приветствие.
+            // Шапка: дата, приветствие, статус смены.
             val hello = if (snapshot.nickname.isNotBlank()) "Привет, ${snapshot.nickname}" else "Привет"
-            Text(hello, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        headerDate(snapshot.date),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(hello, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                }
+                ShiftStatusPill(shiftActive)
+            }
             if (snapshot.fromCache) {
                 Text("Данные из кэша — обновятся при связи", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -964,10 +987,41 @@ private fun HomeDashboard(
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = VerdictColors.go),
                 ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Color.White)
+                    Spacer(Modifier.width(8.dp))
                     Text("Начать смену", style = MaterialTheme.typography.titleMedium, color = Color.White)
                 }
             }
         }
+    }
+}
+
+/** Пилюля статуса смены в шапке: серый — не на смене, зелёный — идёт. */
+@Composable
+private fun ShiftStatusPill(active: Boolean) {
+    val dot = if (active) VerdictColors.go else MaterialTheme.colorScheme.onSurfaceVariant
+    val text = if (active) "смена идёт" else "не на смене"
+    Row(
+        modifier = Modifier
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(999.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(Modifier.size(8.dp).background(dot, RoundedCornerShape(4.dp)))
+        Text(text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+/** «2026-07-10» → «ПЯТНИЦА, 10 ИЮЛЯ». */
+private fun headerDate(iso: String): String {
+    return try {
+        val d = java.time.LocalDate.parse(iso)
+        val days = arrayOf("ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА", "ВОСКРЕСЕНЬЕ")
+        val months = arrayOf("ЯНВАРЯ", "ФЕВРАЛЯ", "МАРТА", "АПРЕЛЯ", "МАЯ", "ИЮНЯ", "ИЮЛЯ", "АВГУСТА", "СЕНТЯБРЯ", "ОКТЯБРЯ", "НОЯБРЯ", "ДЕКАБРЯ")
+        "${days[d.dayOfWeek.value - 1]}, ${d.dayOfMonth} ${months[d.monthValue - 1]}"
+    } catch (_: Exception) {
+        iso
     }
 }
 
@@ -1007,7 +1061,7 @@ private fun RecoveryHeroCard(recovery: HomeRecovery, debtVsPrev: Double?, streak
                 }
             }
             Text(
-                "Усталость: ${recovery.level.ifBlank { "—" }} · за неделю ${oneDecimal(recovery.weeklyAverage)}/100",
+                "Индекс нагрузки: ${loadLevelWord(recovery.level)} · за неделю ${oneDecimal(recovery.weeklyAverage)}/100",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1065,14 +1119,39 @@ private fun RecommendationCard(rec: HomeRecommendation) {
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            // Цветная риска слева по тону.
-            Box(Modifier.width(4.dp).height(40.dp).background(tone.accent, RoundedCornerShape(2.dp)))
+            // Цветная иконка-плитка по типу рекомендации.
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .background(tone.container, RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(recIcon(rec.kind), contentDescription = null, tint = tone.accent, modifier = Modifier.size(22.dp))
+            }
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(rec.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Text(rec.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
+}
+
+private fun recIcon(kind: String) = when (kind) {
+    "recovery" -> Icons.Filled.Bolt
+    "fatigue" -> Icons.Filled.Bedtime
+    "streak" -> Icons.Filled.CheckCircle
+    "planning" -> Icons.Filled.WbSunny
+    else -> Icons.AutoMirrored.Filled.TrendingUp
+}
+
+/** Нейтральные словесные уровни индекса нагрузки (без «стоп-зон» и медицины). */
+private fun loadLevelWord(level: String): String = when (level) {
+    "стоп-зона" -> "на пределе"
+    "красная зона" -> "очень высокая"
+    "перегрузка" -> "высокая"
+    "повышенная нагрузка" -> "повышенная"
+    "норма" -> "спокойно"
+    else -> level.ifBlank { "—" }
 }
 
 @Composable
@@ -1135,11 +1214,11 @@ private fun StartShiftSheet(
     onConfirm: (Double, Double, Double, Double) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var sleepHours by rememberSaveable { mutableStateOf(7f) }
-    var sleepQuality by rememberSaveable { mutableStateOf(3f) }
+    var sleepHours by rememberSaveable { mutableStateOf(7) }
+    var sleepQuality by rememberSaveable { mutableStateOf(3) } // 1 плохо / 3 норм / 5 отлично
     var odometerText by rememberSaveable {
         mutableStateOf(
-            if (startPrompt?.hasLastOdometer == true) oneDecimal(startPrompt.lastOdometer) else "",
+            if (startPrompt?.hasLastOdometer == true) startPrompt.lastOdometer.toInt().toString() else "",
         )
     }
     val breakHours = startPrompt?.breakHours ?: 0.0
@@ -1148,45 +1227,117 @@ private fun StartShiftSheet(
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Text("Начало смены", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("Начать смену", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
 
-            // Сон — обязательно (кормит движок восстановления).
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Сколько спал: ${oneDecimal(sleepHours.toDouble())} ч", style = MaterialTheme.typography.titleSmall)
-                Slider(value = sleepHours, onValueChange = { sleepHours = it }, valueRange = 0f..12f, steps = 23)
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Качество сна: ${qualityWord(sleepQuality.toInt())}", style = MaterialTheme.typography.titleSmall)
-                Slider(value = sleepQuality, onValueChange = { sleepQuality = it }, valueRange = 0f..5f, steps = 4)
+            // Сон — обязательно. Степпер часов.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Как спал этой ночью?", style = MaterialTheme.typography.titleSmall)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedIconButton(onClick = { if (sleepHours > 0) sleepHours-- }) {
+                        Icon(Icons.Filled.Remove, contentDescription = "Меньше")
+                    }
+                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.Bottom) {
+                        Text("$sleepHours", fontFamily = JetBrainsMono, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(6.dp))
+                        Text(hoursWord(sleepHours), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 4.dp))
+                    }
+                    OutlinedIconButton(onClick = { if (sleepHours < 14) sleepHours++ }) {
+                        Icon(Icons.Filled.Add, contentDescription = "Больше")
+                    }
+                }
+                // Качество — три сегмента.
+                val options = listOf("Плохо" to 1, "Норм" to 3, "Отлично" to 5)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(12.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    options.forEach { (label, value) ->
+                        val active = sleepQuality == value
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(if (active) MaterialTheme.colorScheme.surface else Color.Transparent)
+                                .clickable { sleepQuality = value }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             }
 
             // Одометр — подтверждение вчерашнего значения или ввод при первом запуске.
-            OutlinedTextField(
-                value = odometerText,
-                onValueChange = { odometerText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' } },
-                label = { Text(if (startPrompt?.hasLastOdometer == true) "Одометр сейчас (был ${oneDecimal(startPrompt.lastOdometer)})" else "Одометр, км") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(
+                    value = odometerText,
+                    onValueChange = { odometerText = it.filter { ch -> ch.isDigit() } },
+                    label = { Text("Одометр — пробег сейчас") },
+                    suffix = { Text("км") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (startPrompt?.hasLastOdometer == true) {
+                    Text(
+                        "Вчера было ${groupedInt(startPrompt.lastOdometer)} км. Столько сейчас? Поправь, если нет.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
 
-            // Перерыв — авто.
-            val breakText = if (hasPrev) "Перерыв с прошлой смены: ${oneDecimal(breakHours)} ч (посчитан автоматически)" else "Первая смена — перерыв не считаем"
-            Text(breakText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Перерыв — авто, синяя карточка.
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+            ) {
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Icon(Icons.Filled.Coffee, contentDescription = null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(20.dp))
+                    Text(
+                        if (hasPrev) "Перерыв с прошлой смены — ${oneDecimal(breakHours)} ч. Посчитали сами по времени."
+                        else "Первая смена — перерыв не считаем.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    )
+                }
+            }
 
             Button(
                 onClick = {
-                    val odometer = odometerText.replace(',', '.').toDoubleOrNull() ?: 0.0
+                    val odometer = odometerText.toDoubleOrNull() ?: 0.0
                     onConfirm(odometer, sleepHours.toDouble(), sleepQuality.toDouble(), breakHours)
                 },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = VerdictColors.go),
             ) {
+                Icon(Icons.Filled.NearMe, contentDescription = null, tint = Color.White)
+                Spacer(Modifier.width(8.dp))
                 Text("Поехали", style = MaterialTheme.typography.titleMedium, color = Color.White)
             }
         }
+    }
+}
+
+private fun hoursWord(n: Int): String {
+    val nn = n % 100
+    val d = n % 10
+    return when {
+        nn in 11..14 -> "часов"
+        d == 1 -> "час"
+        d in 2..4 -> "часа"
+        else -> "часов"
     }
 }
 
@@ -3376,7 +3527,12 @@ private fun WorkForm.title(): String = when (this) {
 }
 
 private fun money(value: Double): String {
-    return String.format(Locale("ru", "RU"), "%.0f ₽", value)
+    return String.format(Locale("ru", "RU"), "%,.0f ₽", value)
+}
+
+/** Целое с разрядами по-русски: 84120 → «84 120». */
+private fun groupedInt(value: Double): String {
+    return String.format(Locale("ru", "RU"), "%,d", value.toLong())
 }
 
 private fun oneDecimal(value: Double): String {
