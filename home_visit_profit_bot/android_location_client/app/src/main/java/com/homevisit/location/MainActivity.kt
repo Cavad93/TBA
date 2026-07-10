@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -2258,20 +2259,39 @@ private fun VisitInputCard(
     }
 }
 
+private data class VerdictStyle(val accent: Color, val container: Color, val onContainer: Color)
+
+/** Классифицируем решение сервера в вердикт-шкалу DS (стоит / на грани / не стоит). */
+private fun verdictStyleFor(decision: String): VerdictStyle {
+    val d = decision.lowercase()
+    return when {
+        d.contains("не стоит") || d.contains("невыгод") || d.contains("отказ") || d.contains("минус") ->
+            VerdictStyle(VerdictColors.skip, VerdictColors.skipContainer, VerdictColors.onSkipContainer)
+        d.contains("грани") || d.contains("осторож") || d.contains("порог") || d.contains("край") ->
+            VerdictStyle(VerdictColors.edge, VerdictColors.edgeContainer, VerdictColors.onEdgeContainer)
+        else ->
+            VerdictStyle(VerdictColors.go, VerdictColors.goContainer, VerdictColors.onGoContainer)
+    }
+}
+
 @Composable
 private fun CandidateResultCard(candidate: CandidateUiState, onAccept: () -> Unit, onReject: () -> Unit) {
     val estimate = candidate.estimate
     if (candidate.message.isBlank() && estimate == null && !candidate.isLoading) {
         return
     }
+    val verdict = estimate?.let { verdictStyleFor(it.decision) }
     Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = verdict?.container ?: MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        border = verdict?.let { BorderStroke(1.5.dp, it.accent) },
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (candidate.message.isNotBlank()) {
@@ -2284,16 +2304,42 @@ private fun CandidateResultCard(candidate: CandidateUiState, onAccept: () -> Uni
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (estimate != null) {
-                Text(estimate.decision, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text(estimate.reason, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (estimate != null && verdict != null) {
                 Text(
-                    "Было ${money(estimate.beforeHourly)}/ч, станет ${money(estimate.afterHourly)}/ч. Маржинально: ${money(estimate.marginalHourly)}/ч.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    estimate.decision,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = verdict.onContainer,
+                )
+                if (estimate.reason.isNotBlank()) {
+                    Text(estimate.reason, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                // Главное число — крупно, моно, ведёт вёрстку.
+                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        money(estimate.afterHourly),
+                        fontFamily = JetBrainsMono,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        "/ч чистыми",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                }
+                Text(
+                    "Было ${money(estimate.beforeHourly)}/ч · маржинально ${money(estimate.marginalHourly)}/ч",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = JetBrainsMono,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    "Добавится: ${oneDecimal(estimate.extraKm)} км, ${oneDecimal(estimate.extraDriveMinutes)} мин. Минимум: ${money(estimate.requiredCandidateIncome)}, надбавка: ${money(estimate.requiredExtraPayment)}.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    "Добавится ${oneDecimal(estimate.extraKm)} км · ${oneDecimal(estimate.extraDriveMinutes)} мин · минимум ${money(estimate.requiredCandidateIncome)} · надбавка ${money(estimate.requiredExtraPayment)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (estimate.fatigueExtraPayment > 0 || estimate.fatigueLevel.isNotBlank()) {
                     Text(
@@ -2305,10 +2351,11 @@ private fun CandidateResultCard(candidate: CandidateUiState, onAccept: () -> Uni
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = verdict.accent),
                         enabled = !candidate.isLoading,
                         onClick = onAccept,
                     ) {
-                        Text("Принять")
+                        Text("Взять заказ")
                     }
                     OutlinedButton(
                         modifier = Modifier.weight(1f),
