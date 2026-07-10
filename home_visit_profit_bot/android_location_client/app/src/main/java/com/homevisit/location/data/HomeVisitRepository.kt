@@ -31,11 +31,23 @@ import com.homevisit.location.domain.FatigueTrendPoint
 import com.homevisit.location.domain.FatigueTrendReport
 import com.homevisit.location.domain.GpsDayEstimate
 import com.homevisit.location.domain.GpsVisitHint
+import com.homevisit.location.domain.DrivingRating
 import com.homevisit.location.domain.HomeMoney
 import com.homevisit.location.domain.HomeRecommendation
 import com.homevisit.location.domain.HomeRecovery
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.HomeStartPrompt
+import com.homevisit.location.domain.ProfileDriving
+import com.homevisit.location.domain.ProfileMonth
+import com.homevisit.location.domain.ProfileSnapshot
+import com.homevisit.location.domain.ProfileUser
+import com.homevisit.location.domain.ProfileWellbeing
+import com.homevisit.location.domain.ShiftBar
+import com.homevisit.location.domain.ShiftGoal
+import com.homevisit.location.domain.ShiftOrder
+import com.homevisit.location.domain.ShiftSnapshot
+import com.homevisit.location.domain.ShiftToday
+import com.homevisit.location.domain.WellbeingGauge
 import com.homevisit.location.domain.ReportPeriod
 import com.homevisit.location.domain.ReportSnapshot
 import com.homevisit.location.domain.ReportSummary
@@ -700,6 +712,18 @@ class HomeVisitRepository private constructor(
         val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/home"), apiKey, "cache_home")
             ?: return@withContext null
         parseHomeSnapshot(response)
+    }
+
+    suspend fun fetchShift(serverUrl: String, apiKey: String, period: String): ShiftSnapshot? = withContext(Dispatchers.IO) {
+        val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/shift?period=$period"), apiKey, "cache_shift_$period")
+            ?: return@withContext null
+        parseShiftSnapshot(response)
+    }
+
+    suspend fun fetchProfile(serverUrl: String, apiKey: String): ProfileSnapshot? = withContext(Dispatchers.IO) {
+        val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/profile"), apiKey, "cache_profile")
+            ?: return@withContext null
+        parseProfileSnapshot(response)
     }
 
     suspend fun fetchFatigueSummary(serverUrl: String, apiKey: String): FatigueSnapshot? = withContext(Dispatchers.IO) {
@@ -1397,6 +1421,99 @@ class HomeVisitRepository private constructor(
             days = money.optInt("days", 0),
         )
     }
+
+    private fun parseShiftSnapshot(r: JSONObject): ShiftSnapshot? {
+        if (!r.optBoolean("ok", false)) return null
+        val t = r.optJSONObject("today") ?: JSONObject()
+        val g = r.optJSONObject("goal") ?: JSONObject()
+        val barsJson = r.optJSONArray("bars") ?: JSONArray()
+        val recentJson = r.optJSONArray("recent") ?: JSONArray()
+        val bars = buildList {
+            for (i in 0 until barsJson.length()) {
+                val b = barsJson.optJSONObject(i) ?: continue
+                add(ShiftBar(label = b.optString("label"), value = b.optDouble("value", 0.0)))
+            }
+        }
+        val recent = buildList {
+            for (i in 0 until recentJson.length()) {
+                val o = recentJson.optJSONObject(i) ?: continue
+                add(ShiftOrder(label = o.optString("label"), income = o.optDouble("income", 0.0), verdict = o.optString("verdict")))
+            }
+        }
+        return ShiftSnapshot(
+            period = r.optString("period", "day"),
+            today = ShiftToday(
+                active = t.optBoolean("active", false),
+                gross = t.optDouble("gross", 0.0),
+                net = t.optDouble("net", 0.0),
+                netHourly = t.optDouble("net_hourly", 0.0),
+                visits = t.optInt("visits", 0),
+                workHours = t.optDouble("work_hours", 0.0),
+            ),
+            goal = ShiftGoal(
+                daily = optNullableDouble(g, "daily"),
+                suggested = optNullableDouble(g, "suggested"),
+                progress = optNullableDouble(g, "progress"),
+            ),
+            bars = bars,
+            recent = recent,
+            fromCache = r.optBoolean("_from_cache", false),
+        )
+    }
+
+    private fun parseProfileSnapshot(r: JSONObject): ProfileSnapshot? {
+        if (!r.optBoolean("ok", false)) return null
+        val u = r.optJSONObject("user") ?: JSONObject()
+        val m = r.optJSONObject("month") ?: JSONObject()
+        val w = r.optJSONObject("wellbeing") ?: JSONObject()
+        val d = r.optJSONObject("driving")
+        return ProfileSnapshot(
+            user = ProfileUser(
+                nickname = u.optString("nickname"),
+                occupation = u.optString("occupation"),
+                daysInService = if (u.isNull("days_in_service")) null else u.optInt("days_in_service"),
+            ),
+            month = ProfileMonth(
+                avgOnSiteMin = m.optDouble("avg_on_site_min", 0.0),
+                avgRouteMin = m.optDouble("avg_route_min", 0.0),
+                netHourly = m.optDouble("net_hourly", 0.0),
+                visits = m.optInt("visits", 0),
+            ),
+            wellbeing = ProfileWellbeing(
+                hasData = w.optBoolean("has_data", false),
+                recovery = parseGauge(w.optJSONObject("recovery")),
+                load = parseGauge(w.optJSONObject("load")),
+                reserve = parseGauge(w.optJSONObject("reserve")),
+                note = w.optString("note"),
+            ),
+            driving = if (d == null) null else ProfileDriving(
+                score10 = d.optDouble("score10", 0.0),
+                smoothAccelPct = d.optInt("smooth_accel_pct", 0),
+                smoothBrakePct = d.optInt("smooth_brake_pct", 0),
+                harshBrakesPer100km = d.optDouble("harsh_brakes_per100km", 0.0),
+                speedingPer100km = d.optDouble("speeding_per100km", 0.0),
+                rating = d.optJSONObject("self_rating").let { sr ->
+                    DrivingRating(
+                        stars = sr?.optInt("stars", 0) ?: 0,
+                        deltaPct = sr?.optDouble("delta_pct", 0.0) ?: 0.0,
+                        text = sr?.optString("text").orEmpty(),
+                    )
+                },
+            ),
+            fromCache = r.optBoolean("_from_cache", false),
+        )
+    }
+
+    private fun parseGauge(o: JSONObject?): WellbeingGauge {
+        if (o == null) return WellbeingGauge(null, "")
+        return WellbeingGauge(
+            percent = if (o.isNull("percent")) null else o.optInt("percent"),
+            label = o.optString("label"),
+        )
+    }
+
+    private fun optNullableDouble(o: JSONObject, key: String): Double? =
+        if (o.isNull(key)) null else o.optDouble(key)
 
     private fun parseFatigueSnapshot(response: JSONObject): FatigueSnapshot? {
         val cbi = parseCbiInfo(response.optJSONObject("cbi")) ?: return null

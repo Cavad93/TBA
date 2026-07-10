@@ -99,6 +99,96 @@ data class HomeRecommendation(
     val text: String,
 )
 
+// --- Экран «Смена» (GET /api/shift) ---
+
+data class ShiftSnapshot(
+    val period: String,
+    val today: ShiftToday,
+    val goal: ShiftGoal,
+    val bars: List<ShiftBar>,
+    val recent: List<ShiftOrder>,
+    val fromCache: Boolean = false,
+)
+
+data class ShiftToday(
+    val active: Boolean,
+    val gross: Double,
+    val net: Double,
+    val netHourly: Double,
+    val visits: Int,
+    val workHours: Double,
+)
+
+/** daily/suggested = null, если не задано/нет истории. */
+data class ShiftGoal(
+    val daily: Double?,
+    val suggested: Double?,
+    val progress: Double?,
+)
+
+data class ShiftBar(
+    val label: String,
+    val value: Double,
+)
+
+data class ShiftOrder(
+    val label: String,
+    val income: Double,
+    val verdict: String, // go/edge/skip/""
+)
+
+// --- Экран «Профиль» (GET /api/profile) ---
+
+data class ProfileSnapshot(
+    val user: ProfileUser,
+    val month: ProfileMonth,
+    val wellbeing: ProfileWellbeing,
+    val driving: ProfileDriving?,
+    val fromCache: Boolean = false,
+)
+
+data class ProfileUser(
+    val nickname: String,
+    val occupation: String,
+    val daysInService: Int?,
+)
+
+data class ProfileMonth(
+    val avgOnSiteMin: Double,
+    val avgRouteMin: Double,
+    val netHourly: Double,
+    val visits: Int,
+)
+
+data class ProfileWellbeing(
+    val hasData: Boolean,
+    val recovery: WellbeingGauge,
+    val load: WellbeingGauge,
+    val reserve: WellbeingGauge,
+    val note: String,
+)
+
+/** percent = null, если данных ещё нет. */
+data class WellbeingGauge(
+    val percent: Int?,
+    val label: String,
+)
+
+data class ProfileDriving(
+    val score10: Double,
+    val smoothAccelPct: Int,
+    val smoothBrakePct: Int,
+    val harshBrakesPer100km: Double,
+    val speedingPer100km: Double,
+    val rating: DrivingRating,
+)
+
+data class DrivingRating(
+    val stars: Int,
+    val deltaPct: Double,
+    val text: String,
+)
+
 data class WorkDaySummary(
     val status: WorkDayStatus = WorkDayStatus.NotStarted,
     val visitsCount: Int = 0,

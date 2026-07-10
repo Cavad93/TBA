@@ -35,8 +35,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.foundation.Canvas
 import androidx.compose.material.icons.filled.Coffee
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.Card
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -99,6 +103,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -130,10 +136,16 @@ import com.homevisit.location.domain.HomeRecommendation
 import com.homevisit.location.domain.HomeRecovery
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.HomeStartPrompt
+import com.homevisit.location.domain.ProfileDriving
+import com.homevisit.location.domain.ProfileWellbeing
 import com.homevisit.location.domain.ReportPeriod
 import com.homevisit.location.domain.ReportSnapshot
 import com.homevisit.location.domain.ReportSummary
+import com.homevisit.location.domain.ShiftBar
+import com.homevisit.location.domain.ShiftOrder
+import com.homevisit.location.domain.ShiftToday
 import com.homevisit.location.domain.StopLabel
+import com.homevisit.location.domain.WellbeingGauge
 import com.homevisit.location.domain.WorkDayStatus
 import com.homevisit.location.sync.SyncScheduler
 import com.homevisit.location.ui.AppSettingsUiState
@@ -146,7 +158,9 @@ import com.homevisit.location.ui.HomeVisitUiState
 import com.homevisit.location.ui.HomeVisitViewModel
 import com.homevisit.location.ui.ReportUiState
 import com.homevisit.location.ui.RouteUiState
+import com.homevisit.location.ui.ProfileUiState
 import com.homevisit.location.ui.RouteVisitUi
+import com.homevisit.location.ui.ShiftUiState
 import com.homevisit.location.ui.SyncUiState
 import java.util.Locale
 import kotlinx.coroutines.launch
@@ -197,6 +211,8 @@ class MainActivity : ComponentActivity() {
                     onStartDayDetails = viewModel::startDayWithDetails,
                     onStartShift = viewModel::startShift,
                     onRefreshHome = viewModel::refreshHome,
+                    onRefreshShift = viewModel::refreshShift,
+                    onRefreshProfile = viewModel::refreshProfile,
                     onEndDay = viewModel::endDay,
                     onEndDayWithOdometer = viewModel::endDayWithOdometer,
                     onEndDayWithDetails = viewModel::endDayWithDetails,
@@ -392,6 +408,8 @@ private data class WorkActions(
     val onStartDayDetails: (String, String, Double, Double, Double, Double) -> Unit,
     val onStartShift: (Double, Double, Double, Double) -> Unit,
     val onRefreshHome: () -> Unit,
+    val onRefreshShift: (String) -> Unit,
+    val onRefreshProfile: () -> Unit,
     val onEndDay: () -> Unit,
     val onEndDayWithOdometer: (Double?) -> Unit,
     val onEndDayWithDetails: (EndDayDetails) -> Unit,
@@ -530,6 +548,8 @@ private fun HomeVisitApp(
     onStartDayDetails: (String, String, Double, Double, Double, Double) -> Unit,
     onStartShift: (Double, Double, Double, Double) -> Unit,
     onRefreshHome: (String, String) -> Unit,
+    onRefreshShift: (String, String, String) -> Unit,
+    onRefreshProfile: (String, String) -> Unit,
     onEndDay: () -> Unit,
     onEndDayWithOdometer: (Double?) -> Unit,
     onEndDayWithDetails: (EndDayDetails) -> Unit,
@@ -599,6 +619,8 @@ private fun HomeVisitApp(
         onStartDayDetails = onStartDayDetails,
         onStartShift = onStartShift,
         onRefreshHome = { onRefreshHome(serverUrl, apiKey) },
+        onRefreshShift = { period -> onRefreshShift(serverUrl, apiKey, period) },
+        onRefreshProfile = { onRefreshProfile(serverUrl, apiKey) },
         onEndDay = onEndDay,
         onEndDayWithOdometer = onEndDayWithOdometer,
         onEndDayWithDetails = onEndDayWithDetails,
@@ -774,23 +796,392 @@ private fun AppScaffold(
                 )
                 AppDestination.Work -> WorkScreen(uiState, workActions)
                 AppDestination.Route -> RouteScreen(uiState, workActions, settingsState)
-                AppDestination.Shift -> ShiftScreen(uiState, workActions)
-                AppDestination.Profile -> ProfileScreen(uiState, workActions, onOpenSettings)
+                AppDestination.Shift -> ShiftScreen(uiState.shift, workActions.onRefreshShift)
+                AppDestination.Profile -> ProfileScreen(
+                    profile = uiState.profile,
+                    onRefresh = workActions.onRefreshProfile,
+                    onOpenSettings = onOpenSettings,
+                    onLogout = settingsState.onLogout,
+                )
             }
         }
     }
 }
 
-// Временные экраны «Смена» и «Профиль»: пока переиспользуют существующие данные,
-// полноценный редизайн — в следующих под-этапах (статистика/состояние).
+// ======================= Экран «Смена» (статистика) =======================
+
 @Composable
-private fun ShiftScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
-    ReportsScreen(uiState.report, workActions)
+private fun ShiftScreen(shift: ShiftUiState, onRefresh: (String) -> Unit) {
+    var period by rememberSaveable { mutableStateOf("week") }
+    LaunchedEffect(period) { onRefresh(period) }
+    val snapshot = shift.snapshot
+    when {
+        snapshot == null && shift.loading -> HomeLoading()
+        snapshot == null -> HomeError(onRetry = { onRefresh(period) })
+        else -> Column(
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            ShiftEarningsCard(snapshot.today, snapshot.goal)
+            PeriodSegment(period) { period = it }
+            ShiftBarChart(snapshot.bars)
+            if (snapshot.recent.isNotEmpty()) {
+                SectionHeader("Последние")
+                snapshot.recent.forEach { OrderRow(it) }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
 }
 
 @Composable
-private fun ProfileScreen(uiState: HomeVisitUiState, workActions: WorkActions, onOpenSettings: () -> Unit) {
-    FatigueScreen(uiState.fatigue, workActions)
+private fun ShiftEarningsCard(today: ShiftToday, goal: com.homevisit.location.domain.ShiftGoal) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("ЗАРАБОТАНО СЕГОДНЯ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(money(today.net), fontFamily = JetBrainsMono, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, color = VerdictColors.go)
+            val daily = goal.daily
+            if (daily != null && daily > 0) {
+                val progress = (today.net / daily).coerceIn(0.0, 1.0).toFloat()
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                    color = VerdictColors.go,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                )
+                val left = (daily - today.net).coerceAtLeast(0.0)
+                Text(
+                    if (left > 0) "Цель на день — ${money(daily)}. Осталось ${money(left)}." else "Цель на день выполнена — ${money(daily)}. 🎉",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else if (goal.suggested != null) {
+                Text("Совет: поставь цель ~${money(goal.suggested)}/день (в настройках) — покажем прогресс.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                MiniStat("Выездов", today.visits.toString())
+                MiniStat("Часов", oneDecimal(today.workHours))
+                MiniStat("Чистыми/ч", money(today.netHourly))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniStat(label: String, value: String) {
+    Column {
+        Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontFamily = JetBrainsMono, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun PeriodSegment(selected: String, onSelect: (String) -> Unit) {
+    val options = listOf("День" to "day", "Неделя" to "week", "Месяц" to "month")
+    Row(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(12.dp)).padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        options.forEach { (label, value) ->
+            val active = selected == value
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(9.dp))
+                    .background(if (active) MaterialTheme.colorScheme.surface else Color.Transparent)
+                    .clickable { onSelect(value) }.padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal, color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShiftBarChart(bars: List<ShiftBar>) {
+    if (bars.isEmpty()) {
+        CompactCard("Пока пусто", "Закрой первую смену — здесь появится график заработка.")
+        return
+    }
+    val maxValue = bars.maxOf { it.value }.coerceAtLeast(1.0)
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().height(150.dp).padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            bars.forEach { bar ->
+                val frac = (bar.value / maxValue).toFloat().coerceIn(0f, 1f)
+                Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(shortMoney(bar.value), style = MaterialTheme.typography.labelSmall, fontFamily = JetBrainsMono, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    Box(
+                        Modifier.fillMaxWidth().weight(1f, fill = true),
+                        contentAlignment = Alignment.BottomCenter,
+                    ) {
+                        Box(
+                            Modifier.fillMaxWidth().fillMaxHeight(frac.coerceAtLeast(0.02f))
+                                .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                                .background(if (frac >= 0.999f) VerdictColors.go else MaterialTheme.colorScheme.primaryContainer),
+                        )
+                    }
+                    Text(bar.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OrderRow(order: ShiftOrder) {
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            VerdictPill(order.verdict)
+            Text(order.label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text("+${money(order.income)}", fontFamily = JetBrainsMono, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = VerdictColors.go)
+        }
+    }
+}
+
+@Composable
+private fun VerdictPill(verdict: String) {
+    val (bg, fg, text) = when (verdict) {
+        "go" -> Triple(VerdictColors.go, Color.White, "Стоит ехать")
+        "edge" -> Triple(VerdictColors.edge, Color.White, "На грани")
+        "skip" -> Triple(VerdictColors.skip, Color.White, "Не стоит")
+        else -> Triple(MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurface, "—")
+    }
+    Box(Modifier.background(bg, RoundedCornerShape(999.dp)).padding(horizontal = 10.dp, vertical = 5.dp)) {
+        Text(text, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1)
+    }
+}
+
+/** Короткая денежная подпись для столбцов: 4820 → «4.8к». */
+private fun shortMoney(value: Double): String {
+    return if (value >= 1000) String.format(Locale("ru", "RU"), "%.0fк", value / 1000) else value.toInt().toString()
+}
+
+// ======================= Экран «Профиль» (состояние) =======================
+
+@Composable
+private fun ProfileScreen(profile: ProfileUiState, onRefresh: () -> Unit, onOpenSettings: () -> Unit, onLogout: () -> Unit) {
+    LaunchedEffect(Unit) { onRefresh() }
+    val snapshot = profile.snapshot
+    when {
+        snapshot == null && profile.loading -> HomeLoading()
+        snapshot == null -> HomeError(onRetry = onRefresh)
+        else -> Column(
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            ProfileUserCard(snapshot.user.nickname, snapshot.user.occupation, snapshot.user.daysInService)
+
+            SectionHeader("Показатели · за месяц")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                MoneyTile(Modifier.weight(1f), "Среднее на адресе", "${snapshot.month.avgOnSiteMin.toInt()} мин", null)
+                MoneyTile(Modifier.weight(1f), "Среднее в пути", "${snapshot.month.avgRouteMin.toInt()} мин", null)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                MoneyTile(Modifier.weight(1f), "Средний ₽/ч", money(snapshot.month.netHourly), null)
+                MoneyTile(Modifier.weight(1f), "Выездов", snapshot.month.visits.toString(), null)
+            }
+
+            if (snapshot.wellbeing.hasData) {
+                SectionHeader("Состояние · как ты держишься")
+                WellbeingCard(snapshot.wellbeing)
+            }
+
+            snapshot.driving?.let {
+                SectionHeader("Стиль вождения · по данным приложения")
+                DrivingCard(it)
+            }
+
+            Spacer(Modifier.height(4.dp))
+            OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Настройки расчёта и приложения")
+            }
+            TextButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
+                Text("Выйти", color = MaterialTheme.colorScheme.error)
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun ProfileUserCard(nickname: String, occupation: String, days: Int?) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box(
+                Modifier.size(52.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(26.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(initials(nickname), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(nickname.ifBlank { "Профиль" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                val sub = buildList {
+                    if (occupation.isNotBlank()) add(occupation)
+                    if (days != null) add("$days ${dayWord(days)} в деле")
+                }.joinToString(" · ")
+                if (sub.isNotBlank()) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WellbeingCard(w: ProfileWellbeing) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                WellbeingDonut(w.recovery, "Восстановление", goodColor(w.recovery.percent))
+                WellbeingDonut(w.load, "Индекс нагрузки", loadColor(w.load.percent))
+                WellbeingDonut(w.reserve, "Запас сил", goodColor(w.reserve.percent))
+            }
+            if (w.note.isNotBlank()) {
+                Text(w.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WellbeingDonut(gauge: WellbeingGauge, title: String, color: Color) {
+    val percent = gauge.percent ?: 0
+    val track = MaterialTheme.colorScheme.surfaceContainerHighest
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(78.dp), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.fillMaxSize()) {
+                val stroke = 9.dp.toPx()
+                val inset = stroke / 2
+                val arc = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke)
+                val topLeft = androidx.compose.ui.geometry.Offset(inset, inset)
+                drawArc(color = track, startAngle = 0f, sweepAngle = 360f, useCenter = false, topLeft = topLeft, size = arc, style = Stroke(width = stroke, cap = StrokeCap.Round))
+                drawArc(color = color, startAngle = -90f, sweepAngle = 360f * (percent / 100f), useCenter = false, topLeft = topLeft, size = arc, style = Stroke(width = stroke, cap = StrokeCap.Round))
+            }
+            Text("$percent%", fontFamily = JetBrainsMono, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        }
+        Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(gauge.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+    }
+}
+
+@Composable
+private fun DrivingCard(d: ProfileDriving) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.size(44.dp).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.Speed, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp))
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(drivingWord(d.score10), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    if (d.rating.text.isNotBlank()) Text(d.rating.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    StarRow(d.rating.stars)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(oneDecimal(d.score10), fontFamily = JetBrainsMono, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = VerdictColors.go)
+                    Text("из 10", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            MetricBar("Плавность разгона", "${d.smoothAccelPct}%", d.smoothAccelPct / 100f, VerdictColors.go)
+            MetricBar("Плавность торможения", "${d.smoothBrakePct}%", d.smoothBrakePct / 100f, VerdictColors.go)
+            MetricLine("Резких торможений", "${oneDecimal(d.harshBrakesPer100km)}/100 км", if (d.harshBrakesPer100km > 3) VerdictColors.edge else MaterialTheme.colorScheme.onSurfaceVariant)
+            MetricLine("Превышений скорости", "${oneDecimal(d.speedingPer100km)}/100 км", if (d.speedingPer100km > 1) VerdictColors.edge else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun MetricBar(label: String, valueText: String, fraction: Float, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+        LinearProgressIndicator(
+            progress = { fraction.coerceIn(0f, 1f) },
+            modifier = Modifier.weight(1.2f).height(6.dp).clip(RoundedCornerShape(3.dp)),
+            color = color,
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        )
+        Text(valueText, style = MaterialTheme.typography.labelMedium, fontFamily = JetBrainsMono, modifier = Modifier.width(44.dp))
+    }
+}
+
+@Composable
+private fun MetricLine(label: String, valueText: String, color: Color) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(valueText, style = MaterialTheme.typography.labelMedium, fontFamily = JetBrainsMono, color = color)
+    }
+}
+
+@Composable
+private fun StarRow(stars: Int) {
+    Row {
+        repeat(5) { i ->
+            Icon(
+                if (i < stars) Icons.Filled.Star else Icons.Filled.StarBorder,
+                contentDescription = null,
+                tint = VerdictColors.edge,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+}
+
+private fun initials(name: String): String {
+    val parts = name.trim().split(" ", ".").filter { it.isNotBlank() }
+    return when {
+        parts.isEmpty() -> "?"
+        parts.size == 1 -> parts[0].take(1).uppercase()
+        else -> (parts[0].take(1) + parts[1].take(1)).uppercase()
+    }
+}
+
+private fun drivingWord(score: Double): String = when {
+    score >= 8 -> "Ровный"
+    score >= 6 -> "Аккуратный"
+    score >= 4 -> "Средний"
+    else -> "Резкий"
+}
+
+@Composable
+private fun goodColor(percent: Int?): Color = when {
+    percent == null -> MaterialTheme.colorScheme.outline
+    percent >= 66 -> VerdictColors.go
+    percent >= 40 -> VerdictColors.edge
+    else -> VerdictColors.skip
+}
+
+@Composable
+private fun loadColor(percent: Int?): Color = when {
+    percent == null -> MaterialTheme.colorScheme.outline
+    percent >= 66 -> VerdictColors.skip
+    percent >= 40 -> VerdictColors.edge
+    else -> VerdictColors.go
 }
 
 @Composable

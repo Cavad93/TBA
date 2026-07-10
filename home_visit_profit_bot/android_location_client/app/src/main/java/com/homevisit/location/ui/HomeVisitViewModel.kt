@@ -16,6 +16,8 @@ import com.homevisit.location.domain.FatigueTrendReport
 import com.homevisit.location.domain.GpsDayEstimate
 import com.homevisit.location.domain.GpsVisitHint
 import com.homevisit.location.domain.HomeSnapshot
+import com.homevisit.location.domain.ProfileSnapshot
+import com.homevisit.location.domain.ShiftSnapshot
 import com.homevisit.location.domain.ReportPeriod
 import com.homevisit.location.domain.ReportSnapshot
 import com.homevisit.location.domain.ServerRouteSnapshot
@@ -50,6 +52,8 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     private val backupExportState = MutableStateFlow<String?>(null)
     private val syncConflictState = MutableStateFlow<List<SyncConflict>>(emptyList())
     private val homeStateFlow = MutableStateFlow(HomeUiState())
+    private val shiftStateFlow = MutableStateFlow(ShiftUiState())
+    private val profileStateFlow = MutableStateFlow(ProfileUiState())
 
     private val syncState = combine(repository.observeSyncQueueStats(), syncMessageState, backupExportState, syncConflictState) { stats, message, backupJson, conflicts ->
         SyncUiState(stats = stats, message = message, backupJson = backupJson, conflicts = conflicts)
@@ -101,8 +105,8 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         OperationalUiState(route, gpsEstimate, gpsHint, report, fatigue)
     }
 
-    private val auxState = combine(appSettingsState, clinicsState, homeStateFlow) { appSettings, clinics, home ->
-        AuxUiState(appSettings, clinics, home)
+    private val auxState = combine(appSettingsState, clinicsState, homeStateFlow, shiftStateFlow, profileStateFlow) { appSettings, clinics, home, shift, profile ->
+        AuxUiState(appSettings, clinics, home, shift, profile)
     }
 
     val uiState: StateFlow<HomeVisitUiState> = combine(dayState, candidateState, operationalState, syncState, auxState) { day, candidate, operational, sync, aux ->
@@ -117,6 +121,8 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             appSettings = aux.appSettings,
             clinics = aux.clinics,
             home = aux.home,
+            shift = aux.shift,
+            profile = aux.profile,
         )
     }
         .stateIn(
@@ -152,6 +158,30 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 snapshot = snapshot,
                 error = snapshot == null,
             )
+        }
+    }
+
+    fun refreshShift(serverUrl: String, apiKey: String, period: String) {
+        viewModelScope.launch {
+            if (serverUrl.isBlank() || apiKey.isBlank()) {
+                shiftStateFlow.update { it.copy(loading = false) }
+                return@launch
+            }
+            shiftStateFlow.update { it.copy(loading = true, error = false, period = period) }
+            val snapshot = repository.fetchShift(serverUrl, apiKey, period)
+            shiftStateFlow.value = ShiftUiState(loading = false, snapshot = snapshot, error = snapshot == null, period = period)
+        }
+    }
+
+    fun refreshProfile(serverUrl: String, apiKey: String) {
+        viewModelScope.launch {
+            if (serverUrl.isBlank() || apiKey.isBlank()) {
+                profileStateFlow.update { it.copy(loading = false) }
+                return@launch
+            }
+            profileStateFlow.update { it.copy(loading = true, error = false) }
+            val snapshot = repository.fetchProfile(serverUrl, apiKey)
+            profileStateFlow.value = ProfileUiState(loading = false, snapshot = snapshot, error = snapshot == null)
         }
     }
 
@@ -726,6 +756,8 @@ data class HomeVisitUiState(
     val appSettings: AppSettingsUiState = AppSettingsUiState(),
     val clinics: ClinicOptions = ClinicOptions(),
     val home: HomeUiState = HomeUiState(),
+    val shift: ShiftUiState = ShiftUiState(),
+    val profile: ProfileUiState = ProfileUiState(),
 ) {
     val netIncome: Double
         get() = grossIncome - expensesAmount
@@ -743,6 +775,8 @@ private data class AuxUiState(
     val appSettings: AppSettingsUiState,
     val clinics: ClinicOptions,
     val home: HomeUiState,
+    val shift: ShiftUiState,
+    val profile: ProfileUiState,
 )
 
 data class RouteVisitUi(
@@ -822,5 +856,18 @@ data class AppSettingsUiState(
 data class HomeUiState(
     val loading: Boolean = false,
     val snapshot: HomeSnapshot? = null,
+    val error: Boolean = false,
+)
+
+data class ShiftUiState(
+    val loading: Boolean = false,
+    val snapshot: ShiftSnapshot? = null,
+    val error: Boolean = false,
+    val period: String = "day",
+)
+
+data class ProfileUiState(
+    val loading: Boolean = false,
+    val snapshot: ProfileSnapshot? = null,
     val error: Boolean = false,
 )
