@@ -478,6 +478,7 @@ object VerdictColors {
 private fun HomeVisitTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors,
+        typography = AppTypography,
         content = content,
     )
 }
