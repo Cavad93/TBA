@@ -46,7 +46,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         launchGuard {
-            val result = repository.register(serverUrl, email, password, nickname, occupation)
+            val result = repository.register(serverUrl, email, password, nickname, occupation, CONSENT_VERSION)
             if (result.ok) {
                 pendingPassword = password
                 _state.update { it.copy(mode = AuthMode.Verify, pendingEmail = email.trim(), message = result.message) }
@@ -155,5 +155,12 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(isLoading = false) }
             }
         }
+    }
+
+    companion object {
+        /** Версия текста согласия на обработку ПДн. Меняется при изменении документа. */
+        const val CONSENT_VERSION = "2026-07-10"
+        const val CONSENT_URL = "https://vizitorkrut.ru/consent.html"
+        const val POLICY_URL = "https://vizitorkrut.ru/policy.html"
     }
 }

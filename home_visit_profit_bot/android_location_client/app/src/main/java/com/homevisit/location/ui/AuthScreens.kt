@@ -2,6 +2,7 @@ package com.homevisit.location.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -24,6 +26,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -113,6 +116,8 @@ private fun RegisterForm(state: AuthUiState, viewModel: AuthViewModel) {
     var email by rememberSaveable { mutableStateOf("") }
     var nickname by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
+    var consentGiven by rememberSaveable { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
     Text("Регистрация", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
     EmailField(email) { email = it }
     OutlinedTextField(
@@ -123,9 +128,27 @@ private fun RegisterForm(state: AuthUiState, viewModel: AuthViewModel) {
         label = { Text("Ник (как к вам обращаться)") },
     )
     PasswordField(password, "Пароль (от 8 символов)") { password = it }
+
+    // Согласие на обработку ПДн (152-ФЗ): явная галочка, по умолчанию снята.
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = consentGiven, onCheckedChange = { consentGiven = it })
+        Text(
+            "Я даю согласие на обработку моих персональных данных",
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        TextButton(onClick = { uriHandler.openUri(AuthViewModel.CONSENT_URL) }) {
+            Text("Согласие", style = MaterialTheme.typography.bodySmall)
+        }
+        TextButton(onClick = { uriHandler.openUri(AuthViewModel.POLICY_URL) }) {
+            Text("Политика конфиденциальности", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+
     Button(
         modifier = Modifier.fillMaxWidth(),
-        enabled = !state.isLoading,
+        enabled = !state.isLoading && consentGiven,
         onClick = { viewModel.register(email, password, nickname, null) },
     ) { Text("Создать аккаунт") }
     TextButton(onClick = { viewModel.switchMode(AuthMode.Login) }) {

@@ -424,6 +424,7 @@ class HomeVisitRepository private constructor(
         password: String,
         nickname: String,
         occupation: String? = null,
+        consentVersion: String? = null,
     ): AuthOutcome = withContext(Dispatchers.IO) {
         val payload = JSONObject()
             .put("email", email.trim())
@@ -431,6 +432,9 @@ class HomeVisitRepository private constructor(
             .put("nickname", nickname.trim())
         if (!occupation.isNullOrBlank()) {
             payload.put("occupation", occupation.trim())
+        }
+        if (!consentVersion.isNullOrBlank()) {
+            payload.put("consent_version", consentVersion)
         }
         val (code, body) = authPost(normalizeApiUrl(serverUrl, "/api/auth/register"), payload)
         authOutcome(code, body, "Код подтверждения отправлен на почту")
