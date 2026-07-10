@@ -23,6 +23,7 @@ from app.repositories import (
     WorkDayRepository,
 )
 from app.services.auth_service import AuthError, AuthService
+from app.services.home_service import HomeService
 from app.services.location_service import calculate_location_day_estimate, process_location_update
 from app.services.mobile_api_service import MobileApiService
 from app.services.mobile_fatigue_service import MobileFatigueService
@@ -56,6 +57,9 @@ def _handler_factory(config: AppConfig):
             path = _path_only(self.path)
             if path in {"/health", "/api/health"}:
                 self._json_response({"ok": True})
+                return
+            if path == "/api/home":
+                self._handle_home()
                 return
             if path == "/api/day/active":
                 self._handle_active_day()
@@ -220,6 +224,15 @@ def _handler_factory(config: AppConfig):
                     "ready_to_complete": result.should_notify,
                 }
             )
+
+        def _handle_home(self) -> None:
+            if not _authorize_request(self, config):
+                self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            with connect(config) as connection:
+                nickname = _current_nickname(connection)
+                payload = HomeService(connection).snapshot(nickname)
+            self._json_response(payload)
 
         def _handle_active_day(self) -> None:
             if not _authorize_request(self, config):
@@ -642,6 +655,14 @@ def _handler_factory(config: AppConfig):
 
 def _path_only(path: str) -> str:
     return urlparse(path).path
+
+
+def _current_nickname(connection: Any) -> str | None:
+    user_id = current_user_id.get()
+    if not user_id:
+        return None
+    row = connection.execute("SELECT nickname FROM users WHERE id = ?", (user_id,)).fetchone()
+    return str(row["nickname"]) if row and row["nickname"] else None
 
 
 def _authorize_request(handler: BaseHTTPRequestHandler, config: AppConfig) -> bool:
