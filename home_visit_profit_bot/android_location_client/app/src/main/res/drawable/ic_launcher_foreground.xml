@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Передний слой: белый пин-точка на карте + вырезанная галочка «стоит».
+     Контент удержан в безопасной зоне адаптивной иконки (центр 108x108). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Пин (белая капля). -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,20 C40,20 29,31 29,44 C29,61 54,84 54,84 C54,84 79,61 79,44 C79,31 68,20 54,20 Z" />
+    <!-- Галочка внутри головки пина, цвет фона — читается как вырез. -->
+    <path
+        android:strokeColor="#12A150"
+        android:strokeWidth="7.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M42,45 L50,53 L66,35" />
+</vector>
