@@ -63,6 +63,7 @@ import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
@@ -194,6 +195,12 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(OrderSource.current) {
                     prefs.edit().putString(KEY_ORDER_SOURCE, OrderSource.current.key).apply()
                 }
+                // GPS/агрегатор вождения — по умолчанию активны: на первом запуске
+                // просим разрешения, при наличии — сразу включаем трекинг. И разовый синк.
+                LaunchedEffect(Unit) {
+                    if (hasRequiredPermissions()) startTrackingIfReady() else requestRequiredPermissions()
+                    SyncScheduler.runOnce(this@MainActivity)
+                }
                 HomeVisitApp(
                     uiState = uiState,
                     initialServerUrl = prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL).orEmpty(),
@@ -282,6 +289,18 @@ class MainActivity : ComponentActivity() {
         Toast.makeText(this, "GPS и агрегаты вождения запущены", Toast.LENGTH_SHORT).show()
     }
 
+    /** Тихо включает трекинг по умолчанию, если есть разрешения и учётные данные. */
+    private fun startTrackingIfReady() {
+        if (!hasRequiredPermissions()) return
+        val serverUrl = prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL).orEmpty()
+        val apiKey = prefs.getString(KEY_SESSION_TOKEN, "").orEmpty()
+        if (serverUrl.isBlank() || apiKey.isBlank()) return
+        val intent = Intent(this, LocationUploadService::class.java).apply {
+            action = LocationUploadService.ACTION_START
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+    }
+
     private fun stopTracking() {
         val intent = Intent(this, LocationUploadService::class.java).apply {
             action = LocationUploadService.ACTION_STOP
@@ -356,7 +375,8 @@ class MainActivity : ComponentActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PERMISSION_REQUEST && hasRequiredPermissions()) {
-            Toast.makeText(this, "Разрешения выданы. Теперь можно включить GPS.", Toast.LENGTH_SHORT).show()
+            // Разрешения получены — включаем трекинг по умолчанию.
+            startTrackingIfReady()
         } else if (requestCode == PERMISSION_REQUEST) {
             Toast.makeText(this, "Нужны разрешения на точную геолокацию и уведомление", Toast.LENGTH_LONG).show()
         }
@@ -676,6 +696,8 @@ private fun HomeVisitApp(
             settingsState = settingsState,
             syncState = uiState.sync,
             appSettings = uiState.appSettings,
+            reportState = uiState.report,
+            fatigueState = uiState.fatigue,
             workActions = workActions,
             onSync = syncNow,
             onBack = { showSettings = false },
@@ -720,23 +742,32 @@ private fun HomeVisitApp(
     }
 }
 
-/** Экран настроек как оверлей (открывается шестерёнкой), с кнопкой «назад». */
+private enum class SettingsPage(val title: String) {
+    Main("Настройки"),
+    Reports("Подробные отчёты"),
+    Fatigue("Нагрузка и восстановление"),
+}
+
+/** Экран настроек как оверлей (открывается шестерёнкой), с под-навигацией и «назад». */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsOverlay(
     settingsState: GpsSettingsState,
     syncState: SyncUiState,
     appSettings: AppSettingsUiState,
+    reportState: ReportUiState,
+    fatigueState: FatigueUiState,
     workActions: WorkActions,
     onSync: () -> Unit,
     onBack: () -> Unit,
 ) {
+    var page by rememberSaveable { mutableStateOf(SettingsPage.Main) }
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Настройки") },
+                title = { Text(page.title) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { if (page == SettingsPage.Main) onBack() else page = SettingsPage.Main }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
                     }
                 },
@@ -748,7 +779,15 @@ private fun SettingsOverlay(
             modifier = Modifier.fillMaxSize().padding(padding),
             color = MaterialTheme.colorScheme.background,
         ) {
-            SettingsScreen(settingsState, syncState, appSettings, workActions, onSync)
+            when (page) {
+                SettingsPage.Main -> SettingsScreen(
+                    settingsState, syncState, appSettings, workActions, onSync,
+                    onOpenReports = { page = SettingsPage.Reports },
+                    onOpenFatigue = { page = SettingsPage.Fatigue },
+                )
+                SettingsPage.Reports -> ReportsScreen(reportState, workActions)
+                SettingsPage.Fatigue -> FatigueScreen(fatigueState, workActions)
+            }
         }
     }
 }
@@ -2589,7 +2628,7 @@ private fun FatigueScreen(fatigueState: FatigueUiState, workActions: WorkActions
             title = "Нагрузка",
             value = summary?.let { "${oneDecimal(it.score)} / 100" } ?: "Нет данных",
             body = summary?.let {
-                "${it.level}. 7 дней: ${oneDecimal(it.weeklyAverage)}, долг восстановления: ${oneDecimal(it.recoveryDebt)}, Индекс восст.: ${oneDecimal(it.burnoutScore)}."
+                "${it.level}. 7 дней: ${oneDecimal(it.weeklyAverage)}, долг восстановления: ${oneDecimal(it.recoveryDebt)}, Самочувствие: ${oneDecimal(it.burnoutScore)}."
             } ?: "Обновите сводку после синхронизации. Активный день считается предварительно, закрытый день берётся из статистики.",
         )
         Button(
@@ -2737,11 +2776,11 @@ private fun FatigueSummaryCard(snapshot: FatigueSnapshot) {
                 "Индекс" to "${oneDecimal(summary.score)}/100",
                 "7 дней" to "${oneDecimal(summary.weeklyAverage)}/100",
                 "Долг" to "${oneDecimal(summary.recoveryDebt)}/100",
-                "Индекс восст." to "${oneDecimal(summary.burnoutScore)}/100",
+                "Самочувствие" to "${oneDecimal(summary.burnoutScore)}/100",
                 "Сон" to "${oneDecimal(summary.sleepHours)} ч",
                 "Качество" to "${oneDecimal(summary.sleepQuality)}/5",
                 "Перерыв" to "${oneDecimal(summary.breakHoursBefore)} ч",
-                "Циркадный риск" to minutesText(summary.circadianRiskMinutes),
+                "Работа ночью" to minutesText(summary.circadianRiskMinutes),
             ),
         )
         ReportLine("Длинные остановки", summary.longStopCount.toString())
@@ -2812,7 +2851,7 @@ private fun CbiCard(
     onAnswer: (Int, Int) -> Unit,
     onSubmit: () -> Unit,
 ) {
-    InputCard("Индекс восстановления") {
+    InputCard("Самочувствие") {
         Text(
             "Последний индекс восст.: ${oneDecimal(latestScore)}/100, $latestLevel.",
             style = MaterialTheme.typography.bodyMedium,
@@ -2910,8 +2949,12 @@ private fun SettingsScreen(
     appSettings: AppSettingsUiState,
     workActions: WorkActions,
     onSync: () -> Unit,
+    onOpenReports: () -> Unit = {},
+    onOpenFatigue: () -> Unit = {},
 ) {
     ScreenColumn {
+        SettingsMenuItem("Подробные отчёты", "День, месяц, год и разбивка по клиникам", onOpenReports)
+        SettingsMenuItem("Нагрузка и восстановление", "Тренды, самочувствие, калибровка", onOpenFatigue)
         GpsSettingsCard(settingsState)
         OrderSourceCard()
         AppSettingsCard(
@@ -2933,6 +2976,25 @@ private fun SettingsScreen(
             title = "Что здесь важно",
             body = "Вход выполняется по вашему аккаунту — данные видны только вам. Адрес сервера подставлен автоматически и нужен для расчёта маршрутов, отчётов, нагрузки и синхронизации. Настройки экономики, авто, компаний и районов редактируются здесь и уходят на сервер.",
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsMenuItem(title: String, subtitle: String, onClick: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        onClick = onClick,
+    ) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -3994,7 +4056,7 @@ private fun fatigueTargetTitle(value: String): String = when (value) {
     "fatigue_score" -> "нагрузка"
     "recovery_debt" -> "долг"
     "user_fatigue_score" -> "оценка исполнителя"
-    "burnout_score" -> "Индекс восст."
+    "burnout_score" -> "Самочувствие"
     else -> value
 }
 
