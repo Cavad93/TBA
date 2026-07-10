@@ -395,61 +395,84 @@ private data class WorkActions(
     val onSaveAppSettings: (Map<String, Any?>) -> Unit,
 )
 
+// Палитра дизайн-системы Визиторкрут: тёплая «бумага» + чернила, зелёный бренд,
+// синий = маршрут/инфо. Светлая тема — источник истины DS; тёмную выводим согласованно.
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF176B52),
+    primary = Color(0xFF12A150),            // green-500 — бренд, «стоит ехать»
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFA2F2D0),
-    onPrimaryContainer = Color(0xFF002117),
-    secondary = Color(0xFF4C6359),
+    primaryContainer = Color(0xFFC8EDD5),   // green-100
+    onPrimaryContainer = Color(0xFF0B3E23), // green-900
+    secondary = Color(0xFF0C8442),          // green-600
     onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFCEE9DB),
-    onSecondaryContainer = Color(0xFF092018),
-    tertiary = Color(0xFF38656B),
+    secondaryContainer = Color(0xFFE9F8EF),  // green-50
+    onSecondaryContainer = Color(0xFF0C532D),// green-800
+    tertiary = Color(0xFF2F6FE0),           // blue-500 — маршрут/ссылки/инфо
     onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFBCEBF1),
-    onTertiaryContainer = Color(0xFF001F23),
-    surface = Color(0xFFF6FBF7),
-    onSurface = Color(0xFF15201B),
-    onSurfaceVariant = Color(0xFF44514B),
-    surfaceVariant = Color(0xFFDBE5DE),
+    tertiaryContainer = Color(0xFFEAF1FD),   // blue-50
+    onTertiaryContainer = Color(0xFF163878), // blue-800
+    error = Color(0xFFD93B3B),              // red-500 — «не стоит»
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFDECEC),      // red-50
+    onErrorContainer = Color(0xFF7C1B1B),    // red-800
+    background = Color(0xFFF4F2EB),          // paper
+    onBackground = Color(0xFF17160F),        // ink
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF17160F),
+    onSurfaceVariant = Color(0xFF5E594F),    // neutral-600
+    surfaceVariant = Color(0xFFEEEBE3),      // neutral-100
     surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFF0F5F1),
-    surfaceContainer = Color(0xFFEAF0EB),
-    surfaceContainerHigh = Color(0xFFE4EAE5),
-    surfaceContainerHighest = Color(0xFFDEE4DF),
-    outline = Color(0xFF6F7C74),
-    outlineVariant = Color(0xFFBFC9C1),
-    background = Color(0xFFF6FBF7),
-    onBackground = Color(0xFF15201B),
+    surfaceContainerLow = Color(0xFFFFFFFF),  // карточки — белые на бумаге
+    surfaceContainer = Color(0xFFF7F6F1),     // neutral-50
+    surfaceContainerHigh = Color(0xFFEEEBE3), // neutral-100
+    surfaceContainerHighest = Color(0xFFDEDACE), // neutral-200
+    outline = Color(0xFFA39D8C),             // neutral-400
+    outlineVariant = Color(0xFFDEDACE),      // neutral-200 — бордеры карточек
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFF6FD9B4),
-    onPrimary = Color(0xFF00382A),
-    primaryContainer = Color(0xFF00513C),
-    onPrimaryContainer = Color(0xFF8CF6CE),
-    secondary = Color(0xFFB4CCC0),
-    onSecondary = Color(0xFF1E352C),
-    secondaryContainer = Color(0xFF344B42),
-    onSecondaryContainer = Color(0xFFD0E8DC),
-    tertiary = Color(0xFF8FD0D8),
-    onTertiary = Color(0xFF00363C),
-    tertiaryContainer = Color(0xFF1E4D53),
-    onTertiaryContainer = Color(0xFFABE9F1),
-    surface = Color(0xFF141B18),
-    onSurface = Color(0xFFE1E4E0),
-    onSurfaceVariant = Color(0xFFBEC9C2),
-    surfaceVariant = Color(0xFF3F4A44),
-    surfaceContainerLowest = Color(0xFF0B120F),
-    surfaceContainerLow = Color(0xFF161D1A),
-    surfaceContainer = Color(0xFF1A211E),
-    surfaceContainerHigh = Color(0xFF242B28),
-    surfaceContainerHighest = Color(0xFF2F3633),
-    outline = Color(0xFF89938C),
-    outlineVariant = Color(0xFF3F4A44),
-    background = Color(0xFF0E1512),
-    onBackground = Color(0xFFE1E4E0),
+    primary = Color(0xFF5FCB8C),            // green-300
+    onPrimary = Color(0xFF0B3E23),
+    primaryContainer = Color(0xFF0C532D),   // green-800
+    onPrimaryContainer = Color(0xFFC8EDD5),
+    secondary = Color(0xFF5FCB8C),
+    onSecondary = Color(0xFF0B3E23),
+    secondaryContainer = Color(0xFF0C532D),
+    onSecondaryContainer = Color(0xFFC8EDD5),
+    tertiary = Color(0xFF75A0EC),           // blue-300
+    onTertiary = Color(0xFF142E5C),
+    tertiaryContainer = Color(0xFF163878),
+    onTertiaryContainer = Color(0xFFCDDDFA),
+    error = Color(0xFFEC8585),              // red-300
+    onError = Color(0xFF5E1717),
+    errorContainer = Color(0xFF7C1B1B),
+    onErrorContainer = Color(0xFFFAD3D3),
+    background = Color(0xFF100F0B),          // neutral-950 (тёплый near-black)
+    onBackground = Color(0xFFEEEBE3),
+    surface = Color(0xFF1B1914),             // neutral-900
+    onSurface = Color(0xFFEEEBE3),
+    onSurfaceVariant = Color(0xFFA39D8C),    // neutral-400
+    surfaceVariant = Color(0xFF2E2B25),      // neutral-800
+    surfaceContainerLowest = Color(0xFF100F0B),
+    surfaceContainerLow = Color(0xFF1B1914),
+    surfaceContainer = Color(0xFF2E2B25),
+    surfaceContainerHigh = Color(0xFF46423A), // neutral-700
+    surfaceContainerHighest = Color(0xFF46423A),
+    outline = Color(0xFF7E786C),             // neutral-500
+    outlineVariant = Color(0xFF46423A),
 )
+
+/** Вердикт-шкала DS (стоит/на грани/не стоит) — ядро продукта. Вне ColorScheme. */
+object VerdictColors {
+    val go = Color(0xFF12A150)
+    val goContainer = Color(0xFFE9F8EF)
+    val onGoContainer = Color(0xFF0B6A37)
+    val edge = Color(0xFFF2A81E)
+    val edgeContainer = Color(0xFFFEF5E4)
+    val onEdgeContainer = Color(0xFF8E5B0A)
+    val skip = Color(0xFFD93B3B)
+    val skipContainer = Color(0xFFFDECEC)
+    val onSkipContainer = Color(0xFF9C2020)
+}
 
 @Composable
 private fun HomeVisitTheme(content: @Composable () -> Unit) {
