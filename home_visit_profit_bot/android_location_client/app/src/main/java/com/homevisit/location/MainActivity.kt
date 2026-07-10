@@ -112,6 +112,10 @@ import com.homevisit.location.domain.FatigueCorrelationReport
 import com.homevisit.location.domain.FatigueSnapshot
 import com.homevisit.location.domain.FatigueTrendPoint
 import com.homevisit.location.domain.FatigueTrendReport
+import com.homevisit.location.domain.HomeRecommendation
+import com.homevisit.location.domain.HomeRecovery
+import com.homevisit.location.domain.HomeSnapshot
+import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ReportPeriod
 import com.homevisit.location.domain.ReportSnapshot
 import com.homevisit.location.domain.ReportSummary
@@ -123,6 +127,7 @@ import com.homevisit.location.ui.CandidateUiState
 import com.homevisit.location.ui.FatigueUiState
 import com.homevisit.location.ui.GpsEstimateUiState
 import com.homevisit.location.ui.GpsHintUiState
+import com.homevisit.location.ui.HomeUiState
 import com.homevisit.location.ui.HomeVisitUiState
 import com.homevisit.location.ui.HomeVisitViewModel
 import com.homevisit.location.ui.ReportUiState

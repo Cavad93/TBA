@@ -22,6 +22,29 @@
    моменты, редкие API и их актуальные сигнатуры) сверять с актуальными источниками
    в интернете перед внедрением.
 
+6. **Есть доступ к боевому серверу — деплоить самому.** Разрешён SSH на VPS
+   (`ssh root@45.8.228.67`, ключ уже настроен). После изменений бэкенда/сайта
+   выкатывать самостоятельно: `git pull` на сервере, перезапуск сервиса
+   `homevisit-api`, проверка `curl -s http://127.0.0.1:8088/api/health`. Секреты
+   (пароли, ключи, токены) в чат/логи не выводить.
+
+## Ветки и деплой
+
+- Рабочая ветка проекта — `claude/android-migration-plan-review-gbiba7` (не
+  `agent/android-app-migration`, она устарела). Пуш в рабочую ветку запускает
+  сборку APK в GitHub Actions.
+- Код на сервере: `/opt/tba` (репозиторий под пользователем `homevisit`), сервис
+  `homevisit-api` (systemd), API слушает `127.0.0.1:8088` за Caddy. Деплой бэкенда:
+  ```
+  ssh root@45.8.228.67 'cd /opt/tba && \
+    sudo -u homevisit git fetch origin && \
+    sudo -u homevisit git checkout claude/android-migration-plan-review-gbiba7 && \
+    sudo -u homevisit git pull && \
+    systemctl restart homevisit-api && sleep 2 && \
+    curl -s http://127.0.0.1:8088/api/health'
+  ```
+- Сайт: `/opt/tba/home_visit_profit_bot/deploy/site` (Caddy отдаёт статику).
+
 ## Контекст проекта
 
 - Продукт: «Визиторкрут» (`vizitorkrut.ru`) — массовое многопользовательское
