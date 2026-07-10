@@ -1,6 +1,6 @@
 package com.homevisit.location.domain
 
-/** Аккаунт пользователя, как его отдаёт сервер (`/api/auth/*`). */
+/** Аккаунт пользователя, как его отдаёт сервер (эндпоинты /api/auth/...). */
 data class AuthUser(
     val id: Int,
     val email: String,
