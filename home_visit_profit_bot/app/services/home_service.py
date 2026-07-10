@@ -210,7 +210,7 @@ class HomeService:
             recs.append({
                 "kind": "fatigue",
                 "tone": "skip",
-                "title": f"Накопленная усталость: {level or 'высокая'}",
+                "title": f"Накопленная нагрузка: {level or 'высокая'}",
                 "text": "Недельный фон высокий. Делай паузы между визитами и избегай ночных выездов.",
             })
         elif level == "повышенная нагрузка" or weekly >= 40:

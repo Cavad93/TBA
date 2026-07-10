@@ -254,6 +254,30 @@ def calculate_candidate_impact(
     )
 
 
+def decision_to_verdict(decision: str) -> str:
+    """Свести текстовое решение профитабельности к короткому вердикту заказа.
+
+    Возможные решения make_decision: «ОДНОЗНАЧНО ДА», «МОЖНО БРАТЬ»,
+    «ТОЛЬКО С НАДБАВКОЙ», «ТОЛЬКО СО СПЕЦТАРИФОМ»,
+    «НЕВЫГОДНО / ТОЛЬКО СО СПЕЦТАРИФОМ».
+
+    Маппинг:
+      * явное «да / можно брать»            → 'go';
+      * пороговое «спецтариф / надбавка»    → 'edge';
+      * «невыгодно»                         → 'skip'.
+    Проверяем «невыгодно» первым, т.к. эта строка содержит и слово «спецтариф».
+    """
+    text = (decision or "").upper()
+    if "НЕВЫГОДНО" in text:
+        return "skip"
+    if "СПЕЦТАРИФ" in text or "НАДБАВК" in text:
+        return "edge"
+    if "ДА" in text or "МОЖНО БРАТЬ" in text:
+        return "go"
+    # Неизвестное/пороговое решение трактуем консервативно как «на грани».
+    return "edge"
+
+
 def make_decision(
     before_hourly: float,
     after_hourly: float,

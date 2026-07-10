@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS visits (
     estimated_marginal_hourly REAL,
     estimated_day_hourly_before REAL,
     estimated_day_hourly_after REAL,
+    verdict TEXT,
     completed_at TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY(work_day_id) REFERENCES work_days(id)
@@ -465,6 +466,8 @@ def _ensure_columns(db: Database) -> None:
         """
     db.execute(_to_postgres_ddl(conflicts_ddl) if db.dialect == "postgres" else conflicts_ddl)
     _ensure_column(db, "visits", "clinic", "TEXT")
+    # Вердикт заказа ('go'|'edge'|'skip'), вычисленный из решения профитабельности.
+    _ensure_column(db, "visits", "verdict", "TEXT")
     _ensure_column(db, "work_days", "telemed_minutes", "REAL DEFAULT 0")
     _ensure_column(db, "work_days", "office_income", "REAL DEFAULT 0")
     _ensure_column(db, "work_days", "office_minutes", "REAL DEFAULT 0")

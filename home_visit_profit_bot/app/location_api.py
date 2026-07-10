@@ -29,7 +29,9 @@ from app.services.mobile_api_service import MobileApiService
 from app.services.mobile_fatigue_service import MobileFatigueService
 from app.services.mobile_report_service import MobileReportService
 from app.services.mobile_visit_service import MobileVisitService, candidate_result_payload
+from app.services.profile_service import ProfileService
 from app.services.settings_service import SettingsService
+from app.services.shift_service import ShiftService
 
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,12 @@ def _handler_factory(config: AppConfig):
                 return
             if path == "/api/home":
                 self._handle_home()
+                return
+            if path == "/api/shift":
+                self._handle_shift()
+                return
+            if path == "/api/profile":
+                self._handle_profile()
                 return
             if path == "/api/day/active":
                 self._handle_active_day()
@@ -232,6 +240,25 @@ def _handler_factory(config: AppConfig):
             with connect(config) as connection:
                 nickname = _current_nickname(connection)
                 payload = HomeService(connection).snapshot(nickname)
+            self._json_response(payload)
+
+        def _handle_shift(self) -> None:
+            if not _authorize_request(self, config):
+                self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            query = parse_qs(urlparse(self.path).query)
+            period = (query.get("period") or ["day"])[0]
+            with connect(config) as connection:
+                payload = ShiftService(connection).snapshot(period)
+            self._json_response(payload)
+
+        def _handle_profile(self) -> None:
+            if not _authorize_request(self, config):
+                self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            with connect(config) as connection:
+                nickname = _current_nickname(connection)
+                payload = ProfileService(connection).snapshot(nickname)
             self._json_response(payload)
 
         def _handle_active_day(self) -> None:

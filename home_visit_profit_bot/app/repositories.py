@@ -329,6 +329,27 @@ class VisitRepository:
             raise KeyError(f"Visit {visit_id} not found")
         return _visit_from_row(row)
 
+    def set_verdict(self, visit_id: int, verdict: str | None) -> None:
+        """Сохранить вердикт заказа ('go'|'edge'|'skip'|NULL) в visits.verdict."""
+        self.connection.execute(
+            "UPDATE visits SET verdict = ? WHERE id = ?",
+            (verdict, visit_id),
+        )
+        self.connection.commit()
+
+    def recent_completed(self, limit: int = 8) -> list[sqlite3.Row]:
+        """Последние завершённые визиты (по всем дням) для ленты «Смены»."""
+        return self.connection.execute(
+            """
+            SELECT address, clinic, income, verdict, completed_at
+            FROM visits
+            WHERE status = 'completed'
+            ORDER BY completed_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
     def latest_candidate(self, day_id: int) -> Visit | None:
         row = self.connection.execute(
             "SELECT * FROM visits WHERE work_day_id = ? AND status = 'candidate' ORDER BY id DESC LIMIT 1",
@@ -939,6 +960,30 @@ class DrivingBehaviorRepository:
         ).fetchone()
         return _driving_from_row(row)
 
+    def aggregate_between(self, start_date: str, end_date: str) -> dict[str, float | int]:
+        """Средние/суммарные показатели стиля вождения за период [start, end).
+
+        Средний aggressive_score считаем по дням с данными (NULLIF(...,0)),
+        как это принято для усреднений в daily_stats; счётчики — суммируем.
+        """
+        row = self.connection.execute(
+            """
+            SELECT
+                COUNT(*) AS days_count,
+                COALESCE(AVG(NULLIF(aggressive_score, 0)), 0) AS avg_aggressive_score,
+                COALESCE(AVG(NULLIF(jerk_score, 0)), 0) AS avg_jerk_score,
+                COALESCE(SUM(harsh_acceleration_count), 0) AS harsh_acceleration_count,
+                COALESCE(SUM(harsh_braking_count), 0) AS harsh_braking_count,
+                COALESCE(SUM(hard_cornering_count), 0) AS hard_cornering_count,
+                COALESCE(SUM(lane_change_proxy_count), 0) AS lane_change_proxy_count,
+                COALESCE(SUM(stop_go_count), 0) AS stop_go_count
+            FROM driving_behavior_daily
+            WHERE date >= ? AND date < ?
+            """,
+            (start_date, end_date),
+        ).fetchone()
+        return dict(row) if row else {}
+
     def joined_recent(self, days: int = 28) -> list[sqlite3.Row]:
         return self.connection.execute(
             """
@@ -1173,6 +1218,23 @@ class DailyStatsRepository:
         result["start_date"] = start_date
         result["end_date"] = end_date
         return result
+
+    def list_between(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+        """Построчные дневные итоги за период [start_date, end_date) для графиков."""
+        return self.connection.execute(
+            """
+            SELECT
+                date,
+                net_profit,
+                total_income,
+                completed_visits_count,
+                total_work_minutes
+            FROM daily_stats
+            WHERE date >= ? AND date < ?
+            ORDER BY date
+            """,
+            (start_date, end_date),
+        ).fetchall()
 
     def clinic_visit_totals_between(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
         return self.connection.execute(

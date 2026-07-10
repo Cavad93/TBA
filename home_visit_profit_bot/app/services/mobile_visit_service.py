@@ -20,7 +20,11 @@ from app.services.geocoding_service import (
     is_base_district,
     manual_geocoding_result,
 )
-from app.services.profitability_service import calculate_candidate_impact, calculate_remaining_route_summary
+from app.services.profitability_service import (
+    calculate_candidate_impact,
+    calculate_remaining_route_summary,
+    decision_to_verdict,
+)
 from app.services.routing_service import RoutingError
 from app.services.settings_service import allowed_clinics
 
@@ -116,6 +120,10 @@ class MobileVisitService:
                 candidate=candidate,
                 detail=str(error),
             )
+        # Сохраняем вердикт заказа ('go'|'edge'|'skip'), чтобы экраны «Смена» и
+        # история могли показывать его без повторного пересчёта профитабельности.
+        verdict = decision_to_verdict(calculation.decision)
+        self.visits.set_verdict(candidate.id, verdict)
         return CandidateApiResult(ok=True, reason="calculated", candidate=candidate, calculation=calculation)
 
     def accept_candidate(self, visit_id: int) -> dict[str, Any]:

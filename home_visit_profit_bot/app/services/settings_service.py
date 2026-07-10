@@ -52,6 +52,8 @@ SETTINGS_CATALOG: list[SettingField] = [
     SettingField("min_marginal_hourly_income", "economics", "Минимум ₽/час на адрес", "number", 600.0, min=0),
     SettingField("outside_zone_min_hourly_income", "economics", "Минимум ₽/час вне зоны", "number", 600.0, min=0),
     SettingField("outside_zone_min_extra_payment", "economics", "Надбавка вне зоны, ₽", "number", 0.0, min=0),
+    SettingField("daily_income_goal", "economics", "Цель по доходу за день, ₽", "number", 0.0, min=0),
+    SettingField("monthly_income_goal", "economics", "Цель по доходу за месяц, ₽", "number", 0.0, min=0),
     # Авто
     SettingField("car_cost_per_km", "car", "Топливо за км, ₽", "number", 17.05, min=0),
     SettingField("amortization_factor", "car", "Амортизация (× от топлива)", "number", 0.8, min=0),

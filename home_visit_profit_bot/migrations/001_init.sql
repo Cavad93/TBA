@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS visits (
     estimated_marginal_hourly REAL,
     estimated_day_hourly_before REAL,
     estimated_day_hourly_after REAL,
+    verdict TEXT,
     completed_at TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY(work_day_id) REFERENCES work_days(id)
