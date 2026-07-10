@@ -1798,40 +1798,6 @@ private fun qualityWord(value: Int): String = when (value) {
 }
 
 @Composable
-private fun TodayScreen(uiState: HomeVisitUiState, workActions: WorkActions, settingsState: GpsSettingsState, onSync: () -> Unit, onOpenWork: () -> Unit) {
-    val fatigueText = uiState.fatigue.snapshot?.summary?.let { ", нагрузка ${oneDecimal(it.score)}/100" }.orEmpty()
-    val syncText = if (uiState.sync.stats.pendingCount + uiState.sync.stats.failedCount > 0) {
-        ", sync: ${uiState.sync.stats.pendingCount} ждут / ${uiState.sync.stats.failedCount} ошибок"
-    } else {
-        ", sync чисто"
-    }
-    ScreenColumn {
-        StatusCard(
-            title = "Рабочий день",
-            value = uiState.status.title(),
-            body = "Адресов: ${uiState.visitsCount}, на точке: ${uiState.officeCount}, удалённо: ${uiState.telemedCount}$fatigueText$syncText. Доход: ${money(uiState.grossIncome)}, чистыми после расходов: ${money(uiState.netIncome)}.",
-        )
-        DayDetailsCard(uiState, workActions)
-        DayControlRow(uiState, workActions)
-        QuickActions(onOpenWork)
-        GpsControlCard(settingsState)
-        SyncControlCard(
-            syncState = uiState.sync,
-            onSync = onSync,
-            onExportBackup = workActions.onExportBackup,
-            onRefreshConflicts = workActions.onRefreshSyncConflicts,
-            onCheckConnection = workActions.onCheckConnection,
-            onClearCache = workActions.onClearCache,
-            onImportBackup = workActions.onImportBackup,
-        )
-        CompactCard(
-            title = "Локальное сохранение",
-            body = "Данные пишутся в Room на телефоне, попадают в очередь и могут отправляться на backend через кнопку синхронизации.",
-        )
-    }
-}
-
-@Composable
 private fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions) {
     if (uiState.status == WorkDayStatus.Active) {
         var endOdometerText by rememberSaveable { mutableStateOf("") }
