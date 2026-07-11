@@ -11,8 +11,15 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -25,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,9 +41,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.filled.Coffee
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
@@ -88,11 +94,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -101,8 +107,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.Path
@@ -113,6 +122,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -163,6 +173,7 @@ import com.homevisit.location.ui.RouteVisitUi
 import com.homevisit.location.ui.ShiftUiState
 import com.homevisit.location.ui.SyncUiState
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 @Composable
@@ -196,34 +207,96 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
 }
 
 /**
- * Кнопка завершения смены — только здесь, внизу Ленты. По подтверждению закрывает
- * смену; статус дня перестаёт быть Active, и «лифт» поднимает пользователя обратно
- * на Штурвал (см. HomeVisitApp).
+ * Завершение смены — только здесь, внизу Ленты. Чтобы случайное касание не
+ * закрывало смену, это слайдер: ручку нужно осознанно протолкнуть слева направо.
+ * Отпустил, не доведя до конца — ручка пружиной возвращается в начало. Дошёл до
+ * конца — смена закрывается, статус перестаёт быть Active, и «лифт» поднимает
+ * пользователя обратно на Штурвал (см. HomeVisitApp).
  */
 @Composable
 internal fun EndShiftSection(onEndShift: () -> Unit) {
-    var confirm by rememberSaveable { mutableStateOf(false) }
-    Button(
-        modifier = Modifier.fillMaxWidth().height(52.dp),
-        shape = RoundedCornerShape(14.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = VerdictColors.skip),
-        onClick = { confirm = true },
-    ) {
-        Text("Завершить смену", style = MaterialTheme.typography.titleMedium, color = Color.White)
-    }
-    if (confirm) {
-        AlertDialog(
-            onDismissRequest = { confirm = false },
-            title = { Text("Завершить смену?") },
-            text = { Text("Смена закроется, а подсчёт остановится. Вы вернётесь на Штурвал.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirm = false
-                    onEndShift()
-                }) { Text("Завершить") }
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+
+    val trackHeight = 56.dp
+    val thumbSize = 48.dp
+    val edge = 4.dp
+    val thumbPx = with(density) { thumbSize.toPx() }
+    val edgePx = with(density) { edge.toPx() }
+
+    val offsetX = remember { Animatable(0f) }
+    var maxOffset by remember { mutableStateOf(0f) }
+    var done by remember { mutableStateOf(false) }
+    val progress = if (maxOffset > 0f) (offsetX.value / maxOffset).coerceIn(0f, 1f) else 0f
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(trackHeight)
+            .clip(RoundedCornerShape(trackHeight / 2))
+            .background(VerdictColors.skipContainer)
+            .onSizeChanged {
+                // Ход ручки = ширина трека − ширина ручки − отступы по краям.
+                maxOffset = (it.width - thumbPx - edgePx * 2).coerceAtLeast(0f)
             },
-            dismissButton = { TextButton(onClick = { confirm = false }) { Text("Отмена") } },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(
+            text = "Проведите вправо, чтобы завершить смену",
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = thumbSize + edge, end = 12.dp)
+                .alpha(1f - progress),
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.titleSmall,
+            color = VerdictColors.onSkipContainer,
         )
+        Box(
+            modifier = Modifier
+                .padding(edge)
+                .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                .size(thumbSize)
+                .clip(CircleShape)
+                .background(VerdictColors.skip)
+                .draggable(
+                    orientation = Orientation.Horizontal,
+                    enabled = !done,
+                    state = rememberDraggableState { delta ->
+                        scope.launch {
+                            offsetX.snapTo((offsetX.value + delta).coerceIn(0f, maxOffset))
+                        }
+                    },
+                    onDragStopped = {
+                        scope.launch {
+                            if (maxOffset > 0f && offsetX.value >= maxOffset * 0.9f) {
+                                // Доведено до конца — фиксируем и завершаем смену.
+                                offsetX.animateTo(maxOffset, tween(durationMillis = 120))
+                                done = true
+                                onEndShift()
+                            } else {
+                                // Отпущено раньше — пружиной обратно в начало.
+                                offsetX.animateTo(
+                                    0f,
+                                    spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMediumLow,
+                                    ),
+                                )
+                            }
+                        }
+                    },
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "Завершить смену",
+                tint = Color.White,
+            )
+        }
     }
 }
 
