@@ -110,7 +110,22 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     val uiState: StateFlow<HomeVisitUiState> = combine(dayState, candidateState, operationalState, syncState, auxState) { day, candidate, operational, sync, aux ->
+        // Порядок Ленты берём с сервера (order_number): он отражает и авто-оптимизацию,
+        // и ручную перестановку. Без него список шёл бы по времени создания.
+        val serverOrder = operational.route.snapshot?.order.orEmpty()
+        val ordered = if (serverOrder.isEmpty()) {
+            day.routeVisits
+        } else {
+            day.routeVisits.sortedBy { visit ->
+                val index = serverOrder.indexOf(visit.serverId)
+                if (index >= 0) index else Int.MAX_VALUE
+            }
+        }
         day.copy(
+            routeVisits = ordered,
+            // «Текущий заказ» — первый в этом же порядке, иначе кнопка «Готово»
+            // закрывала бы не тот заказ, который показан сверху.
+            activeVisit = ordered.firstOrNull() ?: day.activeVisit,
             candidate = candidate,
             serverRoute = operational.route,
             gpsEstimate = operational.gpsEstimate,
@@ -394,6 +409,22 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 "needs_coordinates" -> routeState.value = routeState.value.copy(isLoading = false, message = "Сервер не нашёл адрес старта. Уточните адрес.")
                 "geocoding_failed" -> routeState.value = routeState.value.copy(isLoading = false, message = "Не удалось геокодировать старт")
                 else -> routeState.value = routeState.value.copy(isLoading = false, message = "Не удалось изменить старт")
+            }
+        }
+    }
+
+    /** Ручная перестановка заказов (↑↓ в Ленте): сохраняем порядок и обновляем маршрут. */
+    fun reorderRoute(serverUrl: String, apiKey: String, visitIds: List<Int>) {
+        viewModelScope.launch {
+            if (serverUrl.isBlank() || apiKey.isBlank() || visitIds.isEmpty()) {
+                return@launch
+            }
+            routeState.value = routeState.value.copy(isLoading = true, message = "Меняю порядок...")
+            if (repository.reorderRoute(serverUrl, apiKey, visitIds)) {
+                refreshRouteInternal(serverUrl, apiKey)
+                routeState.value = routeState.value.copy(message = "Порядок изменён")
+            } else {
+                routeState.value = routeState.value.copy(isLoading = false, message = "Не удалось изменить порядок")
             }
         }
     }

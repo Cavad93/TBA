@@ -591,6 +591,8 @@ def seed_default_settings(db: Database, config: AppConfig) -> None:
         "home_address": "Дом",
         "default_start_address": "Дом",
         "default_finish_address": "Дом",
+        "address_templates": "[]",
+        "frequent_income": "0",
         "car_cost_per_km": str(config.car.car_cost_per_km),
         "amortization_factor": str(config.car.amortization_factor),
         "fuel_price_per_liter": str(config.car.fuel_price_per_liter),

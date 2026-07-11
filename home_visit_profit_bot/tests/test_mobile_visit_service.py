@@ -356,6 +356,46 @@ def test_auto_optimize_off_keeps_accept_order(config) -> None:
     assert accepted == [a_id, b_id]
 
 
+def test_reorder_route_persists_manual_order_and_survives_refresh(config) -> None:
+    # Ручная перестановка сохраняется как задал пользователь и НЕ перезатирается
+    # при обычном чтении маршрута (active_route не переоптимизирует).
+    with connect(config) as connection:
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        service = MobileVisitService(connection)
+        _, a_id = _accept(service, "A", 59.95, 30.30)
+        resp, b_id = _accept(service, "B", 59.90, 30.40)
+        current = [v["id"] for v in resp["visits"] if v["status"] == "accepted"]
+
+        reversed_order = list(reversed(current))
+        after = service.reorder_route({"visit_ids": reversed_order})
+        manual = [v["id"] for v in after["visits"] if v["status"] == "accepted"]
+
+        refreshed = service.active_route()
+        still = [v["id"] for v in refreshed["visits"] if v["status"] == "accepted"]
+
+    assert after["reason"] == "reordered"
+    assert manual == reversed_order
+    assert after["route"]["order"] == reversed_order
+    assert still == reversed_order  # чтение не сбросило ручной порядок
+    assert sorted(manual) == sorted([a_id, b_id])
+
+
+def test_reorder_route_rejects_partial_list(config) -> None:
+    with connect(config) as connection:
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        service = MobileVisitService(connection)
+        _, a_id = _accept(service, "A", 59.95, 30.30)
+        _accept(service, "B", 59.90, 30.40)
+        try:
+            service.reorder_route({"visit_ids": [a_id]})
+        except ValueError as error:
+            message = str(error)
+        else:
+            message = ""
+
+    assert "exactly all accepted" in message
+
+
 def test_mobile_update_finish_requires_active_day(config) -> None:
 
     with connect(config) as connection:

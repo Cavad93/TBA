@@ -669,10 +669,21 @@ class HomeVisitRepository private constructor(
         response.optString("reason", if (response.optBoolean("ok", false)) "finish_updated" else "error")
     }
 
+    // Путь именно /api/day/start-address: /api/day/start занят стартом рабочего дня.
     suspend fun updateDayStart(serverUrl: String, apiKey: String, address: String): String? = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("start_address", address)
-        val response = postJson(normalizeApiUrl(serverUrl, "/api/day/start"), apiKey, payload) ?: return@withContext null
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/day/start-address"), apiKey, payload) ?: return@withContext null
         response.optString("reason", if (response.optBoolean("ok", false)) "start_updated" else "error")
+    }
+
+    /** Ручная перестановка принятых заказов: сервер сохраняет порядок как есть. */
+    suspend fun reorderRoute(serverUrl: String, apiKey: String, visitIds: List<Int>): Boolean = withContext(Dispatchers.IO) {
+        val ids = JSONArray()
+        visitIds.forEach { ids.put(it) }
+        val payload = JSONObject().put("visit_ids", ids)
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/route/reorder"), apiKey, payload)
+            ?: return@withContext false
+        response.optBoolean("ok", false)
     }
 
     suspend fun fetchActiveRoute(serverUrl: String, apiKey: String): ServerRouteSnapshot? = withContext(Dispatchers.IO) {
@@ -1254,7 +1265,14 @@ class HomeVisitRepository private constructor(
                 )
             }
         }
+        val orderJson = route.optJSONArray("order") ?: JSONArray()
+        val order = buildList {
+            for (index in 0 until orderJson.length()) {
+                add(orderJson.optInt(index))
+            }
+        }
         return ServerRouteSnapshot(
+            order = order,
             visitsCount = route.optInt("visits_count", 0),
             totalKm = route.optDouble("total_km", 0.0),
             totalMinutes = route.optDouble("total_minutes", 0.0),

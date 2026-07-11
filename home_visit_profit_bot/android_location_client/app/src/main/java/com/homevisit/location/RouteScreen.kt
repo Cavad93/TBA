@@ -43,6 +43,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Coffee
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
@@ -181,30 +186,46 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, settingsState: GpsSettingsState) {
     // Лента «Фокус»: Старт (редактируемый) → текущий заказ крупной карточкой →
-    // «Далее» списком → оптимизация → Финиш (редактируемый) → слайдер завершения.
+    // «Далее» списком → порядок маршрута → Финиш (редактируемый) → слайдер завершения.
+    var reordering by rememberSaveable { mutableStateOf(false) }
+    val templates = uiState.appSettings.addressTemplates()
+    val orders = uiState.routeVisits
+
     ScreenColumn {
         RouteAnchor(
             title = "Старт",
             icon = Icons.Filled.PlayArrow,
             accent = VerdictColors.go,
             address = uiState.startAddress,
+            templates = templates,
             isLoading = uiState.serverRoute.isLoading,
             onSave = workActions.onUpdateStart,
         )
-        FocusOrderCard(
-            active = uiState.activeVisit,
-            gpsHint = uiState.gpsHint,
-            onRefreshGpsHint = workActions.onRefreshGpsHint,
-            onComplete = workActions.onCompleteCurrentVisit,
-            onCancel = workActions.onCancelCurrentVisit,
-        )
-        UpNextList(orders = uiState.routeVisits, activeLocalId = uiState.activeVisit?.localId)
-        OptimizeButton(isLoading = uiState.serverRoute.isLoading, onOptimize = workActions.onRefreshRoute)
+        if (reordering) {
+            ReorderCard(orders = orders, onReorder = workActions.onReorderRoute)
+        } else {
+            FocusOrderCard(
+                active = uiState.activeVisit,
+                gpsHint = uiState.gpsHint,
+                onRefreshGpsHint = workActions.onRefreshGpsHint,
+                onComplete = workActions.onCompleteCurrentVisit,
+                onCancel = workActions.onCancelCurrentVisit,
+            )
+            UpNextList(orders = orders, activeLocalId = uiState.activeVisit?.localId)
+        }
+        if (orders.size > 1) {
+            ReorderToggle(
+                reordering = reordering,
+                isLoading = uiState.serverRoute.isLoading,
+                onToggle = { reordering = !reordering },
+            )
+        }
         RouteAnchor(
             title = "Финиш",
             icon = Icons.Filled.NearMe,
             accent = MaterialTheme.colorScheme.primary,
             address = uiState.finishAddress,
+            templates = templates,
             isLoading = uiState.serverRoute.isLoading,
             onSave = workActions.onUpdateFinish,
         )
@@ -213,18 +234,108 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
     }
 }
 
-/** Якорь маршрута (Старт/Финиш): показывает адрес, по «Изменить» — правка и пересчёт. */
+/**
+ * Кнопка порядка маршрута над Финишем. Маршрут и так оптимизируется автоматически
+ * при каждом добавлении заказа (настройка auto_optimize), поэтому здесь — ручная
+ * донастройка порядка кнопками ↑↓.
+ */
+@Composable
+internal fun ReorderToggle(reordering: Boolean, isLoading: Boolean, onToggle: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedButton(modifier = Modifier.fillMaxWidth(), enabled = !isLoading, onClick = onToggle) {
+            Icon(
+                imageVector = if (reordering) Icons.Filled.CheckCircle else Icons.AutoMirrored.Filled.TrendingUp,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(if (reordering) "Готово" else "Изменить порядок")
+        }
+        if (!reordering) {
+            Text(
+                "Маршрут оптимизирован автоматически",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+/** Ручная перестановка заказов: ↑↓ меняют порядок, он сразу сохраняется на сервере. */
+@Composable
+internal fun ReorderCard(orders: List<RouteVisitUi>, onReorder: (List<Int>) -> Unit) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "Порядок заказов",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            orders.forEachIndexed { index, visit ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        Modifier.size(24.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("${index + 1}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(visit.address, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            "${visit.clinic.ifBlank { "Без компании" }} · ${money(visit.income)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    OutlinedIconButton(
+                        enabled = index > 0,
+                        onClick = { onReorder(movedOrderIds(orders, index, index - 1)) },
+                    ) {
+                        Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Выше")
+                    }
+                    OutlinedIconButton(
+                        enabled = index < orders.lastIndex,
+                        onClick = { onReorder(movedOrderIds(orders, index, index + 1)) },
+                    ) {
+                        Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Ниже")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Новый порядок id визитов после перемещения элемента from → to. */
+internal fun movedOrderIds(orders: List<RouteVisitUi>, from: Int, to: Int): List<Int> {
+    val list = orders.toMutableList()
+    val item = list.removeAt(from)
+    list.add(to, item)
+    return list.mapNotNull { it.serverId }
+}
+
+/**
+ * Якорь маршрута (Старт/Финиш): показывает адрес, по «Изменить» — правка и пересчёт.
+ * В режиме правки можно выбрать сохранённый шаблон адреса из выпадающего списка
+ * (последний пункт — ввод вручную) или просто напечатать новый адрес.
+ */
 @Composable
 internal fun RouteAnchor(
     title: String,
     icon: ImageVector,
     accent: Color,
     address: String,
+    templates: List<AddressTemplate>,
     isLoading: Boolean,
     onSave: (String) -> Unit,
 ) {
     var editing by rememberSaveable(title) { mutableStateOf(false) }
     var text by rememberSaveable(title) { mutableStateOf("") }
+    var pickerOpen by remember { mutableStateOf(false) }
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -249,6 +360,37 @@ internal fun RouteAnchor(
                 }
             }
             if (editing) {
+                if (templates.isNotEmpty()) {
+                    Box(Modifier.fillMaxWidth()) {
+                        OutlinedButton(onClick = { pickerOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                "Выбрать шаблон",
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.Start,
+                                maxLines = 1,
+                            )
+                            Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                        }
+                        DropdownMenu(expanded = pickerOpen, onDismissRequest = { pickerOpen = false }) {
+                            templates.forEach { template ->
+                                DropdownMenuItem(
+                                    text = { Text("${template.name} · ${template.address}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    onClick = {
+                                        text = template.address
+                                        pickerOpen = false
+                                    },
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Ввести вручную…") },
+                                onClick = {
+                                    text = ""
+                                    pickerOpen = false
+                                },
+                            )
+                        }
+                    }
+                }
                 OutlinedTextField(
                     modifier = Modifier.fillMaxWidth(),
                     value = text,
@@ -364,15 +506,6 @@ internal fun UpNextList(orders: List<RouteVisitUi>, activeLocalId: String?) {
     }
 }
 
-/** Аккуратная кнопка оптимизации маршрута над Финишем. */
-@Composable
-internal fun OptimizeButton(isLoading: Boolean, onOptimize: () -> Unit) {
-    OutlinedButton(modifier = Modifier.fillMaxWidth(), enabled = !isLoading, onClick = onOptimize) {
-        Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(if (isLoading) "Оптимизирую…" else "Оптимизировать маршрут")
-    }
-}
 
 /**
  * Завершение смены — только здесь, внизу Ленты. Чтобы случайное касание не

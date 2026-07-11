@@ -54,6 +54,7 @@ SETTINGS_CATALOG: list[SettingField] = [
     SettingField("outside_zone_min_extra_payment", "economics", "Надбавка вне зоны, ₽", "number", 0.0, min=0),
     SettingField("daily_income_goal", "economics", "Цель по доходу за день, ₽", "number", 0.0, min=0),
     SettingField("monthly_income_goal", "economics", "Цель по доходу за месяц, ₽", "number", 0.0, min=0),
+    SettingField("frequent_income", "economics", "Частый доход (тариф по умолчанию), ₽", "number", 0.0, min=0),
     # Авто
     SettingField("car_cost_per_km", "car", "Топливо за км, ₽", "number", 17.05, min=0),
     SettingField("amortization_factor", "car", "Амортизация (× от топлива)", "number", 0.8, min=0),
@@ -63,6 +64,9 @@ SETTINGS_CATALOG: list[SettingField] = [
     SettingField("home_address", "addresses", "Дом", "text", "Дом"),
     SettingField("default_start_address", "addresses", "Старт по умолчанию", "text", "Дом"),
     SettingField("default_finish_address", "addresses", "Финиш по умолчанию", "text", "Дом"),
+    # Шаблоны адресов для Старта/Финиша: JSON-массив [{"name":..., "address":...}].
+    # JSON, а не list, потому что в адресах есть запятые («ул. Ленина, 40»).
+    SettingField("address_templates", "addresses", "Шаблоны адресов", "text", "[]"),
     # Клиники (значения сеедятся из config.yaml, дальше редактируются пользователем)
     SettingField("clinics", "clinics", "Компании", "list", []),
     SettingField("telemed_clinics", "clinics", "Компании удалённых заказов", "list", []),

@@ -164,8 +164,10 @@ class MobileVisitService:
         return self._route_response(day.id, "cancelled", visit_id)
 
     def active_route(self) -> dict[str, Any]:
+        # Чтение маршрута НЕ переоптимизирует: иначе обновление экрана затирало бы
+        # ручную перестановку пользователя.
         day = self._require_active_day()
-        return self._route_response(day.id, "active_route", 0)
+        return self._route_response(day.id, "active_route", 0, optimize=False)
 
     def update_finish(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Сменить финиш активного дня среди смены и пересчитать маршрут."""
@@ -296,28 +298,52 @@ class MobileVisitService:
             },
         }
 
-    def _route_response(self, day_id: int, reason: str, visit_id: int) -> dict[str, Any]:
+    def _route_response(self, day_id: int, reason: str, visit_id: int, *, optimize: bool = True) -> dict[str, Any]:
         day = self.days.get(day_id)
         if day is None:
             raise ValueError("day not found")
         all_visits = self.visits.list_for_day(day_id, ("accepted", "completed"))
         route = calculate_remaining_route_summary(day, all_visits, self.settings)
-        # Авто-оптимизация: сразу сохраняем оптимальный порядок принятых заказов,
-        # чтобы Лента показывала оптимальную последовательность без ручного действия.
-        # Отключается настройкой auto_optimize.
-        if self.settings.get_bool("auto_optimize", True) and route.order:
+        # Авто-оптимизация: на событиях ИЗМЕНЕНИЯ маршрута (принял/выполнил/отменил/
+        # сменил старт-финиш) сразу сохраняем оптимальный порядок, чтобы Лента
+        # показывала оптимум без ручного действия. Отключается настройкой
+        # auto_optimize. На чтении (active_route) и после ручной перестановки НЕ
+        # трогаем порядок — иначе перезапишем то, что задал пользователь.
+        if optimize and self.settings.get_bool("auto_optimize", True) and route.order:
             accepted_ids = {v.id for v in all_visits if v.status == "accepted"}
             ordered = [vid for vid in route.order if vid in accepted_ids]
             if ordered:
                 self.visits.update_order_numbers(ordered)
                 all_visits = self.visits.list_for_day(day_id, ("accepted", "completed"))
+        payload = route_payload(route)
+        # `order` в ответе — СОХРАНЁННЫЙ порядок показа (order_number), а не «идеальный»
+        # порядок оптимизатора: так клиент видит и авто-оптимизацию, и ручную перестановку.
+        payload["order"] = [visit.id for visit in all_visits if visit.status == "accepted"]
         return {
             "ok": True,
             "reason": reason,
             "visit_id": visit_id,
-            "route": route_payload(route),
+            "route": payload,
             "visits": [visit_payload(visit) for visit in all_visits],
         }
+
+    def reorder_route(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Ручная перестановка принятых заказов (кнопки ↑↓ в Ленте).
+
+        Порядок сохраняется ровно как задал пользователь: авто-оптимизация здесь
+        НЕ применяется, иначе она сразу перезаписала бы ручной порядок. Следующее
+        изменение маршрута (новый заказ / выполнение / отмена) снова оптимизирует.
+        """
+        day = self._require_active_day()
+        raw = payload.get("visit_ids")
+        if not isinstance(raw, list) or not raw:
+            raise ValueError("visit_ids is required")
+        requested = [int(value) for value in raw]
+        accepted = [visit.id for visit in self.visits.list_for_day(day.id, ("accepted",))]
+        if sorted(requested) != sorted(accepted):
+            raise ValueError("visit_ids must contain exactly all accepted visits")
+        self.visits.update_order_numbers(requested)
+        return self._route_response(day.id, "reordered", 0, optimize=False)
 
     def _require_active_day(self):
         day = self.days.active()

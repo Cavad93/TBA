@@ -242,6 +242,9 @@ data class ServerRouteSnapshot(
     val totalKm: Double,
     val totalMinutes: Double,
     val legs: List<ServerRouteLeg>,
+    /** Сохранённый на сервере порядок принятых заказов (id визитов) — по нему
+     *  сортируется Лента: отражает и авто-оптимизацию, и ручную перестановку. */
+    val order: List<Int> = emptyList(),
     val fromCache: Boolean = false,
 )
 

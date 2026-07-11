@@ -168,8 +168,13 @@ def _handler_factory(config: AppConfig):
             if path == "/api/day/finish":
                 self._handle_day_finish()
                 return
-            if path == "/api/day/start":
-                self._handle_day_start()
+            # ВНИМАНИЕ: /api/day/start уже занят стартом рабочего дня (см. выше).
+            # Смена адреса старта среди дня — отдельный путь.
+            if path == "/api/day/start-address":
+                self._handle_day_start_address()
+                return
+            if path == "/api/route/reorder":
+                self._handle_route_reorder()
                 return
             if path == "/api/fatigue/feedback":
                 self._handle_fatigue_feedback()
@@ -465,7 +470,8 @@ def _handler_factory(config: AppConfig):
                 return
             self._json_response(result)
 
-        def _handle_day_start(self) -> None:
+        def _handle_day_start_address(self) -> None:
+            """Смена АДРЕСА старта среди дня (не путать со стартом рабочего дня)."""
             if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
@@ -473,6 +479,20 @@ def _handler_factory(config: AppConfig):
                 payload = self._read_json()
                 with connect(config) as connection:
                     result = MobileVisitService(connection).update_start(payload)
+            except (KeyError, ValueError, TypeError, json.JSONDecodeError) as error:
+                self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            self._json_response(result)
+
+        def _handle_route_reorder(self) -> None:
+            """Ручная перестановка принятых заказов (кнопки ↑↓ в Ленте)."""
+            if not _authorize_request(self, config):
+                self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                payload = self._read_json()
+                with connect(config) as connection:
+                    result = MobileVisitService(connection).reorder_route(payload)
             except (KeyError, ValueError, TypeError, json.JSONDecodeError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
                 return

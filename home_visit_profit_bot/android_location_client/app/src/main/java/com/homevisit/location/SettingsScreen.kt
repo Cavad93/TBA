@@ -317,6 +317,17 @@ internal fun AppSettingsSection(
 ) {
     SectionHeader(section.title)
     section.fields.forEach { field ->
+        // Шаблоны адресов хранятся как JSON — вместо сырого текстового поля даём
+        // нормальный редактор «название + адрес».
+        if (field.key == "address_templates") {
+            val raw = textEdits[field.key] ?: field.textValue
+            AddressTemplatesEditor(
+                label = field.label,
+                templates = parseAddressTemplates(raw),
+                onChange = { items -> textEdits[field.key] = serializeAddressTemplates(items) },
+            )
+            return@forEach
+        }
         when (field.type) {
             SettingType.Bool -> {
                 Row(
@@ -359,6 +370,66 @@ internal fun AppSettingsSection(
                     label = { Text(field.label) },
                 )
             }
+        }
+    }
+}
+
+/** Редактор шаблонов адресов: «название + адрес», выбираются потом в Ленте. */
+@Composable
+internal fun AddressTemplatesEditor(
+    label: String,
+    templates: List<AddressTemplate>,
+    onChange: (List<AddressTemplate>) -> Unit,
+) {
+    var newName by rememberSaveable { mutableStateOf("") }
+    var newAddress by rememberSaveable { mutableStateOf("") }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Text(
+            "Чтобы не печатать адреса каждый день: шаблон можно выбрать при смене Старта или Финиша в Ленте.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        templates.forEachIndexed { index, template ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(template.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(template.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = { onChange(templates.filterIndexed { position, _ -> position != index }) }) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Удалить шаблон")
+                }
+            }
+        }
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = newName,
+            onValueChange = { newName = it },
+            singleLine = true,
+            label = { Text("Название (например, Дом)") },
+        )
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = newAddress,
+            onValueChange = { newAddress = it },
+            singleLine = true,
+            label = { Text("Адрес") },
+        )
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = newAddress.isNotBlank(),
+            onClick = {
+                val address = newAddress.trim()
+                onChange(templates + AddressTemplate(newName.trim().ifBlank { address }, address))
+                newName = ""
+                newAddress = ""
+            },
+        ) {
+            Text("Добавить шаблон")
         }
     }
 }

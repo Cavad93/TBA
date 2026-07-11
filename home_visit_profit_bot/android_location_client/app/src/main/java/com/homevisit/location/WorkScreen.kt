@@ -425,8 +425,9 @@ internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
         EvaluateForm(
             candidate = candidate,
             clinics = uiState.clinics.all,
-            // «Частый тариф»: доход последнего заказа смены как разумный дефолт.
-            frequentIncome = uiState.routeVisits.lastOrNull()?.income,
+            // «Частый тариф» из настроек; если не задан — доход последнего заказа смены.
+            frequentIncome = uiState.appSettings.settingNumber("frequent_income")
+                ?: uiState.routeVisits.lastOrNull()?.income,
             onCalculate = workActions.onCalculateVisit,
             onReopenResult = { showResult = true },
         )
