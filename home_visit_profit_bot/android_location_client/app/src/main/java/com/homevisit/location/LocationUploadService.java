@@ -512,7 +512,7 @@ public class LocationUploadService extends Service implements LocationListener, 
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
         return builder
-                .setContentTitle("Home Visit GPS")
+                .setContentTitle("VizitorKrut GPS")
                 .setContentText(text)
                 .setSmallIcon(android.R.drawable.ic_menu_mylocation)
                 .setOngoing(true)
