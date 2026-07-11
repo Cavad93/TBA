@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   tests:
-    name: pytest (SQLite + PostgreSQL RLS)
+    name: pytest (PostgreSQL RLS)
     runs-on: ubuntu-latest
 
     services:
