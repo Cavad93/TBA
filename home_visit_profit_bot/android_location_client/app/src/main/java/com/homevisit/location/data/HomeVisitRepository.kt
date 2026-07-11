@@ -669,6 +669,12 @@ class HomeVisitRepository private constructor(
         response.optString("reason", if (response.optBoolean("ok", false)) "finish_updated" else "error")
     }
 
+    suspend fun updateDayStart(serverUrl: String, apiKey: String, address: String): String? = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("start_address", address)
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/day/start"), apiKey, payload) ?: return@withContext null
+        response.optString("reason", if (response.optBoolean("ok", false)) "start_updated" else "error")
+    }
+
     suspend fun fetchActiveRoute(serverUrl: String, apiKey: String): ServerRouteSnapshot? = withContext(Dispatchers.IO) {
         val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/route/active"), apiKey, "cache_route_active")
             ?: return@withContext null

@@ -300,6 +300,27 @@ def test_mobile_update_finish_changes_active_day_finish_with_coords(config) -> N
     assert updated.finish_lon == 30.26
 
 
+def test_mobile_update_start_changes_active_day_start_with_coords(config) -> None:
+
+    with connect(config) as connection:
+        days = WorkDayRepository(connection)
+        day = days.create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        service = MobileVisitService(connection)
+
+        result = service.update_start(
+            {"start_address": "Аэропорт Пулково", "lat": 59.80, "lon": 30.26}
+        )
+        updated = days.get(day.id)
+
+    assert result["ok"] is True
+    assert result["reason"] == "start_updated"
+    assert result["start"]["address"] == "Аэропорт Пулково"
+    assert result["start"]["lat"] == 59.80
+    assert updated.start_address == "Аэропорт Пулково"
+    assert updated.start_lat == 59.80
+    assert updated.start_lon == 30.26
+
+
 def test_mobile_update_finish_requires_active_day(config) -> None:
 
     with connect(config) as connection:

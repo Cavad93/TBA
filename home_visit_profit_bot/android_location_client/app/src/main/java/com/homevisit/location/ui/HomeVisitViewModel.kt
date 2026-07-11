@@ -375,6 +375,29 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun updateStart(serverUrl: String, apiKey: String, address: String) {
+        viewModelScope.launch {
+            if (serverUrl.isBlank() || apiKey.isBlank()) {
+                routeState.value = routeState.value.copy(message = "Заполните URL сервера и API ключ")
+                return@launch
+            }
+            if (address.isBlank()) {
+                routeState.value = routeState.value.copy(message = "Введите новый адрес старта")
+                return@launch
+            }
+            routeState.value = routeState.value.copy(isLoading = true, message = "Меняю старт...")
+            when (repository.updateDayStart(serverUrl, apiKey, address)) {
+                "start_updated" -> {
+                    refreshRouteInternal(serverUrl, apiKey)
+                    routeState.value = routeState.value.copy(message = "Старт изменён, маршрут пересчитан")
+                }
+                "needs_coordinates" -> routeState.value = routeState.value.copy(isLoading = false, message = "Сервер не нашёл адрес старта. Уточните адрес.")
+                "geocoding_failed" -> routeState.value = routeState.value.copy(isLoading = false, message = "Не удалось геокодировать старт")
+                else -> routeState.value = routeState.value.copy(isLoading = false, message = "Не удалось изменить старт")
+            }
+        }
+    }
+
     fun refreshGpsHint(serverUrl: String, apiKey: String) {
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) {

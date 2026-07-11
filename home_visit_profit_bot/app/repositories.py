@@ -275,6 +275,13 @@ class WorkDayRepository:
         )
         self.connection.commit()
 
+    def update_start(self, day_id: int, address: str, lat: float | None, lon: float | None) -> None:
+        self.connection.execute(
+            "UPDATE work_days SET start_address = ?, start_lat = ?, start_lon = ? WHERE id = ?",
+            (address, lat, lon, day_id),
+        )
+        self.connection.commit()
+
 
 class VisitRepository:
     def __init__(self, connection: Database):

@@ -198,6 +198,37 @@ class MobileVisitService:
         response["finish"] = {"address": normalized, "lat": lat, "lon": lon}
         return response
 
+    def update_start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Сменить старт активного дня среди смены и пересчитать маршрут."""
+        day = self._require_active_day()
+        address = _required_str(payload, "start_address")
+        lat = _optional_float(payload.get("lat"))
+        lon = _optional_float(payload.get("lon"))
+        if lat is None or lon is None:
+            try:
+                geo = geocode_address(
+                    address,
+                    self.settings.base_districts(),
+                    cache_repo=AddressCacheRepository(self.connection),
+                    default_city=self.settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург",
+                    default_region=self.settings.get("default_region", "Ленинградская область") or "Ленинградская область",
+                    nominatim_url=self.settings.get("nominatim_url", "https://nominatim.openstreetmap.org") or "https://nominatim.openstreetmap.org",
+                    user_agent=self.settings.get("geo_user_agent", "home-visit-profit-bot/1.0") or "home-visit-profit-bot/1.0",
+                    timeout_seconds=self.settings.get_float("request_timeout_seconds", 10),
+                )
+            except GeocodingError as error:
+                return {"ok": False, "reason": "geocoding_failed", "detail": str(error)}
+            if geo is None or geo.lat is None or geo.lon is None:
+                return {"ok": False, "reason": "needs_coordinates"}
+            lat, lon = geo.lat, geo.lon
+            normalized = geo.normalized_address or address
+        else:
+            normalized = address
+        self.days.update_start(day.id, normalized, lat, lon)
+        response = self._route_response(day.id, "start_updated", 0)
+        response["start"] = {"address": normalized, "lat": lat, "lon": lon}
+        return response
+
     def set_stop_label(self, visit_id: int, label: str) -> dict[str, Any]:
         day = self._require_active_day()
         visit = self.visits.get(visit_id)

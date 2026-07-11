@@ -94,6 +94,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -178,31 +179,197 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, settingsState: GpsSettingsState) {
+    // Лента «Фокус»: Старт (редактируемый) → текущий заказ крупной карточкой →
+    // «Далее» списком → оптимизация → Финиш (редактируемый) → слайдер завершения.
     ScreenColumn {
-        GpsControlCard(settingsState)
-        ActiveVisitCard(
-            activeVisit = uiState.activeVisit,
+        RouteAnchor(
+            title = "Старт",
+            icon = Icons.Filled.PlayArrow,
+            accent = VerdictColors.go,
+            address = uiState.startAddress,
+            isLoading = uiState.serverRoute.isLoading,
+            onSave = workActions.onUpdateStart,
+        )
+        FocusOrderCard(
+            active = uiState.activeVisit,
             gpsHint = uiState.gpsHint,
             onRefreshGpsHint = workActions.onRefreshGpsHint,
             onComplete = workActions.onCompleteCurrentVisit,
             onCancel = workActions.onCancelCurrentVisit,
         )
-        ServerRouteCard(
-            route = uiState.serverRoute,
-            onRefresh = workActions.onRefreshRoute,
-        )
-        ChangeFinishCard(
+        UpNextList(orders = uiState.routeVisits, activeLocalId = uiState.activeVisit?.localId)
+        OptimizeButton(isLoading = uiState.serverRoute.isLoading, onOptimize = workActions.onRefreshRoute)
+        RouteAnchor(
+            title = "Финиш",
+            icon = Icons.Filled.NearMe,
+            accent = MaterialTheme.colorScheme.primary,
+            address = uiState.finishAddress,
             isLoading = uiState.serverRoute.isLoading,
-            onUpdateFinish = workActions.onUpdateFinish,
-        )
-        RouteListCard(uiState.routeVisits)
-        StopClassificationCard(
-            activeVisit = uiState.activeVisit,
-            isLoading = uiState.serverRoute.isLoading,
-            onSelect = workActions.onClassifyCurrentStop,
+            onSave = workActions.onUpdateFinish,
         )
         // Единственная точка завершения смены — внизу Ленты (модель «двухэтажного дома»).
         EndShiftSection(onEndShift = workActions.onEndDay)
+    }
+}
+
+/** Якорь маршрута (Старт/Финиш): показывает адрес, по «Изменить» — правка и пересчёт. */
+@Composable
+internal fun RouteAnchor(
+    title: String,
+    icon: ImageVector,
+    accent: Color,
+    address: String,
+    isLoading: Boolean,
+    onSave: (String) -> Unit,
+) {
+    var editing by rememberSaveable(title) { mutableStateOf(false) }
+    var text by rememberSaveable(title) { mutableStateOf("") }
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(accent.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(address.ifBlank { "не задан" }, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                TextButton(onClick = {
+                    if (!editing) text = address
+                    editing = !editing
+                }) {
+                    Text(if (editing) "Отмена" else "Изменить")
+                }
+            }
+            if (editing) {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Новый адрес") },
+                    singleLine = true,
+                )
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isLoading && text.isNotBlank(),
+                    onClick = {
+                        onSave(text.trim())
+                        editing = false
+                    },
+                ) {
+                    Text("Сохранить · пересчитать маршрут")
+                }
+            }
+        }
+    }
+}
+
+/** Крупная карточка текущего заказа: «Готово»/«Отмена» и «Закрыть по GPS». */
+@Composable
+internal fun FocusOrderCard(
+    active: RouteVisitUi?,
+    gpsHint: GpsHintUiState,
+    onRefreshGpsHint: () -> Unit,
+    onComplete: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (active != null) VerdictColors.edgeContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        border = if (active != null) BorderStroke(1.dp, VerdictColors.edge) else null,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                "Текущий заказ",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (active != null) VerdictColors.onEdgeContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (active == null) {
+                Text(
+                    "Активного заказа нет. Оцените и примите заказ во вкладке «Оценка».",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text(active.address, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(
+                    "${active.clinic.ifBlank { "Без компании" }} · ${money(active.income)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                GpsHintBlock(gpsHint = gpsHint, onRefresh = onRefreshGpsHint, onComplete = onComplete)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        enabled = active.serverId != null,
+                        onClick = onComplete,
+                        colors = ButtonDefaults.buttonColors(containerColor = VerdictColors.go, contentColor = Color.White),
+                    ) {
+                        Text("Готово")
+                    }
+                    OutlinedButton(modifier = Modifier.weight(1f), enabled = active.serverId != null, onClick = onCancel) {
+                        Text("Отмена")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Список остальных принятых заказов — «Далее». */
+@Composable
+internal fun UpNextList(orders: List<RouteVisitUi>, activeLocalId: String?) {
+    val upcoming = orders.filter { it.localId != activeLocalId }
+    if (upcoming.isEmpty()) return
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Далее · ${upcoming.size}",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            upcoming.forEachIndexed { index, v ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(
+                        Modifier.size(22.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("${index + 1}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(v.address, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            "${v.clinic.ifBlank { "Без компании" }} · ${money(v.income)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Аккуратная кнопка оптимизации маршрута над Финишем. */
+@Composable
+internal fun OptimizeButton(isLoading: Boolean, onOptimize: () -> Unit) {
+    OutlinedButton(modifier = Modifier.fillMaxWidth(), enabled = !isLoading, onClick = onOptimize) {
+        Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(if (isLoading) "Оптимизирую…" else "Оптимизировать маршрут")
     }
 }
 
@@ -301,93 +468,6 @@ internal fun EndShiftSection(onEndShift: () -> Unit) {
 }
 
 @Composable
-internal fun ChangeFinishCard(isLoading: Boolean, onUpdateFinish: (String) -> Unit) {
-    var finishAddress by rememberSaveable { mutableStateOf("") }
-    InputCard("Изменить финиш") {
-        Text(
-            "Смените конечную точку среди дня — сервер геокодирует адрес и пересчитает маршрут.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OutlinedTextField(
-            modifier = Modifier.fillMaxWidth(),
-            value = finishAddress,
-            onValueChange = { finishAddress = it },
-            singleLine = true,
-            label = { Text("Новый адрес финиша") },
-        )
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading && finishAddress.isNotBlank(),
-            onClick = {
-                onUpdateFinish(finishAddress.trim())
-                finishAddress = ""
-            },
-        ) {
-            Text("Применить финиш")
-        }
-    }
-}
-
-@Composable
-internal fun ActiveVisitCard(
-    activeVisit: RouteVisitUi?,
-    gpsHint: GpsHintUiState,
-    onRefreshGpsHint: () -> Unit,
-    onComplete: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text("Текущий адрес", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            if (activeVisit == null) {
-                Text(
-                    "Нет принятого адреса. После расчёта и принятия заказа он появится здесь.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                Text(activeVisit.address, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "${activeVisit.clinic}, ${money(activeVisit.income)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                GpsHintBlock(
-                    gpsHint = gpsHint,
-                    onRefresh = onRefreshGpsHint,
-                    onComplete = onComplete,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        modifier = Modifier.weight(1f),
-                        enabled = activeVisit.serverId != null,
-                        onClick = onComplete,
-                    ) {
-                        Text("Завершить")
-                    }
-                    OutlinedButton(
-                        modifier = Modifier.weight(1f),
-                        enabled = activeVisit.serverId != null,
-                        onClick = onCancel,
-                    ) {
-                        Text("Отменить")
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 internal fun GpsHintBlock(gpsHint: GpsHintUiState, onRefresh: () -> Unit, onComplete: () -> Unit) {
     val hint = gpsHint.hint
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -424,146 +504,4 @@ internal fun GpsHintBlock(gpsHint: GpsHintUiState, onRefresh: () -> Unit, onComp
     }
 }
 
-@Composable
-internal fun ServerRouteCard(route: RouteUiState, onRefresh: () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Серверный маршрут", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                OutlinedButton(
-                    enabled = !route.isLoading,
-                    onClick = onRefresh,
-                ) {
-                    Text(if (route.isLoading) "Обновляю" else "Обновить")
-                }
-            }
-
-            if (route.message.isNotBlank()) {
-                Text(
-                    route.message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            val snapshot = route.snapshot
-            if (snapshot == null) {
-                Text(
-                    "Пока нет серверного порядка адресов. Нажмите обновить после принятия заказа.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                if (snapshot.fromCache) OfflineBadge()
-                Text(
-                    "Адресов: ${snapshot.visitsCount}. Всего: ${oneDecimal(snapshot.totalKm)} км, ${oneDecimal(snapshot.totalMinutes)} мин.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-
-                if (snapshot.legs.isEmpty()) {
-                    Text(
-                        "Плеч маршрута пока нет.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    snapshot.legs.forEachIndexed { index, leg ->
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(
-                                "${index + 1}. ${leg.fromLabel} -> ${leg.toLabel}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                "${oneDecimal(leg.km)} км, ${oneDecimal(leg.minutes)} мин",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun StopClassificationCard(activeVisit: RouteVisitUi?, isLoading: Boolean, onSelect: (StopLabel) -> Unit) {
-    var selected by rememberSaveable { mutableStateOf(StopLabel.Normal) }
-    InputCard("Тип GPS-остановки") {
-        Text(
-            "Уточнение влияет только на нагрузку и долг восстановления, экономический расчёт не меняет.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OptionGrid(
-            options = StopLabel.entries.toList(),
-            selected = selected,
-            label = { it.title },
-            enabled = activeVisit?.serverId != null && !isLoading,
-            onSelect = {
-                selected = it
-                onSelect(it)
-            },
-        )
-        if (activeVisit?.serverId == null) {
-            Text(
-                "Сначала должен быть текущий адрес, принятый через сервер.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-internal fun RouteListCard(routeVisits: List<RouteVisitUi>) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text("Очередь адресов", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            if (routeVisits.isEmpty()) {
-                Text(
-                    "Принятых адресов пока нет.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                routeVisits.forEachIndexed { index, visit ->
-                    Text(
-                        "${index + 1}. ${visit.address}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = if (index == 0) FontWeight.SemiBold else FontWeight.Normal,
-                    )
-                    Text(
-                        "${visit.clinic}, ${money(visit.income)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
 
