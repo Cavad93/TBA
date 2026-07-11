@@ -7,9 +7,7 @@ from app.repositories import DailyStatsRepository, DrivingBehaviorRepository, Fa
 from app.services.mobile_fatigue_service import CBI_QUESTIONS, MobileFatigueService
 
 
-def test_mobile_cbi_saves_score_and_settings(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_mobile_cbi_saves_score_and_settings(config) -> None:
 
     with connect(config) as connection:
         result = MobileFatigueService(connection).save_cbi([4, 3, 2, 1, 0, 2, 4])
@@ -20,9 +18,7 @@ def test_mobile_cbi_saves_score_and_settings(tmp_path) -> None:
     assert latest_cbi == result["score"]
 
 
-def test_mobile_feedback_uses_latest_closed_day(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_mobile_feedback_uses_latest_closed_day(config) -> None:
 
     with connect(config) as connection:
         day = WorkDayRepository(connection).create("Дом", "Дом", 30, 20)
@@ -59,9 +55,7 @@ def test_mobile_feedback_uses_latest_closed_day(tmp_path) -> None:
     assert feedback["feedback_type"] == "higher"
 
 
-def test_mobile_correlation_report_payload(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_mobile_correlation_report_payload(config) -> None:
 
     with connect(config) as connection:
         days = WorkDayRepository(connection)
@@ -103,9 +97,7 @@ def test_mobile_correlation_report_payload(tmp_path) -> None:
     assert any(cell["target"] == "fatigue_score" and cell["feature"] == "aggressive_score" for cell in payload["cells"])
 
 
-def test_mobile_fatigue_trend_returns_chronological_points(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_mobile_fatigue_trend_returns_chronological_points(config) -> None:
 
     with connect(config) as connection:
         days = WorkDayRepository(connection)
@@ -141,15 +133,3 @@ def test_mobile_fatigue_trend_returns_chronological_points(tmp_path) -> None:
     assert payload["points"][-1]["weekly_average"] == 55
 
 
-def _config(tmp_path):
-    return AppConfig(
-        project_dir=tmp_path,
-        database_path=tmp_path / "data.sqlite3",
-        finance=FinanceConfig(min_hourly_income=600, currency="RUB"),
-        car=CarConfig(car_cost_per_km=17.05, amortization_factor=0.8, fuel_price_per_liter=70, fuel_consumption_l_per_100km=10),
-        defaults=DefaultsConfig(avg_speed_kmh=30, service_minutes=20, telemed_minutes=3, route_time_factor=1),
-        route=RouteConfig(always_return_to_finish=True, optimize_after_each_accept=True),
-        geo=GeoConfig(default_city="Санкт-Петербург", default_region="Ленинградская область", base_districts=[], nominatim_url="", user_agent="test"),
-        routing=RoutingConfig(osrm_url="", request_timeout_seconds=1, fallback_to_estimate=True, straight_line_factor=1.35),
-        location_api=LocationApiConfig(enabled=True, host="127.0.0.1", port=8088, api_key="test", geofence_radius_m=120, dwell_minutes=12, notification_cooldown_minutes=60),
-    )

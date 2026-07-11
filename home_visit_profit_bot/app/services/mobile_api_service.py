@@ -1,9 +1,9 @@
 from __future__ import annotations
+from typing import Any
+from app.database import Database
 
 import json
-import sqlite3
 from dataclasses import dataclass
-from typing import Any
 
 from app.models import EndDayData
 from app.repositories import (
@@ -66,7 +66,7 @@ class SyncResult:
 
 
 class MobileApiService:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
         self.settings = SettingsRepository(connection)
         self.days = WorkDayRepository(connection)
@@ -258,7 +258,7 @@ class MobileApiService:
             end_odometer = _non_negative_float(payload.get("end_odometer"), default=0.0)
         if end_odometer is not None:
             self.connection.execute(
-                "UPDATE work_days SET end_odometer = ?, odometer_km = MAX(0, ? - COALESCE(start_odometer, 0)) WHERE id = ?",
+                "UPDATE work_days SET end_odometer = ?, odometer_km = GREATEST(0, ? - COALESCE(start_odometer, 0)) WHERE id = ?",
                 (end_odometer, end_odometer, day_id),
             )
         self.connection.execute(
@@ -297,14 +297,13 @@ class MobileApiService:
         day_id = self._require_day_id(_required_str(payload, "work_day_id"))
         income = _non_negative_float(payload.get("income"))
         minutes = _non_negative_float(payload.get("minutes"))
-        self.office.add(
+        server_id = self.office.add(
             day_id=day_id,
             address=_required_str(payload, "address"),
             clinic=_clinic(payload, allowed_clinics(self.settings)),
             income=income,
             minutes=minutes,
         )
-        server_id = int(self.connection.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
         self.days.add_money(day_id, "office_income", income)
         self.days.add_money(day_id, "office_minutes", minutes)
         self._map(client_entity_id, "office_entry", server_id)
@@ -322,8 +321,7 @@ class MobileApiService:
             raise ValueError(f"telemed clinic must be one of: {', '.join(sorted(telemed_clinics))}")
         income = _non_negative_float(payload.get("income"))
         minutes = _non_negative_float(payload.get("minutes"))
-        self.telemed.add(day_id=day_id, clinic=clinic, income=income, minutes=minutes)
-        server_id = int(self.connection.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
+        server_id = self.telemed.add(day_id=day_id, clinic=clinic, income=income, minutes=minutes)
         self.days.add_money(day_id, "telemed_income", income)
         self.days.add_money(day_id, "telemed_minutes", minutes)
         self._map(client_entity_id, "telemed_entry", server_id)
@@ -340,8 +338,7 @@ class MobileApiService:
         if field is None:
             raise ValueError(f"unsupported expense category: {category}")
         amount = _non_negative_float(payload.get("amount"))
-        self.expenses.add(day_id, category, amount, _optional_str(payload.get("comment")))
-        server_id = int(self.connection.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
+        server_id = self.expenses.add(day_id, category, amount, _optional_str(payload.get("comment")))
         self.days.add_money(day_id, field, amount)
         if field in {"food_meal_expenses", "coffee_expenses", "drinks_expenses"}:
             self.days.add_money(day_id, "food_expenses", amount)

@@ -1,68 +1,29 @@
 """Тесты изоляции данных по user_id (PostgreSQL RLS).
 
-Запускаются только если задан TEST_PG_URL (нужен реальный PostgreSQL — RLS в SQLite
-нет). Проверяют, что пользователь видит и меняет ТОЛЬКО свои строки.
-
-    TEST_PG_URL=postgresql://localhost/vizitor_isotest python -m pytest tests/test_isolation_pg.py -q
+Каждый тест получает свежую схему через фикстуру fresh_db (conftest). Проверяют,
+что пользователь видит и меняет ТОЛЬКО свои строки.
 """
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
 
-from app import auth
-from app.config import (
-    AppConfig, CarConfig, DefaultsConfig, FinanceConfig, GeoConfig,
-    LocationApiConfig, RouteConfig, RoutingConfig,
-)
-from app.database import current_user_id
-from app.db import ISOLATED_TABLES, connect, init_db, rls_enforcement_status
+from app.config import AppConfig
+from app.database import connect, current_user_id
+from app.db import ISOLATED_TABLES, rls_enforcement_status
 from app.repositories import SettingsRepository, VisitRepository, WorkDayRepository
-from app.services import auth_service as auth_service_module
 from app.services.auth_service import AuthService
-
-PG_URL = os.getenv("TEST_PG_URL")
-pytestmark = pytest.mark.skipif(not PG_URL, reason="TEST_PG_URL не задан (нужен PostgreSQL)")
-
-
-def _config() -> AppConfig:
-    return AppConfig(
-        project_dir=Path("."),
-        database_path=Path("/tmp/unused.sqlite3"),
-        finance=FinanceConfig(min_hourly_income=600, currency="RUB"),
-        car=CarConfig(car_cost_per_km=17.05, amortization_factor=0.8, fuel_price_per_liter=70, fuel_consumption_l_per_100km=10),
-        defaults=DefaultsConfig(avg_speed_kmh=30, service_minutes=20, telemed_minutes=3, route_time_factor=1),
-        route=RouteConfig(always_return_to_finish=True, optimize_after_each_accept=True),
-        geo=GeoConfig(default_city="СПб", default_region="ЛО", base_districts=[], nominatim_url="", user_agent="t"),
-        routing=RoutingConfig(osrm_url="", request_timeout_seconds=1, fallback_to_estimate=True, straight_line_factor=1.35),
-        location_api=LocationApiConfig(enabled=True, host="127.0.0.1", port=8088, api_key="k", geofence_radius_m=120, dwell_minutes=12, notification_cooldown_minutes=60),
-        database_url=PG_URL,
-    )
-
-
-def _reset_and_init(config: AppConfig) -> None:
-    import psycopg
-    with psycopg.connect(PG_URL, autocommit=True) as conn:
-        conn.execute("DROP SCHEMA public CASCADE")
-        conn.execute("CREATE SCHEMA public")
-    init_db(config)
 
 
 def _make_user(config: AppConfig, email: str) -> int:
-    with connect(config) as conn:  # без current_user_id — users/sessions не изолированы
+    with connect(config) as conn:  # users/sessions не изолированы
         service = AuthService(conn, config)
         service.register(email, "supersecret", "Ник")
         service.verify_email(email, "123456")
         return service.users.get_by_email(email)["id"]
 
 
-def test_rls_isolates_work_data(monkeypatch) -> None:
-    monkeypatch.setattr(auth_service_module, "send_code", lambda *a, **k: None)
-    monkeypatch.setattr(auth, "new_numeric_code", lambda digits=6: "123456")
-    config = _config()
-    _reset_and_init(config)
+def test_rls_isolates_work_data(fresh_db) -> None:
+    config = fresh_db
 
     user_a = _make_user(config, "a@x.com")
     user_b = _make_user(config, "b@x.com")
@@ -117,11 +78,8 @@ def test_rls_isolates_work_data(monkeypatch) -> None:
         current_user_id.set(None)
 
 
-def test_rls_isolates_settings(monkeypatch) -> None:
-    monkeypatch.setattr(auth_service_module, "send_code", lambda *a, **k: None)
-    monkeypatch.setattr(auth, "new_numeric_code", lambda digits=6: "123456")
-    config = _config()
-    _reset_and_init(config)
+def test_rls_isolates_settings(fresh_db) -> None:
+    config = fresh_db
     user_a = _make_user(config, "sa@x.com")
     user_b = _make_user(config, "sb@x.com")
 
@@ -147,26 +105,23 @@ def test_rls_isolates_settings(monkeypatch) -> None:
         current_user_id.set(None)
 
 
-def _seed_two_users(monkeypatch, prefix: str) -> tuple[object, int, int]:
-    monkeypatch.setattr(auth_service_module, "send_code", lambda *a, **k: None)
-    monkeypatch.setattr(auth, "new_numeric_code", lambda digits=6: "123456")
-    config = _config()
-    _reset_and_init(config)
+def _seed_two_users(fresh_db, prefix: str) -> tuple[object, int, int]:
+    config = fresh_db
     return config, _make_user(config, f"{prefix}a@x.com"), _make_user(config, f"{prefix}b@x.com")
 
 
-def test_role_is_not_superuser_or_bypassrls(monkeypatch) -> None:
+def test_role_is_not_superuser_or_bypassrls(fresh_db) -> None:
     """#1 footgun: под superuser/BYPASSRLS политики молча игнорируются."""
-    config, _, _ = _seed_two_users(monkeypatch, "role")
+    config, _, _ = _seed_two_users(fresh_db, "role")
     with connect(config) as conn:
         status = rls_enforcement_status(conn)
     assert status["role_safe"], f"роль приложения обходит RLS: {status['issues']}"
     assert status["enforced"], f"RLS не в полной силе: {status['issues']}"
 
 
-def test_all_isolated_tables_force_rls_and_have_policy(monkeypatch) -> None:
+def test_all_isolated_tables_force_rls_and_have_policy(fresh_db) -> None:
     """Каждая пользовательская таблица: ENABLE + FORCE RLS + политика изоляции."""
-    config, _, _ = _seed_two_users(monkeypatch, "force")
+    config, _, _ = _seed_two_users(fresh_db, "force")
     with connect(config) as conn:
         for table in ISOLATED_TABLES:
             r = conn.execute(
@@ -183,9 +138,9 @@ def test_all_isolated_tables_force_rls_and_have_policy(monkeypatch) -> None:
             assert pol["with_check"], f"{table}: нет WITH CHECK (можно вставить чужую строку)"
 
 
-def test_fail_closed_when_user_unset(monkeypatch) -> None:
+def test_fail_closed_when_user_unset(fresh_db) -> None:
     """Если app.user_id не задан — запрос возвращает 0 строк, а не все (fail-closed)."""
-    config, user_a, _ = _seed_two_users(monkeypatch, "closed")
+    config, user_a, _ = _seed_two_users(fresh_db, "closed")
     try:
         current_user_id.set(user_a)
         with connect(config) as conn:
@@ -199,10 +154,10 @@ def test_fail_closed_when_user_unset(monkeypatch) -> None:
         current_user_id.set(None)
 
 
-def test_with_check_blocks_insert_for_other_user(monkeypatch) -> None:
+def test_with_check_blocks_insert_for_other_user(fresh_db) -> None:
     """B не может вставить строку с чужим user_id (WITH CHECK)."""
     import psycopg
-    config, user_a, user_b = _seed_two_users(monkeypatch, "ins")
+    config, user_a, user_b = _seed_two_users(fresh_db, "ins")
     try:
         current_user_id.set(user_b)
         with connect(config) as conn:
@@ -216,10 +171,10 @@ def test_with_check_blocks_insert_for_other_user(monkeypatch) -> None:
         current_user_id.set(None)
 
 
-def test_with_check_blocks_moving_row_to_other_user(monkeypatch) -> None:
+def test_with_check_blocks_moving_row_to_other_user(fresh_db) -> None:
     """A не может «подарить» свою строку пользователю B через UPDATE user_id."""
     import psycopg
-    config, user_a, user_b = _seed_two_users(monkeypatch, "move")
+    config, user_a, user_b = _seed_two_users(fresh_db, "move")
     try:
         current_user_id.set(user_a)
         with connect(config) as conn:
@@ -231,9 +186,9 @@ def test_with_check_blocks_moving_row_to_other_user(monkeypatch) -> None:
         current_user_id.set(None)
 
 
-def test_default_injects_current_user(monkeypatch) -> None:
+def test_default_injects_current_user(fresh_db) -> None:
     """Вставка без user_id проставляет user_id текущего пользователя (DEFAULT из GUC)."""
-    config, user_a, _ = _seed_two_users(monkeypatch, "def")
+    config, user_a, _ = _seed_two_users(fresh_db, "def")
     try:
         current_user_id.set(user_a)
         with connect(config) as conn:
@@ -244,9 +199,9 @@ def test_default_injects_current_user(monkeypatch) -> None:
         current_user_id.set(None)
 
 
-def test_fresh_connection_does_not_inherit_previous_user(monkeypatch) -> None:
+def test_fresh_connection_does_not_inherit_previous_user(fresh_db) -> None:
     """Новое соединение без установленного пользователя не наследует контекст (анти-leak)."""
-    config, user_a, user_b = _seed_two_users(monkeypatch, "leak")
+    config, user_a, user_b = _seed_two_users(fresh_db, "leak")
     try:
         current_user_id.set(user_a)
         with connect(config) as conn:
@@ -263,11 +218,8 @@ def test_fresh_connection_does_not_inherit_previous_user(monkeypatch) -> None:
         current_user_id.set(None)
 
 
-def test_delete_account_purges_all_data(monkeypatch) -> None:
-    monkeypatch.setattr(auth_service_module, "send_code", lambda *a, **k: None)
-    monkeypatch.setattr(auth, "new_numeric_code", lambda digits=6: "123456")
-    config = _config()
-    _reset_and_init(config)
+def test_delete_account_purges_all_data(fresh_db) -> None:
+    config = fresh_db
     user_a = _make_user(config, "del@x.com")
 
     try:

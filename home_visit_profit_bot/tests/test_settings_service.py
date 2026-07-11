@@ -27,18 +27,6 @@ SEEDED_CLINICS = ["Династия", "ПСК", "ВИТАМЕД", "ДНД"]
 SEEDED_TELEMED_CLINICS = ["ПСК", "ДНД"]
 
 
-def _config(tmp_path):
-    return AppConfig(
-        project_dir=tmp_path,
-        database_path=tmp_path / "data.sqlite3",
-        finance=FinanceConfig(min_hourly_income=600, currency="RUB"),
-        car=CarConfig(car_cost_per_km=17.05, amortization_factor=0.8, fuel_price_per_liter=70, fuel_consumption_l_per_100km=10),
-        defaults=DefaultsConfig(avg_speed_kmh=30, service_minutes=20, telemed_minutes=3, route_time_factor=1),
-        route=RouteConfig(always_return_to_finish=True, optimize_after_each_accept=True),
-        geo=GeoConfig(default_city="СПб", default_region="ЛО", base_districts=[], nominatim_url="", user_agent="test"),
-        routing=RoutingConfig(osrm_url="", request_timeout_seconds=1, fallback_to_estimate=True, straight_line_factor=1.35),
-        location_api=LocationApiConfig(enabled=True, host="127.0.0.1", port=8088, api_key="test", geofence_radius_m=120, dwell_minutes=12, notification_cooldown_minutes=60),
-    )
 
 
 def _field(result: dict, key: str) -> dict:
@@ -49,9 +37,7 @@ def _field(result: dict, key: str) -> dict:
     raise AssertionError(f"field {key} not found")
 
 
-def test_read_returns_defaults_on_empty_db(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_read_returns_defaults_on_empty_db(config) -> None:
     with connect(config) as connection:
         result = SettingsService(connection).read()
 
@@ -65,9 +51,7 @@ def test_read_returns_defaults_on_empty_db(tmp_path) -> None:
     assert _field(result, "osrm_url")["default"] == "https://router.project-osrm.org"
 
 
-def test_update_writes_all_types_and_reads_back(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_update_writes_all_types_and_reads_back(config) -> None:
     with connect(config) as connection:
         service = SettingsService(connection)
         result = service.update(
@@ -97,9 +81,7 @@ def test_update_writes_all_types_and_reads_back(tmp_path) -> None:
     assert _field(result, "clinics")["value"] == ["ПСК", "ДНД", "Династия"]
 
 
-def test_update_accepts_values_wrapper_and_ignores_unknown(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_update_accepts_values_wrapper_and_ignores_unknown(config) -> None:
     with connect(config) as connection:
         result = SettingsService(connection).update(
             {"values": {"fuel_price_per_liter": 72, "totally_unknown": 5}}
@@ -110,9 +92,7 @@ def test_update_accepts_values_wrapper_and_ignores_unknown(tmp_path) -> None:
     assert _field(result, "fuel_price_per_liter")["value"] == 72
 
 
-def test_update_rejects_invalid_values(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_update_rejects_invalid_values(config) -> None:
     with connect(config) as connection:
         service = SettingsService(connection)
         with pytest.raises(ValueError):
@@ -125,9 +105,7 @@ def test_update_rejects_invalid_values(tmp_path) -> None:
             service.update({"only_unknown_key": 1})
 
 
-def test_clinic_helpers_follow_settings(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_clinic_helpers_follow_settings(config) -> None:
     with connect(config) as connection:
         settings = SettingsRepository(connection)
         assert allowed_clinics(settings) == set(SEEDED_CLINICS)
@@ -140,9 +118,7 @@ def test_clinic_helpers_follow_settings(tmp_path) -> None:
         assert allowed_telemed_clinics(settings) == {"Альфа"}
 
 
-def test_settings_saved_sync_event_applies_and_is_idempotent(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_settings_saved_sync_event_applies_and_is_idempotent(config) -> None:
     event = {
         "event_id": "settings-1",
         "event_type": "settings_saved",

@@ -1,9 +1,9 @@
 from __future__ import annotations
+from typing import Any
+from app.database import Database
 
 import json
-from typing import Any
 
-import sqlite3
 
 from app.repositories import (
     BurnoutSurveyRepository,
@@ -31,7 +31,7 @@ CBI_QUESTIONS = [
 
 
 class MobileFatigueService:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
         self.days = WorkDayRepository(connection)
         self.visits = VisitRepository(connection)

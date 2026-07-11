@@ -1,23 +1,18 @@
-"""Тонкий слой доступа к БД, поддерживающий SQLite и PostgreSQL.
+"""Слой доступа к PostgreSQL.
 
-Зачем: репозитории написаны под sqlite3 (плейсхолдеры `?`, `cursor.execute(...)`,
-`cursor.lastrowid`). Чтобы не переписывать 265 запросов, `Database` предоставляет
-тот же интерфейс (`execute`/`executemany`/`commit`), а различия диалектов прячет:
+Репозитории написаны в стиле DBAPI (плейсхолдеры `?`, `cursor.execute`,
+`RETURNING` через `insert`). `Database` даёт этот интерфейс поверх psycopg:
 
-* плейсхолдеры `?` → `%s` для PostgreSQL;
-* вставка с получением id — метод `insert(...)` (SQLite: `lastrowid`,
-  PostgreSQL: `RETURNING id`);
-* SQL-выражение разницы дат — `minutes_between(...)` (SQLite: `julianday`,
-  PostgreSQL: `EXTRACT(EPOCH ...)`).
+* плейсхолдеры `?` → `%s`, литеральный `%` экранируется (`%%`);
+* вставка с получением id — `insert(...)` (`RETURNING id`);
+* разница дат в минутах — `minutes_between(...)` (`EXTRACT(EPOCH ...)`).
 
-По умолчанию (тесты, локальная разработка) — SQLite. В production задаётся
-`DATABASE_URL=postgresql://...`, и тот же код работает на PostgreSQL. Драйвер
-psycopg импортируется лениво, поэтому для SQLite-тестов он не требуется.
+Проект работает ТОЛЬКО на PostgreSQL (изоляция ПДн через RLS). SQLite убран.
+`DATABASE_URL=postgresql://...` обязателен.
 """
 from __future__ import annotations
 
 import contextvars
-import sqlite3
 from typing import Any, Iterable, Sequence
 
 from app.config import AppConfig
@@ -32,19 +27,15 @@ current_user_id: contextvars.ContextVar[int | None] = contextvars.ContextVar(
 
 
 class Database:
-    """Обёртка над DBAPI-соединением с прозрачной поддержкой двух диалектов."""
+    """Обёртка над psycopg-соединением с DBAPI-интерфейсом (плейсхолдеры `?`)."""
 
-    def __init__(self, raw: Any, dialect: str) -> None:
+    def __init__(self, raw: Any) -> None:
         self._raw = raw
-        self.dialect = dialect
 
     def _sql(self, sql: str) -> str:
-        # В коде плейсхолдеры `?` (стиль SQLite). psycopg ожидает `%s`, а литеральный
-        # `%` (напр. в LIKE) требует экранирования `%%`. Экранируем `%` ДО подстановки
-        # `?`→`%s`, иначе испортим введённые `%s`.
-        if self.dialect == "postgres":
-            return sql.replace("%", "%%").replace("?", "%s")
-        return sql
+        # `?` (стиль репозиториев) → `%s` (psycopg). Литеральный `%` (напр. LIKE)
+        # экранируем `%%` ДО подстановки, иначе испортим `%s`.
+        return sql.replace("%", "%%").replace("?", "%s")
 
     def execute(self, sql: str, params: Sequence[Any] = ()) -> Any:
         cursor = self._raw.cursor()
@@ -59,28 +50,22 @@ class Database:
     def insert(self, sql: str, params: Sequence[Any] = ()) -> int:
         """Выполнить INSERT и вернуть id новой строки (PK-колонка `id`)."""
         cursor = self._raw.cursor()
-        if self.dialect == "postgres":
-            cursor.execute(self._sql(sql) + " RETURNING id", tuple(params))
-            row = cursor.fetchone()
-            return int(row["id"])
-        cursor.execute(self._sql(sql), tuple(params))
-        return int(cursor.lastrowid)
+        cursor.execute(self._sql(sql) + " RETURNING id", tuple(params))
+        row = cursor.fetchone()
+        return int(row["id"])
 
     def set_user(self, user_id: int) -> None:
-        """Установить текущего пользователя для изоляции строк (RLS).
+        """Задать GUC app.user_id — по нему работают RLS-политики и DEFAULT user_id.
 
-        PostgreSQL: задаёт GUC app.user_id — по нему работают RLS-политики и
-        DEFAULT для колонок user_id. SQLite: no-op (RLS нет, тесты одно-пользовательские).
+        Session-scope (`false`) безопасен, т.к. соединение создаётся заново на
+        каждый запрос и не переиспользуется (нельзя ставить session-mode пулер).
         """
-        if self.dialect == "postgres":
-            cursor = self._raw.cursor()
-            cursor.execute("SELECT set_config('app.user_id', %s, false)", (str(int(user_id)),))
+        cursor = self._raw.cursor()
+        cursor.execute("SELECT set_config('app.user_id', %s, false)", (str(int(user_id)),))
 
     def minutes_between(self, later: str, earlier: str) -> str:
         """SQL-выражение разницы двух ISO-времён (столбцов) в минутах."""
-        if self.dialect == "postgres":
-            return f"(EXTRACT(EPOCH FROM ({later}::timestamptz - {earlier}::timestamptz)) / 60)"
-        return f"((julianday({later}) - julianday({earlier})) * 24 * 60)"
+        return f"(EXTRACT(EPOCH FROM ({later}::timestamptz - {earlier}::timestamptz)) / 60)"
 
     def commit(self) -> None:
         self._raw.commit()
@@ -106,18 +91,14 @@ class Database:
 
 
 def connect(config: AppConfig) -> Database:
-    """Открыть соединение согласно конфигу: PostgreSQL при DATABASE_URL, иначе SQLite."""
-    if config.database_url:
-        import psycopg
-        from psycopg.rows import dict_row
+    """Открыть соединение с PostgreSQL (DATABASE_URL обязателен)."""
+    if not config.database_url:
+        raise RuntimeError("DATABASE_URL не задан: проект работает только на PostgreSQL")
+    import psycopg
+    from psycopg.rows import dict_row
 
-        raw = psycopg.connect(config.database_url, row_factory=dict_row)
-        db = Database(raw, "postgres")
-    else:
-        raw = sqlite3.connect(config.database_path)
-        raw.row_factory = sqlite3.Row
-        raw.execute("PRAGMA foreign_keys = ON")
-        db = Database(raw, "sqlite")
+    raw = psycopg.connect(config.database_url, row_factory=dict_row)
+    db = Database(raw)
 
     user_id = current_user_id.get()
     if user_id is not None:

@@ -7,9 +7,7 @@ from app.services.mobile_visit_service import MobileVisitService
 from app.services.shift_service import ShiftService
 
 
-def test_shift_empty_returns_zeros(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_shift_empty_returns_zeros(config) -> None:
 
     with connect(config) as connection:
         payload = ShiftService(connection).snapshot("day")
@@ -29,9 +27,7 @@ def test_shift_empty_returns_zeros(tmp_path) -> None:
     assert payload["recent"] == []
 
 
-def test_shift_with_active_day_and_visit(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_shift_with_active_day_and_visit(config) -> None:
 
     with connect(config) as connection:
         days = WorkDayRepository(connection)
@@ -80,15 +76,3 @@ def test_shift_with_active_day_and_visit(tmp_path) -> None:
     assert recent["label"]
 
 
-def _config(tmp_path):
-    return AppConfig(
-        project_dir=tmp_path,
-        database_path=tmp_path / "data.sqlite3",
-        finance=FinanceConfig(min_hourly_income=600, currency="RUB"),
-        car=CarConfig(car_cost_per_km=17.05, amortization_factor=0.8, fuel_price_per_liter=70, fuel_consumption_l_per_100km=10),
-        defaults=DefaultsConfig(avg_speed_kmh=30, service_minutes=20, telemed_minutes=3, route_time_factor=1),
-        route=RouteConfig(always_return_to_finish=True, optimize_after_each_accept=True),
-        geo=GeoConfig(default_city="Санкт-Петербург", default_region="Ленинградская область", base_districts=[], nominatim_url="", user_agent="test"),
-        routing=RoutingConfig(osrm_url="", request_timeout_seconds=1, fallback_to_estimate=True, straight_line_factor=1.35),
-        location_api=LocationApiConfig(enabled=True, host="127.0.0.1", port=8088, api_key="test", geofence_radius_m=120, dwell_minutes=12, notification_cooldown_minutes=60),
-    )

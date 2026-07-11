@@ -1,11 +1,11 @@
 from __future__ import annotations
+from typing import Any
+from app.database import Database
 
 import calendar
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
 
-import sqlite3
 
 from app.models import WorkDay
 from app.repositories import (
@@ -30,7 +30,7 @@ class ReportPeriod:
 
 
 class MobileReportService:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
         self.days = WorkDayRepository(connection)
         self.visits = VisitRepository(connection)

@@ -1,7 +1,7 @@
 """Репозитории для аккаунтов: пользователи, коды подтверждения, сессии, сброс пароля.
 
-Работают через слой app.database.Database (SQLite и PostgreSQL). Строки читаются
-по имени столбца (совместимо с sqlite3.Row и psycopg dict_row).
+Работают через слой app.database.Database (PostgreSQL). Строки читаются
+по имени столбца (psycopg dict_row).
 """
 from __future__ import annotations
 

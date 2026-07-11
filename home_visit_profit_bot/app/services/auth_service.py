@@ -1,6 +1,6 @@
 """Сервис аккаунтов: регистрация, подтверждение e-mail, вход, сессии, сброс пароля.
 
-Работает поверх app.database.Database (SQLite/PostgreSQL). Возвращает готовые для
+Работает поверх app.database.Database (PostgreSQL). Возвращает готовые для
 JSON-ответа словари; ошибки бросает как AuthError со статусом HTTP.
 """
 from __future__ import annotations
@@ -92,7 +92,7 @@ class AuthService:
 
     def _seed_user_settings(self, user_id: int) -> None:
         # Настройки по умолчанию для нового пользователя (клиники/цены/авто/гео).
-        # На PostgreSQL user_id берётся из app.user_id; на SQLite — user_id=0 (тесты).
+        # user_id берётся из app.user_id (RLS).
         from app.db import seed_default_settings
 
         self.connection.set_user(user_id)

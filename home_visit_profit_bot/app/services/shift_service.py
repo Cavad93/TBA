@@ -1,9 +1,9 @@
 from __future__ import annotations
+from typing import Any
+from app.database import Database
 
 from datetime import date, datetime, timedelta
-from typing import Any
 
-import sqlite3
 
 from app.repositories import DailyStatsRepository, SettingsRepository, VisitRepository, WorkDayRepository
 from app.services.mobile_report_service import MobileReportService
@@ -25,7 +25,7 @@ class ShiftService:
     MobileReportService и дневные итоги из daily_stats.
     """
 
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
         self.days = WorkDayRepository(connection)
         self.visits = VisitRepository(connection)

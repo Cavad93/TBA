@@ -8,9 +8,7 @@ from app.repositories import WorkDayRepository
 from app.services.mobile_api_service import MobileApiService
 
 
-def test_mobile_sync_creates_day_and_is_idempotent(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_mobile_sync_creates_day_and_is_idempotent(config) -> None:
 
     with connect(config) as connection:
         service = MobileApiService(connection)
@@ -33,9 +31,7 @@ def test_mobile_sync_creates_day_and_is_idempotent(tmp_path) -> None:
     assert len(days) == 1
 
 
-def test_mobile_sync_logs_duplicate_payload_conflict(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_mobile_sync_logs_duplicate_payload_conflict(config) -> None:
 
     with connect(config) as connection:
         service = MobileApiService(connection)
@@ -65,9 +61,7 @@ def test_mobile_sync_logs_duplicate_payload_conflict(tmp_path) -> None:
     assert conflicts[0]["conflict_type"] == "duplicate_event_payload_mismatch"
 
 
-def test_mobile_sync_saves_work_items_and_aggregates(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_mobile_sync_saves_work_items_and_aggregates(config) -> None:
 
     with connect(config) as connection:
         service = MobileApiService(connection)
@@ -176,9 +170,7 @@ def test_mobile_sync_saves_work_items_and_aggregates(tmp_path) -> None:
     assert day.food_expenses == 350
 
 
-def test_mobile_sync_rejects_wrong_telemed_clinic(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_mobile_sync_rejects_wrong_telemed_clinic(config) -> None:
 
     with connect(config) as connection:
         service = MobileApiService(connection)
@@ -202,9 +194,7 @@ def test_mobile_sync_rejects_wrong_telemed_clinic(tmp_path) -> None:
             )
 
 
-def test_mobile_sync_closes_day_with_end_odometer(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_mobile_sync_closes_day_with_end_odometer(config) -> None:
 
     with connect(config) as connection:
         service = MobileApiService(connection)
@@ -233,9 +223,7 @@ def test_mobile_sync_closes_day_with_end_odometer(tmp_path) -> None:
     assert day.odometer_km == 88
 
 
-def test_mobile_sync_full_day_close_creates_stats_and_fatigue_feedback(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_mobile_sync_full_day_close_creates_stats_and_fatigue_feedback(config) -> None:
 
     with connect(config) as connection:
         service = MobileApiService(connection)
@@ -330,15 +318,3 @@ def _event(event_id: str, event_type: str, entity_type: str, entity_id: str, pay
     }
 
 
-def _config(tmp_path):
-    return AppConfig(
-        project_dir=tmp_path,
-        database_path=tmp_path / "data.sqlite3",
-        finance=FinanceConfig(min_hourly_income=600, currency="RUB"),
-        car=CarConfig(car_cost_per_km=17.05, amortization_factor=0.8, fuel_price_per_liter=70, fuel_consumption_l_per_100km=10),
-        defaults=DefaultsConfig(avg_speed_kmh=30, service_minutes=20, telemed_minutes=3, route_time_factor=1),
-        route=RouteConfig(always_return_to_finish=True, optimize_after_each_accept=True),
-        geo=GeoConfig(default_city="Санкт-Петербург", default_region="Ленинградская область", base_districts=[], nominatim_url="", user_agent="test"),
-        routing=RoutingConfig(osrm_url="", request_timeout_seconds=1, fallback_to_estimate=True, straight_line_factor=1.35),
-        location_api=LocationApiConfig(enabled=True, host="127.0.0.1", port=8088, api_key="test", geofence_radius_m=120, dwell_minutes=12, notification_cooldown_minutes=60),
-    )

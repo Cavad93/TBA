@@ -1,8 +1,8 @@
 from __future__ import annotations
-
-import sqlite3
-from datetime import datetime
 from typing import Any
+from app.database import Database
+
+from datetime import datetime
 
 from app.models import DailyStats, DrivingBehaviorDaily, Visit, WorkDay
 
@@ -11,7 +11,7 @@ def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-def _work_day_from_row(row: sqlite3.Row | None) -> WorkDay | None:
+def _work_day_from_row(row: Any | None) -> WorkDay | None:
     if row is None:
         return None
     return WorkDay(
@@ -59,7 +59,7 @@ def _work_day_from_row(row: sqlite3.Row | None) -> WorkDay | None:
     )
 
 
-def _visit_from_row(row: sqlite3.Row) -> Visit:
+def _visit_from_row(row: Any) -> Visit:
     return Visit(
         id=row["id"],
         work_day_id=row["work_day_id"],
@@ -83,7 +83,7 @@ def _visit_from_row(row: sqlite3.Row) -> Visit:
     )
 
 
-def _driving_from_row(row: sqlite3.Row | None) -> DrivingBehaviorDaily | None:
+def _driving_from_row(row: Any | None) -> DrivingBehaviorDaily | None:
     if row is None:
         return None
     return DrivingBehaviorDaily(
@@ -103,7 +103,7 @@ def _driving_from_row(row: sqlite3.Row | None) -> DrivingBehaviorDaily | None:
 
 
 class SettingsRepository:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
 
     def get(self, key: str, default: str | None = None) -> str | None:
@@ -134,7 +134,7 @@ class SettingsRepository:
 
 
 class WorkDayRepository:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
 
     def active(self) -> WorkDay | None:
@@ -277,7 +277,7 @@ class WorkDayRepository:
 
 
 class VisitRepository:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
 
     def create_candidate(
@@ -337,7 +337,7 @@ class VisitRepository:
         )
         self.connection.commit()
 
-    def recent_completed(self, limit: int = 8) -> list[sqlite3.Row]:
+    def recent_completed(self, limit: int = 8) -> list[Any]:
         """Последние завершённые визиты (по всем дням) для ленты «Смены»."""
         return self.connection.execute(
             """
@@ -493,10 +493,10 @@ class VisitRepository:
 
 
 class LocationEventRepository:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
 
-    def get(self, visit_id: int) -> sqlite3.Row | None:
+    def get(self, visit_id: int) -> Any | None:
         return self.connection.execute(
             "SELECT * FROM visit_location_events WHERE visit_id = ?",
             (visit_id,),
@@ -510,7 +510,7 @@ class LocationEventRepository:
         seen_at: str,
         distance_m: float,
         accuracy_m: float,
-    ) -> sqlite3.Row:
+    ) -> Any:
         existing = self.get(visit_id)
         if existing is None:
             self.connection.execute(
@@ -599,10 +599,10 @@ class LocationEventRepository:
 
 
 class LocationSampleRepository:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
 
-    def last_valid(self, work_day_id: int) -> sqlite3.Row | None:
+    def last_valid(self, work_day_id: int) -> Any | None:
         return self.connection.execute(
             """
             SELECT * FROM location_samples
@@ -720,16 +720,16 @@ class LocationSampleRepository:
 
 
 class WorkDayLocationRepository:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
 
-    def get(self, work_day_id: int) -> sqlite3.Row | None:
+    def get(self, work_day_id: int) -> Any | None:
         return self.connection.execute(
             "SELECT * FROM work_day_location_state WHERE work_day_id = ?",
             (work_day_id,),
         ).fetchone()
 
-    def ensure(self, work_day_id: int, updated_at: str) -> sqlite3.Row:
+    def ensure(self, work_day_id: int, updated_at: str) -> Any:
         self.connection.execute(
             """
             INSERT INTO work_day_location_state(work_day_id, updated_at)
@@ -784,23 +784,24 @@ class WorkDayLocationRepository:
 
 
 class ExpenseRepository:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
 
-    def add(self, day_id: int, expense_type: str, amount: float, comment: str | None = None) -> None:
-        self.connection.execute(
+    def add(self, day_id: int, expense_type: str, amount: float, comment: str | None = None) -> int:
+        new_id = self.connection.insert(
             "INSERT INTO expenses(work_day_id, type, amount, comment, created_at) VALUES (?, ?, ?, ?, ?)",
             (day_id, expense_type, amount, comment, now_iso()),
         )
         self.connection.commit()
+        return new_id
 
 
 class TelemedRepository:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
 
-    def add(self, day_id: int, clinic: str, income: float, minutes: float) -> None:
-        self.connection.execute(
+    def add(self, day_id: int, clinic: str, income: float, minutes: float) -> int:
+        new_id = self.connection.insert(
             """
             INSERT INTO telemed_entries(work_day_id, clinic, income, minutes, created_at)
             VALUES (?, ?, ?, ?, ?)
@@ -808,14 +809,15 @@ class TelemedRepository:
             (day_id, clinic, income, minutes, now_iso()),
         )
         self.connection.commit()
+        return new_id
 
-    def list_for_day(self, day_id: int) -> list[sqlite3.Row]:
+    def list_for_day(self, day_id: int) -> list[Any]:
         return self.connection.execute(
             "SELECT * FROM telemed_entries WHERE work_day_id = ? ORDER BY id",
             (day_id,),
         ).fetchall()
 
-    def aggregate_between(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+    def aggregate_between(self, start_date: str, end_date: str) -> list[Any]:
         return self.connection.execute(
             """
             SELECT
@@ -834,11 +836,11 @@ class TelemedRepository:
 
 
 class OfficeRepository:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
 
-    def add(self, day_id: int, address: str, clinic: str, income: float, minutes: float) -> None:
-        self.connection.execute(
+    def add(self, day_id: int, address: str, clinic: str, income: float, minutes: float) -> int:
+        new_id = self.connection.insert(
             """
             INSERT INTO office_entries(work_day_id, address, clinic, income, minutes, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -846,14 +848,15 @@ class OfficeRepository:
             (day_id, address, clinic, income, minutes, now_iso()),
         )
         self.connection.commit()
+        return new_id
 
-    def list_for_day(self, day_id: int) -> list[sqlite3.Row]:
+    def list_for_day(self, day_id: int) -> list[Any]:
         return self.connection.execute(
             "SELECT * FROM office_entries WHERE work_day_id = ? ORDER BY id",
             (day_id,),
         ).fetchall()
 
-    def aggregate_between(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+    def aggregate_between(self, start_date: str, end_date: str) -> list[Any]:
         return self.connection.execute(
             """
             SELECT
@@ -872,7 +875,7 @@ class OfficeRepository:
 
 
 class BurnoutSurveyRepository:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
 
     def add(self, score: float, answers_json: str) -> None:
@@ -885,14 +888,14 @@ class BurnoutSurveyRepository:
         )
         self.connection.commit()
 
-    def latest(self) -> sqlite3.Row | None:
+    def latest(self) -> Any | None:
         return self.connection.execute(
             "SELECT * FROM burnout_surveys ORDER BY created_at DESC, id DESC LIMIT 1"
         ).fetchone()
 
 
 class DrivingBehaviorRepository:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
 
     def upsert(
@@ -984,7 +987,7 @@ class DrivingBehaviorRepository:
         ).fetchone()
         return dict(row) if row else {}
 
-    def joined_recent(self, days: int = 28) -> list[sqlite3.Row]:
+    def joined_recent(self, days: int = 28) -> list[Any]:
         return self.connection.execute(
             """
             SELECT
@@ -1021,7 +1024,7 @@ class DrivingBehaviorRepository:
 
 
 class FatigueFeedbackRepository:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
 
     def add(self, work_day_id: int, predicted_score: float, user_score: float, feedback_type: str) -> None:
@@ -1041,13 +1044,13 @@ class FatigueFeedbackRepository:
         )
         self.connection.commit()
 
-    def latest_for_day(self, work_day_id: int) -> sqlite3.Row | None:
+    def latest_for_day(self, work_day_id: int) -> Any | None:
         return self.connection.execute(
             "SELECT * FROM fatigue_feedback WHERE work_day_id = ? ORDER BY id DESC LIMIT 1",
             (work_day_id,),
         ).fetchone()
 
-    def recent(self, limit: int = 28) -> list[sqlite3.Row]:
+    def recent(self, limit: int = 28) -> list[Any]:
         return self.connection.execute(
             "SELECT * FROM fatigue_feedback ORDER BY id DESC LIMIT ?",
             (limit,),
@@ -1055,7 +1058,7 @@ class FatigueFeedbackRepository:
 
 
 class DailyStatsRepository:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
 
     def create(self, day_id: int, stats: DailyStats) -> None:
@@ -1144,13 +1147,13 @@ class DailyStatsRepository:
         )
         self.connection.commit()
 
-    def last(self, limit: int = 7) -> list[sqlite3.Row]:
+    def last(self, limit: int = 7) -> list[Any]:
         return self.connection.execute(
             "SELECT * FROM daily_stats ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
 
-    def get_by_day(self, work_day_id: int) -> sqlite3.Row | None:
+    def get_by_day(self, work_day_id: int) -> Any | None:
         return self.connection.execute(
             "SELECT * FROM daily_stats WHERE work_day_id = ? ORDER BY id DESC LIMIT 1",
             (work_day_id,),
@@ -1219,7 +1222,7 @@ class DailyStatsRepository:
         result["end_date"] = end_date
         return result
 
-    def list_between(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+    def list_between(self, start_date: str, end_date: str) -> list[Any]:
         """Построчные дневные итоги за период [start_date, end_date) для графиков."""
         return self.connection.execute(
             """
@@ -1236,7 +1239,7 @@ class DailyStatsRepository:
             (start_date, end_date),
         ).fetchall()
 
-    def clinic_visit_totals_between(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+    def clinic_visit_totals_between(self, start_date: str, end_date: str) -> list[Any]:
         return self.connection.execute(
             """
             SELECT
@@ -1258,10 +1261,10 @@ class DailyStatsRepository:
 
 
 class AddressCacheRepository:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
 
-    def get(self, input_text: str) -> sqlite3.Row | None:
+    def get(self, input_text: str) -> Any | None:
         return self.connection.execute(
             "SELECT * FROM address_cache WHERE input_text = ?",
             (input_text.strip(),),

@@ -1,8 +1,8 @@
 from __future__ import annotations
-
-import sqlite3
-from dataclasses import dataclass
 from typing import Any
+from app.database import Database
+
+from dataclasses import dataclass
 
 from app.models import CandidateCalculation, RouteSummary, Visit
 from app.repositories import (
@@ -43,7 +43,7 @@ class CandidateApiResult:
 
 
 class MobileVisitService:
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
         self.settings = SettingsRepository(connection)
         self.days = WorkDayRepository(connection)

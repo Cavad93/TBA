@@ -366,7 +366,7 @@ CREATE TABLE IF NOT EXISTS password_resets (
 
 
 def _to_postgres_ddl(schema: str) -> str:
-    """Перевести SQLite-DDL в PostgreSQL-DDL.
+    """Нормализовать компактный DDL под PostgreSQL.
 
     Отличия: нет PRAGMA; автоинкремент → IDENTITY; целочисленные типы → BIGINT
     (чтобы совпадали типы PK и внешних ключей); REAL → DOUBLE PRECISION.
@@ -400,28 +400,21 @@ ISOLATED_TABLES = [
 
 
 def init_db(config: AppConfig) -> None:
-    if not config.database_url:
-        config.database_path.parent.mkdir(parents=True, exist_ok=True)
     with connect(config) as db:
         _apply_schema(db)
         _ensure_columns(db)
         _ensure_isolation(db)
         _verify_isolation_or_die(db)
-        # На SQLite настройки сидятся сразу (одно-пользовательский режим, user_id=0).
-        # На PostgreSQL — per-user при регистрации (seed_default_settings с app.user_id).
-        if db.dialect != "postgres":
-            seed_default_settings(db, config)
+        # Настройки сидятся per-user при регистрации (seed_default_settings с app.user_id).
 
 
 def rls_enforcement_status(db: Database) -> dict:
-    """Диагностика изоляции ПДн (PostgreSQL).
+    """Диагностика изоляции ПДн.
 
     Проверяет два фатальных условия из research по RLS:
     1) роль приложения НЕ superuser и НЕ имеет BYPASSRLS (иначе RLS игнорируется);
     2) на каждой изолированной таблице включён И forced RLS + есть политика.
     """
-    if db.dialect != "postgres":
-        return {"dialect": "sqlite", "role_safe": True, "enforced": True, "issues": []}
     issues: list[str] = []
     role = db.execute(
         "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
@@ -433,18 +426,19 @@ def rls_enforcement_status(db: Database) -> dict:
         issues.append(f"роль {role['rolname']} имеет BYPASSRLS: RLS не применяется")
     for table in ISOLATED_TABLES:
         r = db.execute(
-            "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = ?",
+            "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
+            "WHERE relname = ? AND relnamespace = current_schema()::regnamespace",
             (table,),
         ).fetchone()
         if not r or not r["relrowsecurity"] or not r["relforcerowsecurity"]:
             issues.append(f"{table}: RLS не включён/не forced")
         pol = db.execute(
-            "SELECT 1 FROM pg_policies WHERE tablename = ? AND policyname = ?",
+            "SELECT 1 FROM pg_policies WHERE tablename = ? AND policyname = ? AND schemaname = current_schema()",
             (table, f"{table}_isolation"),
         ).fetchone()
         if not pol:
             issues.append(f"{table}: нет политики изоляции")
-    return {"dialect": "postgres", "role_safe": role_safe, "enforced": role_safe and not issues, "issues": issues}
+    return {"role_safe": role_safe, "enforced": role_safe and not issues, "issues": issues}
 
 
 def _verify_isolation_or_die(db: Database) -> None:
@@ -452,8 +446,6 @@ def _verify_isolation_or_die(db: Database) -> None:
 
     Аварийный обход: ALLOW_RLS_BYPASS_ROLE=1 (только для осознанной отладки).
     """
-    if db.dialect != "postgres":
-        return
     status = rls_enforcement_status(db)
     if not status["role_safe"]:
         message = "КРИТИЧНО: изоляция ПДн отключена — " + "; ".join(status["issues"])
@@ -465,17 +457,13 @@ def _verify_isolation_or_die(db: Database) -> None:
 
 
 def _ensure_isolation(db: Database) -> None:
-    """Добавить user_id во все пользовательские таблицы; на PostgreSQL — включить RLS.
+    """Добавить user_id во все пользовательские таблицы и включить RLS.
 
-    RLS в PostgreSQL гарантирует, что каждый видит и меняет только свои строки —
-    даже если запрос забыл фильтр. DEFAULT берёт user_id из app.user_id (см.
-    Database.set_user). На SQLite (тесты) — только колонка, без RLS.
+    RLS гарантирует, что каждый видит и меняет только свои строки — даже если
+    запрос забыл фильтр. DEFAULT берёт user_id из app.user_id (см. Database.set_user).
     """
     for table in ISOLATED_TABLES:
         _ensure_column(db, table, "user_id", "BIGINT")
-
-    if db.dialect != "postgres":
-        return
 
     for table in ISOLATED_TABLES:
         db.execute(
@@ -493,7 +481,9 @@ def _ensure_isolation(db: Database) -> None:
         # FK с каскадом: удаление пользователя стирает все его данные (право на удаление).
         constraint = f"{table}_user_fk"
         exists = db.execute(
-            "SELECT 1 FROM pg_constraint WHERE conname = ?", (constraint,)
+            "SELECT 1 FROM pg_constraint WHERE conname = ? "
+            "AND connamespace = current_schema()::regnamespace",
+            (constraint,),
         ).fetchone()
         if not exists:
             db.execute(
@@ -503,8 +493,7 @@ def _ensure_isolation(db: Database) -> None:
 
 
 def _apply_schema(db: Database) -> None:
-    schema = _to_postgres_ddl(SCHEMA) if db.dialect == "postgres" else SCHEMA
-    for statement in _split_statements(schema):
+    for statement in _split_statements(_to_postgres_ddl(SCHEMA)):
         db.execute(statement)
 
 
@@ -524,7 +513,7 @@ def _ensure_columns(db: Database) -> None:
             created_at TEXT NOT NULL
         )
         """
-    db.execute(_to_postgres_ddl(conflicts_ddl) if db.dialect == "postgres" else conflicts_ddl)
+    db.execute(_to_postgres_ddl(conflicts_ddl))
     _ensure_column(db, "visits", "clinic", "TEXT")
     # Вердикт заказа ('go'|'edge'|'skip'), вычисленный из решения профитабельности.
     _ensure_column(db, "visits", "verdict", "TEXT")
@@ -593,16 +582,8 @@ def _ensure_columns(db: Database) -> None:
 
 
 def _ensure_column(db: Database, table: str, column: str, definition: str) -> None:
-    if db.dialect == "postgres":
-        pg_def = re.sub(r"\bREAL\b", "DOUBLE PRECISION", re.sub(r"\bINTEGER\b", "BIGINT", definition))
-        db.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {pg_def}")
-        return
-    columns = {
-        row["name"]
-        for row in db.execute(f"PRAGMA table_info({table})").fetchall()
-    }
-    if column not in columns:
-        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    pg_def = re.sub(r"\bREAL\b", "DOUBLE PRECISION", re.sub(r"\bINTEGER\b", "BIGINT", definition))
+    db.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {pg_def}")
 
 
 def seed_default_settings(db: Database, config: AppConfig) -> None:

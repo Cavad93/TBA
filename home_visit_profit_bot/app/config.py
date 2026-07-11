@@ -103,8 +103,8 @@ class AppConfig:
     geo: GeoConfig
     routing: RoutingConfig
     location_api: LocationApiConfig
-    # Если задан DATABASE_URL (postgresql://...), backend работает на PostgreSQL;
-    # иначе — на SQLite по database_path (по умолчанию для тестов и локальной разработки).
+    # backend работает ТОЛЬКО на PostgreSQL (обязателен DATABASE_URL=postgresql://...).
+    # Поле database_path оставлено для совместимости конструктора и не используется.
     database_url: str | None = None
     email: EmailConfig = field(default_factory=_default_email)
 
@@ -119,9 +119,7 @@ def load_config(project_dir: Path | None = None) -> AppConfig:
     load_dotenv(project_dir / ".env")
 
     raw = _read_yaml(project_dir / "config.yaml")
-    database_path = Path(os.getenv("DATABASE_PATH", str(project_dir / "data.sqlite3")))
-    if not database_path.is_absolute():
-        database_path = project_dir / database_path
+    database_path = project_dir / "data"  # не используется (backend только на PostgreSQL)
     database_url = os.getenv("DATABASE_URL") or None
     email = EmailConfig(
         smtp_host=os.getenv("SMTP_HOST") or None,

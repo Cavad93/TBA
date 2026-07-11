@@ -23,9 +23,7 @@ class FakeSettings:
             return default
 
 
-def test_long_gps_stops_treat_first_two_as_pause_and_third_as_heavy(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_long_gps_stops_treat_first_two_as_pause_and_third_as_heavy(config) -> None:
     with connect(config) as connection:
         days = WorkDayRepository(connection)
         visits = VisitRepository(connection)
@@ -146,9 +144,7 @@ def test_fatigue_can_be_disabled() -> None:
     assert estimate.score == 0
 
 
-def test_daily_stats_persists_fatigue_fields(tmp_path) -> None:
-    config = _config(tmp_path)
-    init_db(config)
+def test_daily_stats_persists_fatigue_fields(config) -> None:
     with connect(config) as connection:
         days = WorkDayRepository(connection)
         repo = DailyStatsRepository(connection)
@@ -187,17 +183,3 @@ def test_daily_stats_persists_fatigue_fields(tmp_path) -> None:
     assert row["sleep_hours"] == 6
 
 
-def _config(tmp_path):
-    from app.config import AppConfig, CarConfig, DefaultsConfig, FinanceConfig, GeoConfig, LocationApiConfig, RouteConfig, RoutingConfig
-
-    return AppConfig(
-        project_dir=tmp_path,
-        database_path=tmp_path / "data.sqlite3",
-        finance=FinanceConfig(min_hourly_income=600, currency="RUB"),
-        car=CarConfig(car_cost_per_km=17.05, amortization_factor=0.8, fuel_price_per_liter=70, fuel_consumption_l_per_100km=10),
-        defaults=DefaultsConfig(avg_speed_kmh=30, service_minutes=20, telemed_minutes=3, route_time_factor=1),
-        route=RouteConfig(always_return_to_finish=True, optimize_after_each_accept=True),
-        geo=GeoConfig(default_city="Санкт-Петербург", default_region="Ленинградская область", base_districts=[], nominatim_url="", user_agent="test"),
-        routing=RoutingConfig(osrm_url="", request_timeout_seconds=1, fallback_to_estimate=True, straight_line_factor=1.35),
-        location_api=LocationApiConfig(enabled=True, host="127.0.0.1", port=8088, api_key="test", geofence_radius_m=120, dwell_minutes=12, notification_cooldown_minutes=60),
-    )

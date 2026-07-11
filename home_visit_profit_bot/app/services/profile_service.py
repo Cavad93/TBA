@@ -1,9 +1,9 @@
 from __future__ import annotations
+from typing import Any
+from app.database import Database
 
 from datetime import date, datetime, timedelta
-from typing import Any
 
-import sqlite3
 
 from app.database import current_user_id
 from app.repositories import DailyStatsRepository, DrivingBehaviorRepository, WorkDayRepository
@@ -23,7 +23,7 @@ class ProfileService:
     восстановление, индекс нагрузки, запас сил.
     """
 
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: Database):
         self.connection = connection
         self.days = WorkDayRepository(connection)
         self.stats = DailyStatsRepository(connection)
