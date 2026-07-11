@@ -43,6 +43,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedIconButton
@@ -56,6 +58,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
@@ -485,19 +488,7 @@ internal fun EvaluateForm(
                 Text("Частый тариф: ${money(frequentIncome)}")
             }
         }
-        if (clinics.isNotEmpty()) {
-            Text(
-                "Компания · необязательно",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OptionGrid(
-                options = listOf("") + clinics,
-                selected = clinic,
-                label = { if (it.isBlank()) "Без компании" else it },
-                onSelect = { clinic = it },
-            )
-        }
+        CompanyPicker(clinics = clinics, value = clinic, onValue = { clinic = it })
         if (candidate.needsManualRoute) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MoneyField(modifier = Modifier.weight(1f), value = routeKmText, onValueChange = { routeKmText = it }, label = "Км вручную")
@@ -566,6 +557,59 @@ internal fun OtherEntriesSection(uiState: HomeVisitUiState, workActions: WorkAct
             WorkForm.Expense -> ExpenseInputCard(workActions.onAddExpense)
             WorkForm.Visit -> Unit
         }
+    }
+}
+
+/**
+ * Выбор компании для заказа — выпадающий список (строкой, не кнопками):
+ * «Без компании» по умолчанию, затем компании пользователя из настроек, а в конце
+ * «Ввести вручную…» для разовой акции (произвольное название, не попадает в общий
+ * список, но отдельно учитывается по строке). Пусто = «Без компании».
+ */
+@Composable
+internal fun CompanyPicker(clinics: List<String>, value: String, onValue: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    var manual by rememberSaveable { mutableStateOf(false) }
+    val display = when {
+        manual -> "Вручную"
+        value.isBlank() -> "Без компании"
+        else -> value
+    }
+    Text(
+        "Компания · необязательно",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(display, modifier = Modifier.weight(1f), textAlign = TextAlign.Start, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = "Выбрать компанию")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("Без компании") },
+                onClick = { manual = false; onValue(""); expanded = false },
+            )
+            clinics.forEach { name ->
+                DropdownMenuItem(
+                    text = { Text(name) },
+                    onClick = { manual = false; onValue(name); expanded = false },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("Ввести вручную…") },
+                onClick = { manual = true; onValue(""); expanded = false },
+            )
+        }
+    }
+    if (manual) {
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = value,
+            onValueChange = onValue,
+            label = { Text("Название компании (разовая)") },
+            singleLine = true,
+        )
     }
 }
 

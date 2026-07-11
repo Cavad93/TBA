@@ -234,30 +234,49 @@ def test_mobile_candidate_needs_manual_route_when_auto_route_has_no_points(confi
     assert rejected.status == "rejected"
 
 
-def test_mobile_candidate_rejects_invalid_clinic(config) -> None:
-
+def test_mobile_candidate_accepts_manual_clinic(config) -> None:
+    # Компания в заказе больше не ограничена белым списком: произвольное значение
+    # («Ввести вручную» — разовая акция) принимается и учитывается как есть.
     with connect(config) as connection:
         WorkDayRepository(connection).create("Дом", "Дом", 30, 20)
         service = MobileVisitService(connection)
 
-        try:
-            service.create_candidate(
-                {
-                    "address": "Невский 1",
-                    "income": 2500,
-                    "clinic": "Неизвестно",
-                    "lat": 59.936,
-                    "lon": 30.315,
-                    "route_km": 5,
-                    "route_minutes": 20,
-                }
-            )
-        except ValueError as error:
-            message = str(error)
-        else:
-            message = ""
+        result = service.create_candidate(
+            {
+                "address": "Невский 1",
+                "income": 2500,
+                "clinic": "Разовая халтура",
+                "lat": 59.936,
+                "lon": 30.315,
+                "route_km": 5,
+                "route_minutes": 20,
+            }
+        )
 
-    assert "unsupported clinic" in message
+        assert result.ok
+        assert result.candidate.clinic == "Разовая халтура"
+
+
+def test_mobile_candidate_without_clinic_is_general(config) -> None:
+    # Пусто → «Без компании» (общий учёт), без ошибки.
+    with connect(config) as connection:
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20)
+        service = MobileVisitService(connection)
+
+        result = service.create_candidate(
+            {
+                "address": "Невский 1",
+                "income": 2500,
+                "clinic": "",
+                "lat": 59.936,
+                "lon": 30.315,
+                "route_km": 5,
+                "route_minutes": 20,
+            }
+        )
+
+        assert result.ok
+        assert result.candidate.clinic == ""
 
 
 def test_mobile_update_finish_changes_active_day_finish_with_coords(config) -> None:

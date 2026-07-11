@@ -6,11 +6,11 @@ from pathlib import Path
 from typing import Any
 
 
-# Начальный список клиник живёт в конфигурации (config.yaml), а не в бизнес-логике.
-# Это лишь seed: во время работы список полностью редактируется через настройки
-# (ключи `clinics` / `telemed_clinics`) и может содержать любое число клиник.
-_DEFAULT_CLINICS = ["Династия", "ПСК", "ВИТАМЕД", "ДНД"]
-_DEFAULT_TELEMED_CLINICS = ["ПСК", "ДНД"]
+# Список компаний по умолчанию ПУСТ: пользователь сам вносит свои компании через
+# настройки (ключи `clinics` / `telemed_clinics`). Никаких предзаполненных названий —
+# новый пользователь стартует «Без компании». Значения можно задать в config.yaml.
+_DEFAULT_CLINICS: list[str] = []
+_DEFAULT_TELEMED_CLINICS: list[str] = []
 
 import yaml
 from dotenv import load_dotenv
