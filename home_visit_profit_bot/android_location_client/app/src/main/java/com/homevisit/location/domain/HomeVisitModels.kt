@@ -212,6 +212,7 @@ data class CandidateEstimate(
     val clinic: String,
     val decision: String,
     val reason: String,
+    val score: Int,
     val requiredExtraPayment: Double,
     val requiredCandidateIncome: Double,
     val beforeHourly: Double,

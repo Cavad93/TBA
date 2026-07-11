@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from app.models import CandidateCalculation, Point, RouteSummary, Visit, WorkDay
 from app.repositories import DailyStatsRepository, LocationEventRepository, SettingsRepository, VisitRepository
 from app.services.fatigue_service import calculate_candidate_fatigue_surcharge
@@ -276,6 +278,37 @@ def decision_to_verdict(decision: str) -> str:
         return "go"
     # Неизвестное/пороговое решение трактуем консервативно как «на грани».
     return "edge"
+
+
+def profitability_score(
+    decision: str,
+    marginal_hourly: float,
+    target_marginal_hourly: float,
+) -> int:
+    """«Выгодность» заказа 0–100 для UI-датчика (кольцо на экране «Оценка»).
+
+    Балл монотонно растёт с маржинальной ставкой заказа и ВСЕГДА согласован с
+    цветом-вердиктом (иначе датчик противоречил бы кнопкам):
+      * skip  → 5–33   (невыгодно)
+      * edge  → 34–66  (на грани / со спецтарифом)
+      * go    → 67–96  (выгодно)
+
+    Внутри полосы позиция задаётся плавно (tanh) по тому, насколько маржинальная
+    ставка заказа выше/ниже целевой: ровно на цели ≈ середина полосы, сильно выше
+    → к верхней границе, сильно ниже → к нижней. Если целевая ставка неизвестна,
+    опираемся на знак маржинальной ставки.
+    """
+    verdict = decision_to_verdict(decision)
+    if target_marginal_hourly and target_marginal_hourly > 0:
+        # Масштаб 0.6·цель даёт заметный разброс без «прилипания» к краям.
+        position = 0.5 + 0.5 * math.tanh(
+            (marginal_hourly - target_marginal_hourly) / (target_marginal_hourly * 0.6)
+        )
+    else:
+        position = 1.0 if marginal_hourly >= 0 else 0.0
+
+    low, high = {"skip": (5, 33), "edge": (34, 66), "go": (67, 96)}.get(verdict, (34, 66))
+    return int(round(low + position * (high - low)))
 
 
 def make_decision(

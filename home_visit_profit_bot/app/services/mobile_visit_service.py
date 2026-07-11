@@ -24,6 +24,7 @@ from app.services.profitability_service import (
     calculate_candidate_impact,
     calculate_remaining_route_summary,
     decision_to_verdict,
+    profitability_score,
 )
 from app.services.routing_service import RoutingError
 from app.services.settings_service import allowed_clinics
@@ -301,6 +302,11 @@ def calculation_payload(calculation: CandidateCalculation) -> dict[str, Any]:
     return {
         "decision": calculation.decision,
         "reason": calculation.reason,
+        "score": profitability_score(
+            calculation.decision,
+            calculation.marginal_hourly,
+            calculation.target_marginal_hourly,
+        ),
         "before_route": route_payload(calculation.before_route),
         "after_route": route_payload(calculation.after_route),
         "before_hourly": calculation.before_hourly,
@@ -417,7 +423,13 @@ def _optional_non_negative_float(value: Any) -> float | None:
 
 
 def _clinic(payload: dict[str, Any], allowed: set[str]) -> str:
-    clinic = _required_str(payload, "clinic")
+    # Компания необязательна: пусто → «Без компании» (общий учёт, минимализм для
+    # новичков). Непустое значение по-прежнему проверяем по белому списку, чтобы
+    # не засорять статистику опечатками (произвольный ручной ввод — отдельная
+    # настройка, добавляется позже).
+    clinic = _optional_str(payload.get("clinic"))
+    if clinic is None:
+        return ""
     if clinic not in allowed:
         raise ValueError(f"unsupported clinic: {clinic}")
     return clinic

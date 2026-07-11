@@ -411,29 +411,160 @@ internal fun GpsEstimateControls(state: GpsEstimateUiState, onRefresh: () -> Uni
 
 @Composable
 internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
-    var selectedForm by rememberSaveable { mutableStateOf(WorkForm.Visit) }
+    val candidate = uiState.candidate
+    var showResult by rememberSaveable { mutableStateOf(false) }
+    // Датчик выгоды всплывает, как только пришёл расчёт (или нужен ручной маршрут).
+    LaunchedEffect(candidate.estimate, candidate.needsManualRoute, candidate.message) {
+        if (candidate.estimate != null || candidate.needsManualRoute) showResult = true
+    }
 
     ScreenColumn {
-        StatusCard(
-            title = "Состояние дня",
-            value = uiState.status.title(),
-            body = "Грязный доход: ${money(uiState.grossIncome)}. Расходы: ${money(uiState.expensesAmount)}. Записей: ${uiState.visitsCount + uiState.officeCount + uiState.telemedCount + uiState.expensesCount}.",
+        EvaluateForm(
+            candidate = candidate,
+            clinics = uiState.clinics.all,
+            // «Частый тариф»: доход последнего заказа смены как разумный дефолт.
+            frequentIncome = uiState.routeVisits.lastOrNull()?.income,
+            onCalculate = workActions.onCalculateVisit,
+            onReopenResult = { showResult = true },
         )
-        // Старт смены — только со Штурвала, завершение — только в Ленте
-        // (модель «двухэтажного дома»), поэтому кнопок начала/конца дня здесь нет.
-        SectionHeader("Ввод работы")
-        WorkFormTabs(selectedForm = selectedForm, onSelect = { selectedForm = it })
-        when (selectedForm) {
-            WorkForm.Visit -> VisitInputCard(
-                candidate = uiState.candidate,
-                clinics = uiState.clinics.all,
-                onCalculate = workActions.onCalculateVisit,
-                onAccept = workActions.onAcceptCandidate,
-                onReject = workActions.onRejectCandidate,
+        OtherEntriesSection(uiState, workActions)
+    }
+
+    if (showResult) {
+        ModalBottomSheet(
+            onDismissRequest = { showResult = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
+            CandidateGauge(
+                candidate = candidate,
+                onAccept = {
+                    workActions.onAcceptCandidate()
+                    showResult = false
+                },
+                onReject = {
+                    workActions.onRejectCandidate()
+                    showResult = false
+                },
             )
+        }
+    }
+}
+
+/** Форма «Оценить заказ»: только адрес, доход (с частым тарифом) и опциональная компания. */
+@Composable
+internal fun EvaluateForm(
+    candidate: CandidateUiState,
+    clinics: List<String>,
+    frequentIncome: Double?,
+    onCalculate: (String, Double, String, Double?, Double?) -> Unit,
+    onReopenResult: () -> Unit,
+) {
+    var address by rememberSaveable { mutableStateOf("") }
+    var incomeText by rememberSaveable { mutableStateOf("") }
+    // Пусто = «Без компании» (общий учёт — минимализм для новичков).
+    var clinic by rememberSaveable { mutableStateOf("") }
+    // Ручной маршрут показываем только когда геокодер не справился.
+    var routeKmText by rememberSaveable { mutableStateOf("") }
+    var routeMinutesText by rememberSaveable { mutableStateOf("") }
+    val income = parseNumber(incomeText)
+    val routeKm = parseNumber(routeKmText)
+    val routeMinutes = parseNumber(routeMinutesText)
+    val hasManualRoute = routeKm != null && routeMinutes != null
+
+    InputCard("Оценить заказ") {
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = address,
+            onValueChange = { address = it },
+            label = { Text("Адрес") },
+            singleLine = false,
+        )
+        MoneyField(value = incomeText, onValueChange = { incomeText = it }, label = "Доход, ₽")
+        if (frequentIncome != null && frequentIncome > 0 && incomeText.isBlank()) {
+            OutlinedButton(onClick = { incomeText = frequentIncome.toLong().toString() }) {
+                Text("Частый тариф: ${money(frequentIncome)}")
+            }
+        }
+        if (clinics.isNotEmpty()) {
+            Text(
+                "Компания · необязательно",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OptionGrid(
+                options = listOf("") + clinics,
+                selected = clinic,
+                label = { if (it.isBlank()) "Без компании" else it },
+                onSelect = { clinic = it },
+            )
+        }
+        if (candidate.needsManualRoute) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MoneyField(modifier = Modifier.weight(1f), value = routeKmText, onValueChange = { routeKmText = it }, label = "Км вручную")
+                MoneyField(modifier = Modifier.weight(1f), value = routeMinutesText, onValueChange = { routeMinutesText = it }, label = "Мин вручную")
+            }
+            Text(
+                "Адрес не распознан по карте — укажите километраж и время вручную.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = address.isNotBlank() && income != null && !candidate.isLoading,
+            onClick = {
+                onCalculate(
+                    address,
+                    income ?: 0.0,
+                    clinic,
+                    if (hasManualRoute) routeKm else null,
+                    if (hasManualRoute) routeMinutes else null,
+                )
+            },
+        ) {
+            Text(if (candidate.isLoading) "Считаю…" else "Оценить заказ")
+        }
+        if (candidate.estimate != null) {
+            TextButton(onClick = onReopenResult, modifier = Modifier.fillMaxWidth()) {
+                Text("Показать оценку снова")
+            }
+        }
+    }
+}
+
+/** Свёрнутый блок прочих записей (точка/удалёнка/расход) — вне основного потока оценки. */
+@Composable
+internal fun OtherEntriesSection(uiState: HomeVisitUiState, workActions: WorkActions) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var form by rememberSaveable { mutableStateOf(WorkForm.Office) }
+    Spacer(Modifier.height(2.dp))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { expanded = !expanded }
+            .padding(horizontal = 6.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Другие записи", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        Icon(
+            imageVector = if (expanded) Icons.Filled.Remove else Icons.Filled.Add,
+            contentDescription = if (expanded) "Скрыть" else "Показать",
+            tint = MaterialTheme.colorScheme.primary,
+        )
+    }
+    if (expanded) {
+        OptionGrid(
+            options = listOf(WorkForm.Office, WorkForm.Telemed, WorkForm.Expense),
+            selected = form,
+            label = { it.title() },
+            onSelect = { form = it },
+        )
+        when (form) {
             WorkForm.Office -> OfficeInputCard(uiState.clinics.all, workActions.onAddOffice)
             WorkForm.Telemed -> TelemedInputCard(uiState.clinics.telemed, workActions.onAddTelemed)
             WorkForm.Expense -> ExpenseInputCard(workActions.onAddExpense)
+            WorkForm.Visit -> Unit
         }
     }
 }
@@ -462,160 +593,112 @@ internal fun WorkFormTabs(selectedForm: WorkForm, onSelect: (WorkForm) -> Unit) 
     )
 }
 
+/**
+ * Датчик выгоды (вариант «кольцо») в нижнем листе: кольцо «Выгодность 0–100» +
+ * ₽/ч и три плитки, ниже — «Отказаться» / «Принять». Семантика цвета кнопок:
+ * невыгодно (score<34) → «Отказаться» красная; выгодно (score≥67) → «Принять»
+ * зелёная; вторая кнопка нейтральная.
+ */
 @Composable
-internal fun VisitInputCard(
-    candidate: CandidateUiState,
-    clinics: List<String>,
-    onCalculate: (String, Double, String, Double?, Double?) -> Unit,
-    onAccept: () -> Unit,
-    onReject: () -> Unit,
-) {
-    var address by rememberSaveable { mutableStateOf("") }
-    var incomeText by rememberSaveable { mutableStateOf("") }
-    var routeKmText by rememberSaveable { mutableStateOf("") }
-    var routeMinutesText by rememberSaveable { mutableStateOf("") }
-    var clinic by rememberSaveable(clinics) { mutableStateOf(clinics.firstOrNull().orEmpty()) }
-    val income = parseNumber(incomeText)
-    val routeKm = parseNumber(routeKmText)
-    val routeMinutes = parseNumber(routeMinutesText)
-    val hasManualRoute = routeKm != null && routeMinutes != null
-
-    InputCard("Выездной заказ") {
-        OutlinedTextField(
-            modifier = Modifier.fillMaxWidth(),
-            value = address,
-            onValueChange = { address = it },
-            label = { Text("Адрес") },
-            singleLine = false,
-        )
-        MoneyField(value = incomeText, onValueChange = { incomeText = it }, label = "Стоимость")
-        ClinicPicker(clinics = clinics, selected = clinic, onSelect = { clinic = it })
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            MoneyField(
-                modifier = Modifier.weight(1f),
-                value = routeKmText,
-                onValueChange = { routeKmText = it },
-                label = "Км вручную",
-            )
-            MoneyField(
-                modifier = Modifier.weight(1f),
-                value = routeMinutesText,
-                onValueChange = { routeMinutesText = it },
-                label = "Мин вручную",
-            )
-        }
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            enabled = address.isNotBlank() && income != null && clinic.isNotBlank(),
-            onClick = {
-                onCalculate(
-                    address,
-                    income ?: 0.0,
-                    clinic,
-                    if (hasManualRoute) routeKm else null,
-                    if (hasManualRoute) routeMinutes else null,
+internal fun CandidateGauge(candidate: CandidateUiState, onAccept: () -> Unit, onReject: () -> Unit) {
+    val estimate = candidate.estimate
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        when {
+            candidate.isLoading -> {
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                Text("Считаю выгодность…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            estimate == null -> {
+                Text(
+                    if (candidate.needsManualRoute) "Нужно уточнить маршрут" else "Не удалось рассчитать",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
                 )
-            },
-        ) {
-            Text(if (candidate.isLoading) "Считаю..." else "Рассчитать заказ")
+                if (candidate.message.isNotBlank()) {
+                    Text(candidate.message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                }
+                if (candidate.needsManualRoute) {
+                    Text(
+                        "Заполните «Км вручную» и «Мин вручную» в форме и нажмите «Оценить» снова.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+            else -> {
+                val score = estimate.score
+                val accent = when {
+                    score >= 67 -> VerdictColors.go
+                    score < 34 -> VerdictColors.skip
+                    else -> VerdictColors.edge
+                }
+                val track = MaterialTheme.colorScheme.surfaceContainerHighest
+                Box(Modifier.size(156.dp), contentAlignment = Alignment.Center) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        val stroke = 15.dp.toPx()
+                        val inset = stroke / 2
+                        val arc = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke)
+                        val topLeft = Offset(inset, inset)
+                        drawArc(color = track, startAngle = 0f, sweepAngle = 360f, useCenter = false, topLeft = topLeft, size = arc, style = Stroke(width = stroke, cap = StrokeCap.Round))
+                        drawArc(color = accent, startAngle = -90f, sweepAngle = 360f * (score / 100f), useCenter = false, topLeft = topLeft, size = arc, style = Stroke(width = stroke, cap = StrokeCap.Round))
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("$score", fontFamily = JetBrainsMono, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, color = accent)
+                        Text("выгодность", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Text(estimate.decision, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = accent, textAlign = TextAlign.Center)
+                if (estimate.reason.isNotBlank()) {
+                    Text(estimate.reason, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    GaugeTile(Modifier.weight(1f), money(estimate.afterHourly), "чистыми/ч")
+                    GaugeTile(Modifier.weight(1f), "+${oneDecimal(estimate.extraKm)} км", "дорога")
+                    GaugeTile(Modifier.weight(1f), "+${oneDecimal(estimate.extraDriveMinutes)} мин", "в пути")
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = onReject,
+                        colors = if (score < 34)
+                            ButtonDefaults.buttonColors(containerColor = VerdictColors.skip, contentColor = Color.White)
+                        else
+                            ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh, contentColor = MaterialTheme.colorScheme.onSurface),
+                    ) { Text("Отказаться") }
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = onAccept,
+                        colors = if (score >= 67)
+                            ButtonDefaults.buttonColors(containerColor = VerdictColors.go, contentColor = Color.White)
+                        else
+                            ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh, contentColor = MaterialTheme.colorScheme.onSurface),
+                    ) { Text("Принять") }
+                }
+            }
         }
-        CandidateResultCard(candidate = candidate, onAccept = onAccept, onReject = onReject)
     }
 }
 
 @Composable
-internal fun CandidateResultCard(candidate: CandidateUiState, onAccept: () -> Unit, onReject: () -> Unit) {
-    val estimate = candidate.estimate
-    if (candidate.message.isBlank() && estimate == null && !candidate.isLoading) {
-        return
-    }
-    val verdict = estimate?.let { verdictStyleFor(it.decision) }
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = verdict?.container ?: MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-        border = verdict?.let { BorderStroke(1.5.dp, it.accent) },
+private fun GaugeTile(modifier: Modifier, value: String, caption: String) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (candidate.message.isNotBlank()) {
-                Text(candidate.message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-            }
-            if (candidate.needsManualRoute) {
-                Text(
-                    "Заполните поля `Км вручную` и `Мин вручную`, затем нажмите `Рассчитать заказ` ещё раз.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (estimate != null && verdict != null) {
-                Text(
-                    estimate.decision,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = verdict.onContainer,
-                )
-                if (estimate.reason.isNotBlank()) {
-                    Text(estimate.reason, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                // Главное число — крупно, моно, ведёт вёрстку.
-                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        money(estimate.afterHourly),
-                        fontFamily = JetBrainsMono,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        "/ч чистыми",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 4.dp),
-                    )
-                }
-                Text(
-                    "Было ${money(estimate.beforeHourly)}/ч · маржинально ${money(estimate.marginalHourly)}/ч",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = JetBrainsMono,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    "Добавится ${oneDecimal(estimate.extraKm)} км · ${oneDecimal(estimate.extraDriveMinutes)} мин · минимум ${money(estimate.requiredCandidateIncome)} · надбавка ${money(estimate.requiredExtraPayment)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (estimate.fatigueExtraPayment > 0 || estimate.fatigueLevel.isNotBlank()) {
-                    Text(
-                        "Нагрузка: ${estimate.fatigueLevel.ifBlank { "без отдельного уровня" }}, надбавка ${money(estimate.fatigueExtraPayment)}.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = verdict.accent),
-                        enabled = !candidate.isLoading,
-                        onClick = onAccept,
-                    ) {
-                        Text("Взять заказ")
-                    }
-                    OutlinedButton(
-                        modifier = Modifier.weight(1f),
-                        enabled = !candidate.isLoading,
-                        onClick = onReject,
-                    ) {
-                        Text("Отклонить")
-                    }
-                }
-            }
-        }
+        Text(value, fontFamily = JetBrainsMono, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(caption, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
     }
 }
 

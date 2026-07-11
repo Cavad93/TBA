@@ -1206,6 +1206,7 @@ class HomeVisitRepository private constructor(
                 clinic = candidate.optString("clinic"),
                 decision = calculation.optString("decision"),
                 reason = calculation.optString("reason"),
+                score = calculation.optInt("score", 0),
                 requiredExtraPayment = calculation.optDouble("required_extra_payment", 0.0),
                 requiredCandidateIncome = calculation.optDouble("required_candidate_income", 0.0),
                 beforeHourly = calculation.optDouble("before_hourly", 0.0),
