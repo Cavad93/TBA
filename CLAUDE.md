@@ -54,6 +54,32 @@
   ```
 - Сайт: `/opt/tba/home_visit_profit_bot/deploy/site` (Caddy отдаёт статику).
 
+## Публикация APK на сайт (обязательно после каждой сборки)
+
+**После того как GitHub Actions успешно собрал APK — его нужно выложить на сайт
+для скачивания.** CI сам на сайт НЕ выкладывает: сайт отдаёт файл
+`https://vizitorkrut.ru/vizitorkrut.apk` из папки статики, и его надо обновлять
+вручную, иначе пользователь скачает старую версию. Порядок:
+
+1. Дождаться зелёной сборки `Build Android APK` и скачать артефакт релиза:
+   ```
+   gh run download <RUN_ID> -n vizitorkrut-release-apk -D <tmp>
+   ```
+2. Скопировать на сервер и заменить файл сайта (владелец — `homevisit`),
+   сохранив бэкап старого:
+   ```
+   scp <tmp>/app-release.apk root@45.8.228.67:/tmp/vizitorkrut-new.apk
+   ssh root@45.8.228.67 'D=/opt/tba/home_visit_profit_bot/deploy/site; \
+     cp -a "$D/vizitorkrut.apk" "$D/vizitorkrut.apk.bak-$(date +%Y%m%d-%H%M%S)"; \
+     install -o homevisit -g homevisit -m 0644 /tmp/vizitorkrut-new.apk "$D/vizitorkrut.apk" && \
+     rm -f /tmp/vizitorkrut-new.apk && sha256sum "$D/vizitorkrut.apk"'
+   ```
+3. Проверить, что сайт отдаёт свежий файл (сверить `content-length`/`sha256`
+   локального артефакта и ответа `curl -sI https://vizitorkrut.ru/vizitorkrut.apk`).
+
+`versionCode` берётся из номера CI-сборки (монотонно растёт) — обновление
+устанавливается «поверх», ручной бамп не нужен.
+
 ## Контекст проекта
 
 - Продукт: «Визиторкрут» (`vizitorkrut.ru`) — массовое многопользовательское
