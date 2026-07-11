@@ -419,7 +419,8 @@ internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
             value = uiState.status.title(),
             body = "Грязный доход: ${money(uiState.grossIncome)}. Расходы: ${money(uiState.expensesAmount)}. Записей: ${uiState.visitsCount + uiState.officeCount + uiState.telemedCount + uiState.expensesCount}.",
         )
-        DayControlRow(uiState, workActions)
+        // Старт смены — только со Штурвала, завершение — только в Ленте
+        // (модель «двухэтажного дома»), поэтому кнопок начала/конца дня здесь нет.
         SectionHeader("Ввод работы")
         WorkFormTabs(selectedForm = selectedForm, onSelect = { selectedForm = it })
         when (selectedForm) {
@@ -449,35 +450,6 @@ internal fun QuickActions(onOpenWork: () -> Unit) {
         ),
         onClick = onOpenWork,
     )
-}
-
-@Composable
-internal fun DayControlRow(uiState: HomeVisitUiState, workActions: WorkActions) {
-    val isActive = uiState.status == WorkDayStatus.Active
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (isActive) {
-            Button(
-                modifier = Modifier.weight(1f),
-                onClick = workActions.onEndDay,
-            ) {
-                Text("Завершить день")
-            }
-        } else {
-            Button(
-                modifier = Modifier.weight(1f),
-                onClick = workActions.onStartDay,
-            ) {
-                Text("Начать день")
-            }
-        }
-        OutlinedButton(
-            modifier = Modifier.weight(1f),
-            onClick = workActions.onStartDay,
-            enabled = !isActive,
-        ) {
-            Text("Новый день")
-        }
-    }
 }
 
 @Composable

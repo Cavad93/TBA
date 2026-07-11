@@ -190,6 +190,40 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
             isLoading = uiState.serverRoute.isLoading,
             onSelect = workActions.onClassifyCurrentStop,
         )
+        // Единственная точка завершения смены — внизу Ленты (модель «двухэтажного дома»).
+        EndShiftSection(onEndShift = workActions.onEndDay)
+    }
+}
+
+/**
+ * Кнопка завершения смены — только здесь, внизу Ленты. По подтверждению закрывает
+ * смену; статус дня перестаёт быть Active, и «лифт» поднимает пользователя обратно
+ * на Штурвал (см. HomeVisitApp).
+ */
+@Composable
+internal fun EndShiftSection(onEndShift: () -> Unit) {
+    var confirm by rememberSaveable { mutableStateOf(false) }
+    Button(
+        modifier = Modifier.fillMaxWidth().height(52.dp),
+        shape = RoundedCornerShape(14.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = VerdictColors.skip),
+        onClick = { confirm = true },
+    ) {
+        Text("Завершить смену", style = MaterialTheme.typography.titleMedium, color = Color.White)
+    }
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("Завершить смену?") },
+            text = { Text("Смена закроется, а подсчёт остановится. Вы вернётесь на Штурвал.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirm = false
+                    onEndShift()
+                }) { Text("Завершить") }
+            },
+            dismissButton = { TextButton(onClick = { confirm = false }) { Text("Отмена") } },
+        )
     }
 }
 

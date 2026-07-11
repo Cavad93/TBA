@@ -10,6 +10,10 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -404,7 +408,13 @@ internal enum class AppDestination(
     Work("Оценка", Icons.Filled.Speed, "Оценка заказа"),
     Route("Лента", Icons.AutoMirrored.Filled.FormatListBulleted, "Лента"),
     Shift("Смена", Icons.Filled.AccountBalanceWallet, "Смена"),
-    Profile("Профиль", Icons.Filled.Person, "Профиль"),
+    Profile("Профиль", Icons.Filled.Person, "Профиль");
+
+    companion object {
+        /** Вкладки «первого этажа» (во время смены). Штурвал (Home) — отдельный
+         *  «второй этаж», в нижнем меню его нет. */
+        val firstFloor: List<AppDestination> = entries.filter { it != Home }
+    }
 }
 
 internal enum class WorkForm {
@@ -616,28 +626,28 @@ internal fun HomeVisitApp(
         return
     }
 
+    // «Двухэтажный дом»: пока смена не идёт — виден только Штурвал (2-й этаж) без
+    // нижнего меню; с началом смены «лифт» опускает на 1-й этаж со вкладками.
+    val shiftActive = uiState.status == WorkDayStatus.Active
+    // Каждый вход на 1-й этаж начинаем с «Оценить» — главного рабочего действия.
+    LaunchedEffect(shiftActive) {
+        if (shiftActive) selected = AppDestination.Work
+    }
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
         val wide = maxWidth >= 720.dp
-        if (wide) {
-            Row(Modifier.fillMaxSize()) {
-                AppNavigationRail(selected = selected, onSelect = { selected = it })
-                AppScaffold(
-                    selected = selected,
-                    uiState = uiState,
-                    workActions = workActions,
-                    settingsState = settingsState,
-                    onSync = syncNow,
-                    onSelectDestination = { selected = it },
-                    onOpenSettings = { showSettings = true },
-                    bottomBar = {},
-                )
-            }
-        } else {
-            AppScaffold(
+        // 1-й этаж (рабочий) — выезжает снизу и уходит вниз.
+        AnimatedVisibility(
+            visible = shiftActive,
+            enter = slideInVertically(animationSpec = tween(durationMillis = 420)) { it },
+            exit = slideOutVertically(animationSpec = tween(durationMillis = 420)) { it },
+        ) {
+            FirstFloor(
+                wide = wide,
                 selected = selected,
                 uiState = uiState,
                 workActions = workActions,
@@ -645,11 +655,101 @@ internal fun HomeVisitApp(
                 onSync = syncNow,
                 onSelectDestination = { selected = it },
                 onOpenSettings = { showSettings = true },
-                bottomBar = {
-                    AppNavigationBar(selected = selected, onSelect = { selected = it })
-                },
             )
         }
+        // 2-й этаж (Штурвал) — уезжает вверх и возвращается сверху.
+        AnimatedVisibility(
+            visible = !shiftActive,
+            enter = slideInVertically(animationSpec = tween(durationMillis = 420)) { -it },
+            exit = slideOutVertically(animationSpec = tween(durationMillis = 420)) { -it },
+        ) {
+            SturvalFloor(
+                uiState = uiState,
+                workActions = workActions,
+                onOpenSettings = { showSettings = true },
+            )
+        }
+    }
+}
+
+/** 2-й этаж — полноэкранный Штурвал без нижнего меню; шестерёнка открывает настройки. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SturvalFloor(
+    uiState: HomeVisitUiState,
+    workActions: WorkActions,
+    onOpenSettings: () -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(AppDestination.Home.title) },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Настройки")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            )
+        },
+    ) { padding ->
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            HomeScreen(
+                home = uiState.home,
+                shiftActive = false,
+                workActions = workActions,
+                onOpenWork = {},
+                onOpenReports = {},
+            )
+        }
+    }
+}
+
+/** 1-й этаж — рабочее пространство со вкладками (Оценить/Лента/Смена/Профиль). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun FirstFloor(
+    wide: Boolean,
+    selected: AppDestination,
+    uiState: HomeVisitUiState,
+    workActions: WorkActions,
+    settingsState: GpsSettingsState,
+    onSync: () -> Unit,
+    onSelectDestination: (AppDestination) -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    if (wide) {
+        Row(Modifier.fillMaxSize()) {
+            AppNavigationRail(selected = selected, onSelect = onSelectDestination)
+            AppScaffold(
+                selected = selected,
+                uiState = uiState,
+                workActions = workActions,
+                settingsState = settingsState,
+                onSync = onSync,
+                onSelectDestination = onSelectDestination,
+                onOpenSettings = onOpenSettings,
+                bottomBar = {},
+            )
+        }
+    } else {
+        AppScaffold(
+            selected = selected,
+            uiState = uiState,
+            workActions = workActions,
+            settingsState = settingsState,
+            onSync = onSync,
+            onSelectDestination = onSelectDestination,
+            onOpenSettings = onOpenSettings,
+            bottomBar = {
+                AppNavigationBar(selected = selected, onSelect = onSelectDestination)
+            },
+        )
     }
 }
 
@@ -762,7 +862,7 @@ internal fun AppScaffold(
 @Composable
 internal fun AppNavigationBar(selected: AppDestination, onSelect: (AppDestination) -> Unit) {
     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-        AppDestination.entries.forEach { destination ->
+        AppDestination.firstFloor.forEach { destination ->
             NavigationBarItem(
                 selected = selected == destination,
                 onClick = { onSelect(destination) },
@@ -780,7 +880,7 @@ internal fun AppNavigationRail(selected: AppDestination, onSelect: (AppDestinati
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
     ) {
         Spacer(Modifier.height(12.dp))
-        AppDestination.entries.forEach { destination ->
+        AppDestination.firstFloor.forEach { destination ->
             NavigationRailItem(
                 selected = selected == destination,
                 onClick = { onSelect(destination) },
