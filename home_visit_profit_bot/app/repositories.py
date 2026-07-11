@@ -128,6 +128,12 @@ class SettingsRepository:
         except ValueError:
             return default
 
+    def get_bool(self, key: str, default: bool) -> bool:
+        value = self.get(key)
+        if value is None:
+            return default
+        return str(value).strip().lower() in {"1", "true", "yes", "on", "да"}
+
     def base_districts(self) -> list[str]:
         value = self.get("base_districts", "") or ""
         return [part.strip() for part in value.split(",") if part.strip()]

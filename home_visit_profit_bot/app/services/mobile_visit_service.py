@@ -302,6 +302,15 @@ class MobileVisitService:
             raise ValueError("day not found")
         all_visits = self.visits.list_for_day(day_id, ("accepted", "completed"))
         route = calculate_remaining_route_summary(day, all_visits, self.settings)
+        # Авто-оптимизация: сразу сохраняем оптимальный порядок принятых заказов,
+        # чтобы Лента показывала оптимальную последовательность без ручного действия.
+        # Отключается настройкой auto_optimize.
+        if self.settings.get_bool("auto_optimize", True) and route.order:
+            accepted_ids = {v.id for v in all_visits if v.status == "accepted"}
+            ordered = [vid for vid in route.order if vid in accepted_ids]
+            if ordered:
+                self.visits.update_order_numbers(ordered)
+                all_visits = self.visits.list_for_day(day_id, ("accepted", "completed"))
         return {
             "ok": True,
             "reason": reason,

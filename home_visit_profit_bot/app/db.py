@@ -611,6 +611,7 @@ def seed_default_settings(db: Database, config: AppConfig) -> None:
         "default_service_minutes": str(config.defaults.service_minutes),
         "default_telemed_minutes": str(config.defaults.telemed_minutes),
         "default_route_time_factor": str(config.defaults.route_time_factor),
+        "auto_optimize": str(config.route.optimize_after_each_accept).lower(),
         "nominatim_url": config.geo.nominatim_url,
         "geo_user_agent": config.geo.user_agent,
         "default_city": config.geo.default_city,

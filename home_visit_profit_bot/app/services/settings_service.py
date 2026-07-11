@@ -76,6 +76,7 @@ SETTINGS_CATALOG: list[SettingField] = [
     SettingField("default_avg_speed_kmh", "routing", "Скорость по умолчанию, км/ч", "number", 30.0, min=0),
     SettingField("default_service_minutes", "routing", "Время на адресе, мин", "number", 20.0, min=0),
     SettingField("default_telemed_minutes", "routing", "Удалённые заказы по умолчанию, мин", "number", 3.0, min=0),
+    SettingField("auto_optimize", "routing", "Авто-оптимизация маршрута", "bool", True),
     # GPS
     SettingField("location_geofence_radius_m", "gps", "Радиус геозоны, м", "number", 120.0, min=0),
     SettingField("location_dwell_minutes", "gps", "Порог стоянки, мин", "number", 12.0, min=0),

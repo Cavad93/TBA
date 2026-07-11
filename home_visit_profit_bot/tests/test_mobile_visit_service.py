@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.config import AppConfig, CarConfig, DefaultsConfig, FinanceConfig, GeoConfig, LocationApiConfig, RouteConfig, RoutingConfig
 from app.db import connect, init_db
-from app.repositories import LocationEventRepository, VisitRepository, WorkDayRepository
+from app.repositories import LocationEventRepository, SettingsRepository, VisitRepository, WorkDayRepository
 from app.services.mobile_visit_service import MobileVisitService, candidate_result_payload
 
 
@@ -319,6 +319,41 @@ def test_mobile_update_start_changes_active_day_start_with_coords(config) -> Non
     assert updated.start_address == "Аэропорт Пулково"
     assert updated.start_lat == 59.80
     assert updated.start_lon == 30.26
+
+
+def _accept(service, address, lat, lon):
+    result = service.create_candidate(
+        {"address": address, "income": 1000, "clinic": "", "lat": lat, "lon": lon, "route_km": 5, "route_minutes": 20}
+    )
+    return service.accept_candidate(result.candidate.id), result.candidate.id
+
+
+def test_accept_persists_optimized_order(config) -> None:
+    # Авто-оптимизация (по умолчанию вкл): порядок принятых в ленте совпадает с
+    # оптимальным порядком маршрута — сразу после добавления, без ручного действия.
+    with connect(config) as connection:
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        service = MobileVisitService(connection)
+        _accept(service, "A", 59.95, 30.30)
+        resp, _ = _accept(service, "B", 59.90, 30.40)
+        accepted = [v["id"] for v in resp["visits"] if v["status"] == "accepted"]
+        optimal = [vid for vid in resp["route"]["order"] if vid in set(accepted)]
+
+    assert len(accepted) == 2
+    assert accepted == optimal
+
+
+def test_auto_optimize_off_keeps_accept_order(config) -> None:
+    # Выключенная авто-оптимизация: порядок остаётся как принимали (a, b).
+    with connect(config) as connection:
+        SettingsRepository(connection).set("auto_optimize", "false")
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        service = MobileVisitService(connection)
+        _, a_id = _accept(service, "A", 59.95, 30.30)
+        resp, b_id = _accept(service, "B", 59.90, 30.40)
+        accepted = [v["id"] for v in resp["visits"] if v["status"] == "accepted"]
+
+    assert accepted == [a_id, b_id]
 
 
 def test_mobile_update_finish_requires_active_day(config) -> None:
