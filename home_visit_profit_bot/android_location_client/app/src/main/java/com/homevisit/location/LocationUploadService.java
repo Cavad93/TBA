@@ -42,8 +42,9 @@ public class LocationUploadService extends Service implements LocationListener, 
 
     private static final int NOTIFICATION_ID = 7001;
     private static final String CHANNEL_ID = "location_upload";
-    private static final int ALERT_NOTIFICATION_ID = 7002;
-    private static final String ALERT_CHANNEL_ID = "location_alerts";
+    // Package-private: StopActionReceiver гасит это уведомление после действия.
+    static final int ALERT_NOTIFICATION_ID = 7002;
+    static final String ALERT_CHANNEL_ID = "location_alerts";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private LocationManager locationManager;
@@ -347,42 +348,69 @@ public class LocationUploadService extends Service implements LocationListener, 
         }
         try {
             JSONObject response = new JSONObject(responseText);
+            // ready_to_complete == should_notify на сервере: длительная стоянка у
+            // незакрытого заказа (с cooldown). Показываем пуш с действиями.
             if (!response.optBoolean("ready_to_complete", false)) {
                 return;
             }
+            int visitId = response.optInt("visit_id", -1);
             double distance = response.optDouble("distance_m", 0);
-            String text = distance > 0
-                    ? String.format(Locale.US, "Вы рядом с адресом (%.0f м). Можно закрыть по GPS.", distance)
-                    : "Вы рядом с адресом. Можно закрыть по GPS.";
-            showArrivalNotification(text);
+            double dwell = response.optDouble("dwell_minutes", 0);
+            showStopNotification(visitId, distance, dwell);
         } catch (Exception ignored) {
         }
     }
 
-    private void showArrivalNotification(String text) {
+    private void showStopNotification(int visitId, double distance, double dwell) {
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager == null) {
             return;
         }
+        String title = dwell > 0
+                ? String.format(Locale.US, "Долгая остановка · %.0f мин", dwell)
+                : "Долгая остановка у адреса";
+        String text = distance > 0
+                ? String.format(Locale.US, "Вы рядом (%.0f м). Закрыть заказ или отметить остановку?", distance)
+                : "Закрыть заказ или отметить тип остановки?";
+
         Intent openIntent = new Intent(this, MainActivity.class);
         openIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        PendingIntent pending = PendingIntent.getActivity(
-                this,
-                0,
-                openIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-        );
+        PendingIntent openPending = PendingIntent.getActivity(
+                this, 0, openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
         Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(this, ALERT_CHANNEL_ID)
                 : new Notification.Builder(this);
-        Notification notification = builder
-                .setContentTitle("Закрыть адрес по GPS?")
+        builder.setContentTitle(title)
                 .setContentText(text)
                 .setSmallIcon(android.R.drawable.ic_menu_mylocation)
                 .setAutoCancel(true)
-                .setContentIntent(pending)
-                .build();
-        manager.notify(ALERT_NOTIFICATION_ID, notification);
+                .setContentIntent(openPending);
+
+        // Действия прямо из шторки (лимит Android — 3 кнопки).
+        if (visitId > 0) {
+            builder.addAction(stopAction("Закрыть по GPS", visitId, "complete", null));
+            builder.addAction(stopAction("Обед/пауза", visitId, "label", "pause"));
+            builder.addAction(stopAction("Ожидание", visitId, "label", "waiting"));
+        }
+        manager.notify(ALERT_NOTIFICATION_ID, builder.build());
+    }
+
+    private Notification.Action stopAction(String title, int visitId, String kind, String label) {
+        Intent intent = new Intent(this, StopActionReceiver.class);
+        // Разный action у каждой кнопки — чтобы PendingIntent'ы не перезаписывали extras.
+        intent.setAction("stop_action:" + kind + ":" + (label == null ? "" : label));
+        intent.putExtra(StopActionReceiver.EXTRA_VISIT_ID, visitId);
+        intent.putExtra(StopActionReceiver.EXTRA_KIND, kind);
+        if (label != null) {
+            intent.putExtra(StopActionReceiver.EXTRA_LABEL, label);
+        }
+        int requestCode = visitId * 10 + (kind + ":" + label).hashCode();
+        PendingIntent pending = PendingIntent.getBroadcast(
+                this, requestCode, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return new Notification.Action.Builder(0, title, pending).build();
     }
 
     private String normalizeLocationUrl(String value) {
