@@ -180,29 +180,6 @@ class HomeVisitRepository private constructor(
         return visit.id
     }
 
-    suspend fun addOfficeEntry(
-        workDayId: String,
-        address: String,
-        minutes: Double,
-        income: Double,
-        clinic: String,
-    ): String {
-        val now = now()
-        val office = OfficeEntryEntity(
-            id = id(),
-            workDayId = workDayId,
-            address = address.trim(),
-            minutes = minutes,
-            income = income,
-            clinic = clinic,
-            createdAtEpochMillis = now,
-            updatedAtEpochMillis = now,
-        )
-        dao.saveOfficeEntry(office)
-        dao.enqueueSync(sync("office_saved", "office_entry", office.id, now, officePayload(office)))
-        return office.id
-    }
-
     /**
      * Работа на точке — заказ-якорь в Ленте. Создаём на сервере: он геокодирует
      * адрес, ставит точку в маршрут (дорога до неё считается) и возвращает id,

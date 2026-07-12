@@ -692,12 +692,6 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun addOffice(address: String, minutes: Double, income: Double, clinic: String) {
-        viewModelScope.launch {
-            val workDayId = ensureActiveDay()
-            repository.addOfficeEntry(workDayId, address, minutes, income, clinic)
-        }
-    }
 
     fun addTelemed(minutes: Double, income: Double, clinic: String) {
         viewModelScope.launch {
