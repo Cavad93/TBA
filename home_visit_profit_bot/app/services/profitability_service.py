@@ -4,8 +4,9 @@ import math
 
 from app.models import CandidateCalculation, Point, RouteSummary, Visit, WorkDay
 from app.repositories import DailyStatsRepository, LocationEventRepository, SettingsRepository, VisitRepository
-from app.services.fatigue_service import calculate_candidate_fatigue_surcharge
+from app.services.fatigue_service import calculate_candidate_fatigue
 from app.services.optimization_service import optimize_route, optimize_route_estimated, optimize_route_manual
+from app.services.recovery_pricing_service import build_pricing
 from app.services.routing_service import RoutingError
 
 
@@ -188,6 +189,29 @@ def calculate_candidate_impact(
     marginal_profit = candidate.income - extra_car_cost
     marginal_hourly = _safe_hourly(marginal_profit, extra_total_minutes)
 
+    # Состояние считаем ДО решения: оно поднимает пороги, а не приписывается к готовому
+    # вердикту. Иначе «можно брать» и «сегодня твой минимум выше» противоречили бы друг
+    # другу на одном экране.
+    fatigue = calculate_candidate_fatigue(
+        day=day,
+        existing_visits=existing_visits,
+        candidate=candidate,
+        before_route=before_route,
+        after_route=after_route,
+        settings_repo=settings_repo,
+        stats_repo=stats_repo,
+        location_events=location_events,
+    )
+    pricing = build_pricing(
+        debt=fatigue.recovery_debt_after,
+        min_hourly=min_hourly,
+        outside_min_hourly=outside_min_hourly,
+        min_marginal_hourly=min_marginal_hourly,
+    )
+    min_hourly = pricing.effective_min_hourly
+    outside_min_hourly = pricing.effective_outside_min_hourly
+    min_marginal_hourly = pricing.effective_min_marginal_hourly
+
     existing_base_count = sum(1 for visit in existing_visits if visit.is_base_district)
     target_day_hourly = _target_day_hourly(
         candidate=candidate,
@@ -203,6 +227,7 @@ def calculate_candidate_impact(
         min_hourly=min_hourly,
         outside_min_hourly=outside_min_hourly,
         outside_min_extra=outside_min_extra,
+        blocks_outside_zone=pricing.blocks_outside_zone,
     )
     tariff = calculate_required_tariff(
         day=day,
@@ -219,16 +244,6 @@ def calculate_candidate_impact(
         min_marginal_hourly=min_marginal_hourly,
         outside_min_hourly=outside_min_hourly,
         outside_min_extra=outside_min_extra,
-    )
-    fatigue = calculate_candidate_fatigue_surcharge(
-        day=day,
-        existing_visits=existing_visits,
-        candidate=candidate,
-        before_route=before_route,
-        after_route=after_route,
-        settings_repo=settings_repo,
-        stats_repo=stats_repo,
-        location_events=location_events,
     )
     visit_repo.update_estimates(candidate.id, marginal_profit, marginal_hourly, before_hourly, after_hourly)
     visit_repo.update_route_estimate(candidate.id, max(0.0, extra_km), max(0.0, extra_drive_minutes))
@@ -260,13 +275,16 @@ def calculate_candidate_impact(
         fatigue_score_before=fatigue.before_score,
         fatigue_score_after=fatigue.after_score,
         fatigue_weekly_average=fatigue.weekly_average,
-        fatigue_extra_payment=fatigue.extra_payment,
         fatigue_level=fatigue.level,
-        fatigue_reason=fatigue.reason,
+        fatigue_reason=pricing.reason,
         recovery_debt_before=fatigue.recovery_debt_before,
         recovery_debt_after=fatigue.recovery_debt_after,
         circadian_risk_minutes=fatigue.circadian_risk_minutes,
         burnout_score=fatigue.burnout_score,
+        base_min_hourly=pricing.base_min_hourly,
+        effective_min_hourly=pricing.effective_min_hourly,
+        recovery_markup_percent=round(pricing.markup * 100),
+        recovery_blocks_outside_zone=pricing.blocks_outside_zone,
     )
 
 
@@ -333,9 +351,17 @@ def make_decision(
     min_hourly: float,
     outside_min_hourly: float | None = None,
     outside_min_extra: float = 0.0,
+    blocks_outside_zone: bool = False,
 ) -> tuple[str, str]:
     outside_min_hourly = min_hourly if outside_min_hourly is None else outside_min_hourly
     if not candidate.is_base_district:
+        if blocks_outside_zone:
+            # Дальняя дорога на исходе ресурса — это уже не вопрос денег: сколько ни
+            # доплати, ехать через полгорода с высоким долгом восстановления не стоит.
+            return (
+                "ТОЛЬКО СО СПЕЦТАРИФОМ",
+                "Высокий долг восстановления. Заказы вне базовой зоны сегодня брать не стоит.",
+            )
         target = max(before_hourly, outside_min_hourly)
         if after_hourly >= target and outside_min_extra <= 0:
             if existing_base_count < 5:

@@ -152,13 +152,20 @@ class CandidateCalculation:
     fatigue_score_before: float = 0.0
     fatigue_score_after: float = 0.0
     fatigue_weekly_average: float = 0.0
-    fatigue_extra_payment: float = 0.0
     fatigue_level: str = ""
     fatigue_reason: str = ""
     recovery_debt_before: float = 0.0
     recovery_debt_after: float = 0.0
     circadian_risk_minutes: float = 0.0
     burnout_score: float = 0.0
+    # Состояние поднимает МИНИМАЛЬНЫЙ ТАРИФ, а не добавляет отдельную надбавку.
+    # Прежнее поле fatigue_extra_payment считалось на сервере, доезжало до телефона и
+    # нигде не показывалось; складывать его с поднятым порогом значило бы взять
+    # наценку дважды.
+    base_min_hourly: float = 0.0
+    effective_min_hourly: float = 0.0
+    recovery_markup_percent: float = 0.0
+    recovery_blocks_outside_zone: bool = False
 
 
 @dataclass(frozen=True)
@@ -188,6 +195,14 @@ class EndDayData:
     parking_compensation: float = 0.0
     toll_expenses: float = 0.0
     toll_compensation: float = 0.0
+    # Штуки, а не рубли: 300 ₽ — это одна чашка в аэропорту или три в ларьке,
+    # а на восстановление влияет именно количество кофеина, а не сумма чека.
+    coffee_units: float = 0.0
+    drinks_units: float = 0.0
+    meal_units: float = 0.0
+    # Самооценка усталости 1–10. Она же — обратная связь: сравнивая её с нашей
+    # оценкой, система учится на конкретном человеке.
+    self_rating: float = 0.0
 
 
 @dataclass(frozen=True)

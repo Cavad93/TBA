@@ -460,13 +460,17 @@ def calculation_payload(calculation: CandidateCalculation) -> dict[str, Any]:
         "fatigue_score_before": calculation.fatigue_score_before,
         "fatigue_score_after": calculation.fatigue_score_after,
         "fatigue_weekly_average": calculation.fatigue_weekly_average,
-        "fatigue_extra_payment": calculation.fatigue_extra_payment,
         "fatigue_level": calculation.fatigue_level,
         "fatigue_reason": calculation.fatigue_reason,
         "recovery_debt_before": calculation.recovery_debt_before,
         "recovery_debt_after": calculation.recovery_debt_after,
         "circadian_risk_minutes": calculation.circadian_risk_minutes,
         "burnout_score": calculation.burnout_score,
+        # Состояние меняет экономику ровно здесь: обычный минимум против сегодняшнего.
+        "base_min_hourly": calculation.base_min_hourly,
+        "effective_min_hourly": calculation.effective_min_hourly,
+        "recovery_markup_percent": calculation.recovery_markup_percent,
+        "recovery_blocks_outside_zone": calculation.recovery_blocks_outside_zone,
     }
 
 

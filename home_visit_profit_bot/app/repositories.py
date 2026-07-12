@@ -773,6 +773,45 @@ class LocationSampleRepository:
         ).fetchone()
         return float(row["meters"] or 0) / 1000 if row else 0.0
 
+    def walk_minutes(self, work_day_id: int) -> float:
+        """Время пешком — по скорости движения, без запроса новых разрешений.
+
+        Распознавание активности (ACTIVITY_RECOGNITION) потребовало бы отдельного
+        разрешения при установке и объяснений на ревью в Google Play, а даёт то же
+        самое: пешеход движется 2–7 км/ч. Ниже — это стояние на месте, выше — уже
+        машина. Грубо, но честно, и ничего не стоит пользователю.
+        """
+        row = self.connection.execute(
+            """
+            SELECT COALESCE(SUM(seconds_from_prev), 0) AS seconds
+            FROM location_samples
+            WHERE work_day_id = ?
+              AND is_valid = 1
+              AND seconds_from_prev > 0
+              AND seconds_from_prev <= 180
+              AND speed_kmh >= 2
+              AND speed_kmh <= 7
+            """,
+            (work_day_id,),
+        ).fetchone()
+        return float(row["seconds"] or 0) / 60 if row else 0.0
+
+    def night_minutes(self, work_day_id: int) -> float:
+        """Минуты смены, пришедшиеся на ночь (00:00–06:00) — по факту GPS, а не по плану."""
+        row = self.connection.execute(
+            """
+            SELECT COALESCE(SUM(seconds_from_prev), 0) AS seconds
+            FROM location_samples
+            WHERE work_day_id = ?
+              AND is_valid = 1
+              AND seconds_from_prev > 0
+              AND seconds_from_prev <= 180
+              AND CAST(SUBSTRING(captured_at FROM 12 FOR 2) AS INTEGER) < 6
+            """,
+            (work_day_id,),
+        ).fetchone()
+        return float(row["seconds"] or 0) / 60 if row else 0.0
+
     def route_minutes_between(self, work_day_id: int, start_at: str | None, end_at: str | None, moving_speed_kmh: float) -> float:
         where = [
             "work_day_id = ?",
@@ -1408,3 +1447,141 @@ class AddressCacheRepository:
         cursor = self.connection.execute("DELETE FROM address_cache")
         self.connection.commit()
         return int(cursor.rowcount)
+
+
+class DayMetricRepository:
+    """Метрики дня в виде «ключ — значение»: из них строится личная норма."""
+
+    def __init__(self, connection: Database):
+        self.connection = connection
+
+    def put_many(self, work_day_id: int, date: str, metrics: dict[str, float]) -> None:
+        created_at = now_iso()
+        for metric, value in metrics.items():
+            self.connection.execute(
+                """
+                INSERT INTO day_metrics(work_day_id, date, metric, value, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(work_day_id, metric) DO UPDATE SET
+                    value = excluded.value,
+                    date = excluded.date
+                """,
+                (work_day_id, date, metric, float(value), created_at),
+            )
+        self.connection.commit()
+
+    def history(self, metric: str, limit: int = 28) -> list[float]:
+        """Последние значения метрики, свежие первыми — сырьё для медианы и MAD."""
+        rows = self.connection.execute(
+            """
+            SELECT value FROM day_metrics
+            WHERE metric = ?
+            ORDER BY date DESC, id DESC
+            LIMIT ?
+            """,
+            (metric, limit),
+        ).fetchall()
+        return [float(row["value"]) for row in rows]
+
+    def for_day(self, work_day_id: int) -> dict[str, float]:
+        rows = self.connection.execute(
+            "SELECT metric, value FROM day_metrics WHERE work_day_id = ?",
+            (work_day_id,),
+        ).fetchall()
+        return {str(row["metric"]): float(row["value"]) for row in rows}
+
+
+class UserBaselineRepository:
+    """Свёрнутая личная норма. Переживает удаление сырья по сроку хранения."""
+
+    def __init__(self, connection: Database):
+        self.connection = connection
+
+    def put(self, metric: str, median_value: float, scale_value: float, days_count: int) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO user_baselines(metric, median_value, scale_value, days_count, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, metric) DO UPDATE SET
+                median_value = excluded.median_value,
+                scale_value = excluded.scale_value,
+                days_count = excluded.days_count,
+                updated_at = excluded.updated_at
+            """,
+            (metric, float(median_value), float(scale_value), int(days_count), now_iso()),
+        )
+        self.connection.commit()
+
+    def all(self) -> dict[str, Any]:
+        rows = self.connection.execute("SELECT * FROM user_baselines").fetchall()
+        return {str(row["metric"]): row for row in rows}
+
+
+class DrivingSegmentRepository:
+    """Стиль вождения по отрезкам между адресами."""
+
+    def __init__(self, connection: Database):
+        self.connection = connection
+
+    def upsert(
+        self,
+        *,
+        work_day_id: int,
+        segment_index: int,
+        date: str,
+        started_at: str | None = None,
+        ended_at: str | None = None,
+        km: float = 0.0,
+        samples_count: int = 0,
+        sensor_minutes: float = 0.0,
+        harsh_acceleration_count: int = 0,
+        harsh_braking_count: int = 0,
+        hard_cornering_count: int = 0,
+        lane_change_proxy_count: int = 0,
+        stop_go_count: int = 0,
+        jerk_score: float = 0.0,
+        speed_variability_score: float = 0.0,
+        aggressive_score: float = 0.0,
+    ) -> None:
+        updated_at = now_iso()
+        self.connection.execute(
+            """
+            INSERT INTO driving_behavior_segments(
+                work_day_id, segment_index, date, started_at, ended_at, km,
+                samples_count, sensor_minutes, harsh_acceleration_count, harsh_braking_count,
+                hard_cornering_count, lane_change_proxy_count, stop_go_count,
+                jerk_score, speed_variability_score, aggressive_score, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(work_day_id, segment_index) DO UPDATE SET
+                ended_at = excluded.ended_at,
+                km = excluded.km,
+                samples_count = excluded.samples_count,
+                sensor_minutes = excluded.sensor_minutes,
+                harsh_acceleration_count = excluded.harsh_acceleration_count,
+                harsh_braking_count = excluded.harsh_braking_count,
+                hard_cornering_count = excluded.hard_cornering_count,
+                lane_change_proxy_count = excluded.lane_change_proxy_count,
+                stop_go_count = excluded.stop_go_count,
+                jerk_score = excluded.jerk_score,
+                speed_variability_score = excluded.speed_variability_score,
+                aggressive_score = excluded.aggressive_score,
+                updated_at = excluded.updated_at
+            """,
+            (
+                work_day_id, segment_index, date, started_at, ended_at, km,
+                samples_count, sensor_minutes, harsh_acceleration_count, harsh_braking_count,
+                hard_cornering_count, lane_change_proxy_count, stop_go_count,
+                jerk_score, speed_variability_score, aggressive_score, updated_at, updated_at,
+            ),
+        )
+        self.connection.commit()
+
+    def for_day(self, work_day_id: int) -> list[Any]:
+        return self.connection.execute(
+            """
+            SELECT * FROM driving_behavior_segments
+            WHERE work_day_id = ?
+            ORDER BY segment_index ASC
+            """,
+            (work_day_id,),
+        ).fetchall()

@@ -1,8 +1,20 @@
 from __future__ import annotations
 
 from app.models import DailyStats, EndDayData, Point, RollingAverages, Visit, WorkDay
-from app.repositories import DailyStatsRepository, LocationEventRepository, SettingsRepository, VisitRepository, WorkDayRepository
-from app.services.fatigue_service import estimate_active_day_fatigue
+from app.repositories import (
+    DailyStatsRepository,
+    DayMetricRepository,
+    DrivingBehaviorRepository,
+    LocationEventRepository,
+    LocationSampleRepository,
+    SettingsRepository,
+    UserBaselineRepository,
+    VisitRepository,
+    WorkDayRepository,
+)
+from app.services.day_metrics_service import build_closed_day_metrics, load_baselines, persist_day_metrics
+from app.services.fatigue_service import estimate_active_day_fatigue, stop_complexity_for_day
+from app.services.indices_service import economy_index
 from app.services.optimization_service import optimize_route
 from app.services.profitability_service import calculate_car_expenses
 from app.services.routing_service import RoutingError
@@ -10,6 +22,31 @@ from app.services.routing_service import RoutingError
 
 MIN_ROUTE_TIME_FACTOR = 0.5
 MAX_ROUTE_TIME_FACTOR = 3.0
+
+
+def _save_self_rating_feedback(connection, work_day_id: int, self_rating: float, predicted_score: float) -> None:
+    """Самооценка 1–10 — это и есть обратная связь, просто заданная по-человечески.
+
+    Спрашивать «согласен ли ты с оценкой 63 из 100» неестественно; спрашивать «на
+    сколько ты вымотался от 1 до 10» — естественно. Переводим в ту же шкалу 0–100 и
+    кладём туда же, откуда учится модель: пользователь отвечает на понятный вопрос,
+    а система получает ровно тот сигнал, который ей нужен.
+    """
+    if self_rating <= 0:
+        return
+    from app.repositories import FatigueFeedbackRepository
+    from app.services.correlation_service import apply_feedback_learning
+
+    # apply_feedback_learning сама записывает отклик — отдельный add() дал бы дубль.
+    apply_feedback_learning(
+        work_day_id=work_day_id,
+        predicted_score=predicted_score,
+        user_score=max(0.0, min(100.0, self_rating * 10)),
+        feedback_type="self_rating",
+        settings_repo=SettingsRepository(connection),
+        driving_repo=DrivingBehaviorRepository(connection),
+        feedback_repo=FatigueFeedbackRepository(connection),
+    )
 
 
 def finalize_day(
@@ -73,14 +110,41 @@ def finalize_day(
     )
     net_profit = total_income - total_expenses
     net_hourly = net_profit / (total_work_minutes / 60) if total_work_minutes > 0 else 0
+
+    connection = stats_repo.connection
+    metric_repo = DayMetricRepository(connection)
+    baseline_repo = UserBaselineRepository(connection)
+
+    # Норму берём ДО того, как записали сегодняшний день: сравнивать сегодня с нормой,
+    # в которую уже входит сегодня, — значит частично сравнивать день с самим собой и
+    # занижать любое отклонение.
+    baselines = load_baselines(baseline_repo)
+    metrics = build_closed_day_metrics(
+        day=day,
+        visits=completed_visits,
+        data=data,
+        total_income=total_income,
+        total_expenses=total_expenses,
+        net_profit=net_profit,
+        net_hourly=net_hourly,
+        driving_repo=DrivingBehaviorRepository(connection),
+        samples_repo=LocationSampleRepository(connection),
+        settings_repo=settings_repo,
+    )
+    metrics["stop_complexity"] = stop_complexity_for_day(
+        LocationEventRepository(connection), day, completed_visits
+    )
+    metrics["route_time_factor"] = round(route_time_factor, 2)
+
     fatigue = estimate_active_day_fatigue(
         day=day,
         visits=completed_visits,
         settings_repo=settings_repo,
         stats_repo=stats_repo,
-        location_events=LocationEventRepository(stats_repo.connection),
+        location_events=LocationEventRepository(connection),
         total_work_minutes=total_work_minutes,
         route_minutes=route_minutes,
+        metrics=metrics,
         learning_stats_row={
             "actual_km": data.actual_km,
             "total_work_minutes": total_work_minutes,
@@ -91,6 +155,13 @@ def finalize_day(
             "sleep_hours": day.sleep_hours,
         },
     )
+
+    economy = economy_index(metrics, baselines)
+    metrics["economy_index"] = economy.score
+    metrics["load_index"] = fatigue.score
+    metrics["recovery_debt"] = fatigue.recovery_debt
+    persist_day_metrics(metric_repo, baseline_repo, work_day_id=day.id, date=day.date, metrics=metrics)
+    _save_self_rating_feedback(connection, day.id, data.self_rating, fatigue.score)
 
     stats = DailyStats(
         completed_visits_count=data.completed_visits_count,

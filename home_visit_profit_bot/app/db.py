@@ -288,6 +288,59 @@ CREATE TABLE IF NOT EXISTS fatigue_feedback (
     FOREIGN KEY(work_day_id) REFERENCES work_days(id)
 );
 
+-- Стиль вождения по отрезкам между адресами, а не одной строкой за сутки.
+-- Только так можно сказать «после пятого адреса стиль стал менее стабильным»:
+-- дневной агрегат такой вопрос не различает в принципе.
+CREATE TABLE IF NOT EXISTS driving_behavior_segments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_day_id INTEGER NOT NULL,
+    segment_index INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    started_at TEXT,
+    ended_at TEXT,
+    km REAL DEFAULT 0,
+    samples_count INTEGER DEFAULT 0,
+    sensor_minutes REAL DEFAULT 0,
+    harsh_acceleration_count INTEGER DEFAULT 0,
+    harsh_braking_count INTEGER DEFAULT 0,
+    hard_cornering_count INTEGER DEFAULT 0,
+    lane_change_proxy_count INTEGER DEFAULT 0,
+    stop_go_count INTEGER DEFAULT 0,
+    jerk_score REAL DEFAULT 0,
+    speed_variability_score REAL DEFAULT 0,
+    aggressive_score REAL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(work_day_id, segment_index),
+    FOREIGN KEY(work_day_id) REFERENCES work_days(id)
+);
+
+-- Метрики дня «ключ — значение», а не два десятка новых колонок в daily_stats.
+-- Из них строится личная норма, и каждая новая метрика (время пешком, лишние
+-- километры, чашки кофе) добавляется без миграции схемы.
+CREATE TABLE IF NOT EXISTS day_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_day_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    value REAL NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(work_day_id, metric),
+    FOREIGN KEY(work_day_id) REFERENCES work_days(id)
+);
+
+-- Свёрнутая личная норма: медиана и робастный разброс по каждой метрике.
+-- Живёт отдельно от сырья, поэтому сырьё можно удалять по сроку хранения,
+-- не теряя того, что человек про себя уже «наработал».
+CREATE TABLE IF NOT EXISTS user_baselines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    metric TEXT NOT NULL,
+    median_value REAL DEFAULT 0,
+    scale_value REAL DEFAULT 0,
+    days_count INTEGER DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS mobile_client_entities (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     client_entity_id TEXT NOT NULL,
@@ -401,6 +454,7 @@ ISOLATED_TABLES = [
     "work_days", "visits", "expenses", "telemed_entries", "office_entries",
     "daily_stats", "visit_location_events", "location_samples",
     "work_day_location_state", "burnout_surveys", "driving_behavior_daily",
+    "driving_behavior_segments", "day_metrics", "user_baselines",
     "fatigue_feedback", "mobile_client_entities", "mobile_sync_events",
     "mobile_sync_conflicts",
     # Кэш геокодера тоже персональный: ключ — сырой текст адреса, а город у каждого
@@ -416,6 +470,7 @@ def init_db(config: AppConfig) -> None:
         _ensure_columns(db)
         _ensure_isolation(db)
         _migrate_address_cache_to_per_user(db)
+        _ensure_baselines_per_user(db)
         _verify_isolation_or_die(db)
         # Настройки сидятся per-user при регистрации (seed_default_settings с app.user_id).
 
@@ -487,6 +542,26 @@ def _migrate_address_cache_to_per_user(db: Database) -> None:
         db.execute(
             "ALTER TABLE address_cache ADD CONSTRAINT address_cache_user_input_key "
             "UNIQUE (user_id, input_text)"
+        )
+    db.commit()
+
+
+def _ensure_baselines_per_user(db: Database) -> None:
+    """Личная норма уникальна парой «пользователь + метрика», а не одной метрикой.
+
+    Уникальность по одному `metric` сделала бы норму глобальной: первый пользователь
+    занял бы строку «резкие торможения», а остальным её было бы не вставить — RLS не
+    пускает к чужой записи, а уникальный индекс не даёт создать свою. Тот же капкан
+    уже случился с кэшем адресов.
+    """
+    exists = db.execute(
+        "SELECT 1 FROM pg_constraint WHERE conname = 'user_baselines_user_metric_key' "
+        "AND connamespace = current_schema()::regnamespace"
+    ).fetchone()
+    if not exists:
+        db.execute(
+            "ALTER TABLE user_baselines ADD CONSTRAINT user_baselines_user_metric_key "
+            "UNIQUE (user_id, metric)"
         )
     db.commit()
 
