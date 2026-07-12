@@ -40,6 +40,11 @@ import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.LateWarning
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
+import com.homevisit.location.domain.DrivingWithinDay
+import com.homevisit.location.domain.IndexCard
+import com.homevisit.location.domain.IndexReason
+import com.homevisit.location.domain.ProfileIndices
+import com.homevisit.location.domain.RecoveryPricing
 import com.homevisit.location.domain.ProfileMonth
 import com.homevisit.location.domain.ProfileSnapshot
 import com.homevisit.location.domain.ProfileUser
