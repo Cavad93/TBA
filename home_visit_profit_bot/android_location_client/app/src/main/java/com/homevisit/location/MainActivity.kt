@@ -255,7 +255,6 @@ class MainActivity : ComponentActivity() {
                     onAddOffice = viewModel::addOnSite,
                     onAddTelemed = viewModel::addTelemed,
                     onAddExpense = viewModel::addExpense,
-                    onSync = viewModel::syncPending,
                     onRefreshAppSettings = viewModel::refreshAppSettings,
                     onSaveAppSettings = viewModel::saveAppSettings,
                     onRefreshClinics = viewModel::refreshClinics,
@@ -531,7 +530,6 @@ internal fun HomeVisitApp(
     onAddOffice: (String, String, String, Double, Double, String, String?, String?) -> Unit,
     onAddTelemed: (Double, Double, String) -> Unit,
     onAddExpense: (ExpenseCategory, Double, String) -> Unit,
-    onSync: (String, String) -> Unit,
     onRefreshAppSettings: (String, String) -> Unit,
     onSaveAppSettings: (String, String, Map<String, Any?>) -> Unit,
     onRefreshClinics: (String, String) -> Unit,
@@ -612,7 +610,6 @@ internal fun HomeVisitApp(
         onRefreshAppSettings = { onRefreshAppSettings(serverUrl, apiKey) },
         onSaveAppSettings = { values -> onSaveAppSettings(serverUrl, apiKey, values) },
     )
-    val syncNow = { onSync(serverUrl, apiKey) }
     // Подтягиваем список клиник из настроек, когда есть URL и ключ (для форм).
     LaunchedEffect(serverUrl, apiKey) {
         if (serverUrl.isNotBlank() && apiKey.isNotBlank()) {
@@ -633,12 +630,10 @@ internal fun HomeVisitApp(
     if (showSettings) {
         SettingsOverlay(
             settingsState = settingsState,
-            syncState = uiState.sync,
             appSettings = uiState.appSettings,
             reportState = uiState.report,
             fatigueState = uiState.fatigue,
             workActions = workActions,
-            onSync = syncNow,
             onBack = { showSettings = false },
         )
         return
@@ -670,7 +665,6 @@ internal fun HomeVisitApp(
                 uiState = uiState,
                 workActions = workActions,
                 settingsState = settingsState,
-                onSync = syncNow,
                 onSelectDestination = { selected = it },
                 onOpenSettings = { showSettings = true },
             )
@@ -737,7 +731,6 @@ internal fun FirstFloor(
     uiState: HomeVisitUiState,
     workActions: WorkActions,
     settingsState: GpsSettingsState,
-    onSync: () -> Unit,
     onSelectDestination: (AppDestination) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -749,7 +742,6 @@ internal fun FirstFloor(
                 uiState = uiState,
                 workActions = workActions,
                 settingsState = settingsState,
-                onSync = onSync,
                 onSelectDestination = onSelectDestination,
                 onOpenSettings = onOpenSettings,
                 bottomBar = {},
@@ -761,7 +753,6 @@ internal fun FirstFloor(
             uiState = uiState,
             workActions = workActions,
             settingsState = settingsState,
-            onSync = onSync,
             onSelectDestination = onSelectDestination,
             onOpenSettings = onOpenSettings,
             bottomBar = {
@@ -784,12 +775,10 @@ internal enum class SettingsPage(val title: String) {
 @Composable
 internal fun SettingsOverlay(
     settingsState: GpsSettingsState,
-    syncState: SyncUiState,
     appSettings: AppSettingsUiState,
     reportState: ReportUiState,
     fatigueState: FatigueUiState,
     workActions: WorkActions,
-    onSync: () -> Unit,
     onBack: () -> Unit,
 ) {
     var page by rememberSaveable { mutableStateOf(SettingsPage.Main) }
@@ -820,7 +809,7 @@ internal fun SettingsOverlay(
         ) {
             when (page) {
                 SettingsPage.Main -> SettingsScreen(
-                    settingsState, syncState, appSettings, workActions, onSync,
+                    settingsState, appSettings, workActions,
                     onOpenReports = { page = SettingsPage.Reports },
                     onOpenFatigue = { page = SettingsPage.Fatigue },
                     onOpenAppSettings = { page = SettingsPage.App },
@@ -842,7 +831,6 @@ internal fun AppScaffold(
     uiState: HomeVisitUiState,
     workActions: WorkActions,
     settingsState: GpsSettingsState,
-    onSync: () -> Unit,
     onSelectDestination: (AppDestination) -> Unit,
     onOpenSettings: () -> Unit,
     bottomBar: @Composable () -> Unit,

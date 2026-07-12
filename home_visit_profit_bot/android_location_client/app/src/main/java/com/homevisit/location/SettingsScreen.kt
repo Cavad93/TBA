@@ -168,10 +168,8 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun SettingsScreen(
     settingsState: GpsSettingsState,
-    syncState: SyncUiState,
     appSettings: AppSettingsUiState,
     workActions: WorkActions,
-    onSync: () -> Unit,
     onOpenReports: () -> Unit = {},
     onOpenFatigue: () -> Unit = {},
     onOpenAppSettings: () -> Unit = {},
@@ -179,6 +177,11 @@ internal fun SettingsScreen(
 ) {
     // Настройки — это меню, а не простыня полей: сами параметры живут на своих
     // страницах, а здесь только вход в них. Аккаунт — последним пунктом.
+    //
+    // Синхронизации здесь нет: она идёт сама (фоновая задача каждые 15 минут плюс
+    // разовая при входе). Показывать её очередь, конфликты и кнопку «синхронизировать»
+    // — значит грузить человека нашей внутренней кухней и намекать, что без него
+    // данные не уйдут. Уйдут.
     ScreenColumn {
         SettingsMenuItem(
             "Параметры расчёта",
@@ -193,16 +196,6 @@ internal fun SettingsScreen(
         SettingsMenuItem("Подробные отчёты", "День, месяц, год и разбивка по компаниям", onOpenReports)
         SettingsMenuItem("Нагрузка и восстановление", "Тренды, самочувствие, калибровка", onOpenFatigue)
         OrderSourceCard()
-        SyncControlCard(
-            syncState = syncState,
-            onSync = onSync,
-            onExportBackup = workActions.onExportBackup,
-            onRefreshConflicts = workActions.onRefreshSyncConflicts,
-            onCheckConnection = workActions.onCheckConnection,
-            onClearCache = workActions.onClearCache,
-            onImportBackup = workActions.onImportBackup,
-            showImport = true,
-        )
         AccountCard(settingsState)
     }
 }
@@ -572,104 +565,6 @@ internal fun GpsControlCard(settingsState: GpsSettingsState) {
                     enabled = settingsState.gpsRunning,
                 ) {
                     Text("Остановить")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun SyncControlCard(
-    syncState: SyncUiState,
-    onSync: () -> Unit,
-    onExportBackup: () -> Unit,
-    onRefreshConflicts: () -> Unit,
-    onCheckConnection: () -> Unit,
-    onClearCache: () -> Unit,
-    onImportBackup: (String) -> Unit,
-    showImport: Boolean = false,
-) {
-    var importJson by rememberSaveable { mutableStateOf("") }
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("Синхронизация", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                "Отправляет локальные записи из очереди на backend `/api/sync`.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            ReportMetricGrid(
-                metrics = listOf(
-                    "Ожидают" to syncState.stats.pendingCount.toString(),
-                    "Ошибки" to syncState.stats.failedCount.toString(),
-                    "Отправлено" to syncState.stats.sentCount.toString(),
-                    "Всего" to syncState.stats.totalCount.toString(),
-                ),
-            )
-            if (syncState.message.isNotBlank()) {
-                Text(
-                    syncState.message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(modifier = Modifier.weight(1f), onClick = onSync) {
-                    Text("Синхронизировать")
-                }
-                OutlinedButton(modifier = Modifier.weight(1f), onClick = onExportBackup) {
-                    Text("Экспорт JSON")
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(modifier = Modifier.weight(1f), onClick = onCheckConnection) {
-                    Text("Проверить связь")
-                }
-                OutlinedButton(modifier = Modifier.weight(1f), onClick = onRefreshConflicts) {
-                    Text("Журнал конфликтов")
-                }
-            }
-            OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onClearCache) {
-                Text("Очистить кэш адресов")
-            }
-            Text(
-                "Удаляет офлайн-копии маршрута, отчётов и нагрузки. Свежие данные подтянутся при следующем обновлении со связью.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            syncState.conflicts.take(3).forEach { conflict ->
-                CompactCard(
-                    title = conflict.conflictType,
-                    body = "${conflict.entityType}/${conflict.clientEntityId}: ${conflict.details.orEmpty()}",
-                )
-            }
-            if (showImport) {
-                OutlinedTextField(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(140.dp),
-                    value = importJson,
-                    onValueChange = { importJson = it },
-                    label = { Text("JSON резервной копии") },
-                    singleLine = false,
-                )
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = importJson.isNotBlank(),
-                    onClick = {
-                        onImportBackup(importJson)
-                        importJson = ""
-                    },
-                ) {
-                    Text("Импортировать backup")
                 }
             }
         }
