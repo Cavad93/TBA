@@ -750,36 +750,77 @@ private fun GaugeTile(modifier: Modifier, value: String, caption: String) {
 }
 
 @Composable
-internal fun OfficeInputCard(clinics: List<String>, onSubmit: (String, Double, Double, String) -> Unit) {
+/**
+ * Работа на точке: адрес с фиксированным временем. Попадает в Ленту заказом-якорем —
+ * дорога до неё считается, а оптимизатор её не переставляет. Продолжительность не
+ * спрашиваем: она выводится из начала и окончания.
+ */
+@Composable
+internal fun OfficeInputCard(
+    clinics: List<String>,
+    onSubmit: (String, Double, Double, String, String?, String?) -> Unit,
+) {
     var address by rememberSaveable { mutableStateOf("") }
-    var minutesText by rememberSaveable { mutableStateOf("") }
+    var startText by rememberSaveable { mutableStateOf("") }
+    var endText by rememberSaveable { mutableStateOf("") }
     var incomeText by rememberSaveable { mutableStateOf("") }
-    var clinic by rememberSaveable(clinics) { mutableStateOf(clinics.firstOrNull().orEmpty()) }
-    val minutes = parseNumber(minutesText)
+    var clinic by rememberSaveable { mutableStateOf("") }
+
     val income = parseNumber(incomeText)
+    val start = parseTimeOfDay(startText)
+    val end = parseTimeOfDay(endText)
+    val minutes = if (start != null && end != null) minutesBetween(start, end) else null
 
     InputCard("На точке") {
         OutlinedTextField(
             modifier = Modifier.fillMaxWidth(),
             value = address,
             onValueChange = { address = it },
-            label = { Text("Адрес предприятия") },
+            label = { Text("Адрес точки") },
             singleLine = false,
         )
-        MoneyField(value = minutesText, onValueChange = { minutesText = it }, label = "Продолжительность, мин")
-        MoneyField(value = incomeText, onValueChange = { incomeText = it }, label = "Стоимость")
-        ClinicPicker(clinics = clinics, selected = clinic, onSelect = { clinic = it })
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            MoneyField(
+                value = startText,
+                onValueChange = { startText = it },
+                label = "Начало, 9:00",
+                modifier = Modifier.weight(1f),
+            )
+            MoneyField(
+                value = endText,
+                onValueChange = { endText = it },
+                label = "Окончание, 13:00",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (minutes != null) {
+            Text(
+                "Продолжительность: ${minutesText(minutes.toDouble())}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        MoneyField(value = incomeText, onValueChange = { incomeText = it }, label = "Стоимость, ₽")
+        CompanyPicker(clinics = clinics, value = clinic, onValue = { clinic = it })
         Button(
             modifier = Modifier.fillMaxWidth(),
-            enabled = address.isNotBlank() && minutes != null && income != null && clinic.isNotBlank(),
+            enabled = address.isNotBlank() && income != null && minutes != null && minutes > 0,
             onClick = {
-                onSubmit(address, minutes ?: 0.0, income ?: 0.0, clinic)
+                onSubmit(
+                    address,
+                    (minutes ?: 0L).toDouble(),
+                    income ?: 0.0,
+                    clinic,
+                    start?.let { todayAtIso(it) },
+                    end?.let { todayAtIso(it) },
+                )
                 address = ""
-                minutesText = ""
+                startText = ""
+                endText = ""
                 incomeText = ""
             },
         ) {
-            Text("Сохранить заказ на точке")
+            Text("Добавить в Ленту")
         }
     }
 }

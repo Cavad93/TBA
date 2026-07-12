@@ -231,6 +231,60 @@ class MobileVisitService:
         response["start"] = {"address": normalized, "lat": lat, "lon": lon}
         return response
 
+    def create_onsite(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Работа на точке: сразу принятый заказ-якорь с фиксированным временем.
+
+        Его не оценивают — на него едут по договорённости. Зато он попадает в
+        маршрут, и дорога до него считается как до любого адреса.
+        """
+        day = self._require_active_day()
+        address = _required_str(payload, "address")
+        income = _optional_non_negative_float(payload.get("income")) or 0.0
+        minutes = _optional_non_negative_float(payload.get("service_minutes")) or 0.0
+        clinic = _clinic(payload, allowed_clinics(self.settings))
+        lat = _optional_float(payload.get("lat"))
+        lon = _optional_float(payload.get("lon"))
+
+        base_districts = self.settings.base_districts()
+        district = None
+        normalized = address
+        if lat is None or lon is None:
+            try:
+                geo = geocode_address(
+                    address,
+                    base_districts,
+                    cache_repo=AddressCacheRepository(self.connection),
+                    default_city=self.settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург",
+                    default_region=self.settings.get("default_region", "Ленинградская область") or "Ленинградская область",
+                    nominatim_url=self.settings.get("nominatim_url", "https://nominatim.openstreetmap.org") or "https://nominatim.openstreetmap.org",
+                    user_agent=self.settings.get("geo_user_agent", "home-visit-profit-bot/1.0") or "home-visit-profit-bot/1.0",
+                    timeout_seconds=self.settings.get_float("request_timeout_seconds", 10),
+                )
+            except GeocodingError as error:
+                return {"ok": False, "reason": "geocoding_failed", "detail": str(error)}
+            if geo is None or geo.lat is None or geo.lon is None:
+                return {"ok": False, "reason": "needs_coordinates"}
+            lat, lon = geo.lat, geo.lon
+            district = geo.district
+            normalized = geo.normalized_address or address
+
+        visit = self.visits.create_onsite(
+            day_id=day.id,
+            address=normalized,
+            income=income,
+            service_minutes=minutes,
+            planned_start_at=_optional_str(payload.get("start_at")),
+            planned_end_at=_optional_str(payload.get("end_at")),
+            lat=lat,
+            lon=lon,
+            clinic=clinic,
+            district=district,
+            is_base_district=is_base_district(district, base_districts),
+        )
+        response = self._route_response(day.id, "onsite_added", visit.id)
+        response["visit"] = visit_payload(visit)
+        return response
+
     def set_stop_label(self, visit_id: int, label: str) -> dict[str, Any]:
         day = self._require_active_day()
         visit = self.visits.get(visit_id)

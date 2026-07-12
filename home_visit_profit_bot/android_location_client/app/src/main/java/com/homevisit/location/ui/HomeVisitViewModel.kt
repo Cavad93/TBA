@@ -25,6 +25,8 @@ import com.homevisit.location.domain.ServerRouteSnapshot
 import com.homevisit.location.domain.StopLabel
 import com.homevisit.location.domain.SyncConflict
 import com.homevisit.location.domain.SyncQueueStats
+import com.homevisit.location.data.local.VisitEntity
+import com.homevisit.location.domain.VisitKind
 import com.homevisit.location.domain.VisitStatus
 import com.homevisit.location.domain.WorkDayStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -93,11 +95,11 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                         activeVisit = visits
                             .filter { it.status == VisitStatus.Accepted }
                             .minByOrNull { it.createdAtEpochMillis }
-                            ?.let { RouteVisitUi.fromVisit(it.id, it.address, it.clinic, it.income) },
+                            ?.let { RouteVisitUi.fromVisit(it) },
                         routeVisits = visits
                             .filter { it.status == VisitStatus.Accepted }
                             .sortedBy { it.createdAtEpochMillis }
-                            .map { RouteVisitUi.fromVisit(it.id, it.address, it.clinic, it.income) },
+                            .map { RouteVisitUi.fromVisit(it) },
                     )
                 }
             }
@@ -652,6 +654,44 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /**
+     * Работа на точке. Уходит на сервер сразу: он геокодирует адрес и ставит точку
+     * в маршрут — без этого дорога до неё не считалась бы, а в Ленте её бы не было.
+     */
+    fun addOnSite(
+        serverUrl: String,
+        apiKey: String,
+        address: String,
+        minutes: Double,
+        income: Double,
+        clinic: String,
+        startAt: String?,
+        endAt: String?,
+    ) {
+        viewModelScope.launch {
+            val workDayId = ensureActiveDay()
+            routeState.value = routeState.value.copy(isLoading = true, message = "Добавляю работу на точке...")
+            val ok = repository.addOnSiteVisit(
+                serverUrl = serverUrl,
+                apiKey = apiKey,
+                workDayId = workDayId,
+                address = address,
+                income = income,
+                serviceMinutes = minutes,
+                clinic = clinic,
+                startAt = startAt,
+                endAt = endAt,
+            )
+            routeState.value = routeState.value.copy(
+                isLoading = false,
+                message = if (ok) "Работа на точке добавлена в Ленту" else "Не удалось добавить: проверьте адрес и связь",
+            )
+            if (ok) {
+                refreshRoute(serverUrl, apiKey)
+            }
+        }
+    }
+
     fun addOffice(address: String, minutes: Double, income: Double, clinic: String) {
         viewModelScope.launch {
             val workDayId = ensureActiveDay()
@@ -882,15 +922,26 @@ data class RouteVisitUi(
     val address: String,
     val clinic: String,
     val income: Double,
+    val kind: VisitKind = VisitKind.Field,
+    val plannedStartAt: String? = null,
+    val plannedEndAt: String? = null,
+    val serviceMinutes: Double? = null,
 ) {
+    /** Работа на точке — заказ с фиксированным временем: оптимизатор его не двигает. */
+    val isAnchor: Boolean get() = kind == VisitKind.OnSite
+
     companion object {
-        fun fromVisit(localId: String, address: String, clinic: String, income: Double): RouteVisitUi {
+        fun fromVisit(visit: VisitEntity): RouteVisitUi {
             return RouteVisitUi(
-                localId = localId,
-                serverId = localId.removePrefix("server-").toIntOrNull(),
-                address = address,
-                clinic = clinic,
-                income = income,
+                localId = visit.id,
+                serverId = visit.id.removePrefix("server-").toIntOrNull(),
+                address = visit.address,
+                clinic = visit.clinic,
+                income = visit.income,
+                kind = visit.kind,
+                plannedStartAt = visit.plannedStartAt,
+                plannedEndAt = visit.plannedEndAt,
+                serviceMinutes = visit.serviceMinutes,
             )
         }
     }

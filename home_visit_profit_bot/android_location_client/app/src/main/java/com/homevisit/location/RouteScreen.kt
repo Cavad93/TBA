@@ -472,6 +472,7 @@ internal fun FocusOrderCard(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                AnchorTimeLabel(active)
                 GpsHintBlock(gpsHint = gpsHint, onRefresh = onRefreshGpsHint, onComplete = onComplete)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
@@ -522,6 +523,7 @@ internal fun UpNextList(orders: List<RouteVisitUi>, activeLocalId: String?) {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        AnchorTimeLabel(v)
                     }
                 }
             }
@@ -529,6 +531,28 @@ internal fun UpNextList(orders: List<RouteVisitUi>, activeLocalId: String?) {
     }
 }
 
+
+/**
+ * Время работы на точке. Показываем его явно: это заказ-якорь — оптимизатор его не
+ * переставляет, потому что на приём с 9:00 нельзя приехать в другое время.
+ */
+@Composable
+internal fun AnchorTimeLabel(visit: RouteVisitUi) {
+    if (!visit.isAnchor) return
+    val start = timeOfDayText(visit.plannedStartAt)
+    val end = timeOfDayText(visit.plannedEndAt)
+    val window = when {
+        start != null && end != null -> "$start–$end"
+        start != null -> "с $start"
+        else -> null
+    }
+    Text(
+        text = listOfNotNull("На точке", window).joinToString(" · "),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = VerdictColors.edge,
+    )
+}
 
 /**
  * Завершение смены — только здесь, внизу Ленты. Чтобы случайное касание не

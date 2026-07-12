@@ -40,6 +40,11 @@ data class VisitEntity(
     val onSiteMinutes: Double?,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
+    // Работа на точке: заказ с фиксированным временем — оптимизатор его не двигает.
+    val kind: VisitKind = VisitKind.Field,
+    val serviceMinutes: Double? = null,
+    val plannedStartAt: String? = null,
+    val plannedEndAt: String? = null,
 )
 
 @Entity(

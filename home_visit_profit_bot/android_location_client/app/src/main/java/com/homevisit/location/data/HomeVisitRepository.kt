@@ -60,6 +60,7 @@ import com.homevisit.location.domain.SettingsSection
 import com.homevisit.location.domain.StopLabel
 import com.homevisit.location.domain.SyncConflict
 import com.homevisit.location.domain.SyncQueueStats
+import com.homevisit.location.domain.VisitKind
 import com.homevisit.location.domain.VisitStatus
 import com.homevisit.location.domain.WorkDayStatus
 import java.net.HttpURLConnection
@@ -200,6 +201,63 @@ class HomeVisitRepository private constructor(
         dao.saveOfficeEntry(office)
         dao.enqueueSync(sync("office_saved", "office_entry", office.id, now, officePayload(office)))
         return office.id
+    }
+
+    /**
+     * Работа на точке — заказ-якорь в Ленте. Создаём на сервере: он геокодирует
+     * адрес, ставит точку в маршрут (дорога до неё считается) и возвращает id,
+     * по которому заказ потом можно закрыть.
+     */
+    suspend fun addOnSiteVisit(
+        serverUrl: String,
+        apiKey: String,
+        workDayId: String,
+        address: String,
+        income: Double,
+        serviceMinutes: Double,
+        clinic: String,
+        startAt: String?,
+        endAt: String?,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("address", address.trim())
+            .put("income", income)
+            .put("service_minutes", serviceMinutes)
+            .put("clinic", clinic)
+        startAt?.let { body.put("start_at", it) }
+        endAt?.let { body.put("end_at", it) }
+
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/visits/onsite"), apiKey, body)
+            ?: return@withContext false
+        if (!response.optBoolean("ok", false)) {
+            return@withContext false
+        }
+        val visit = response.optJSONObject("visit") ?: return@withContext false
+        val visitId = visit.optInt("id", 0)
+        if (visitId <= 0) {
+            return@withContext false
+        }
+        val now = now()
+        dao.saveVisit(
+            VisitEntity(
+                id = "server-$visitId",
+                workDayId = workDayId,
+                address = visit.optString("address", address),
+                income = visit.optDouble("income", income),
+                clinic = visit.optString("clinic", clinic),
+                status = VisitStatus.Accepted,
+                estimatedDriveMinutes = visit.optDouble("estimated_extra_minutes", 0.0),
+                actualDriveMinutes = null,
+                onSiteMinutes = serviceMinutes,
+                createdAtEpochMillis = now,
+                updatedAtEpochMillis = now,
+                kind = VisitKind.OnSite,
+                serviceMinutes = serviceMinutes,
+                plannedStartAt = startAt,
+                plannedEndAt = endAt,
+            ),
+        )
+        true
     }
 
     suspend fun addTelemedEntry(

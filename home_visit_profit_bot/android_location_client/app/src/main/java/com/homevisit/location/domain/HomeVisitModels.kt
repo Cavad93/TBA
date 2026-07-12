@@ -23,6 +23,20 @@ enum class VisitStatus {
     Cancelled,
 }
 
+/**
+ * Тип заказа. `OnSite` — работа на точке: адрес с фиксированным временем начала и
+ * окончания. В Ленте он якорь — оптимизатор его не переставляет.
+ */
+enum class VisitKind(val apiValue: String) {
+    Field("field"),
+    OnSite("onsite");
+
+    companion object {
+        fun fromApi(value: String?): VisitKind =
+            entries.firstOrNull { it.apiValue == value } ?: Field
+    }
+}
+
 enum class ExpenseCategory(val title: String) {
     Meal("Еда"),
     Coffee("Кофе/энергетик"),

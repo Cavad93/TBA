@@ -169,6 +169,37 @@ def test_onsite_income_is_not_double_counted_in_day_totals(config) -> None:
     assert day.office_minutes == 0
 
 
+def test_create_onsite_returns_route_with_the_anchor(config) -> None:
+    """REST-путь: точка сразу принята, попала в маршрут и вернулась в ответе."""
+    from app.services.mobile_visit_service import MobileVisitService
+
+    with connect(config) as connection:
+        WorkDayRepository(connection).create(
+            "Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31
+        )
+        service = MobileVisitService(connection)
+
+        result = service.create_onsite(
+            {
+                "address": "Клиника на Ленина",
+                "income": 9000,
+                "service_minutes": 240,
+                "start_at": "2026-07-12T09:00:00",
+                "end_at": "2026-07-12T13:00:00",
+                "lat": 59.95,
+                "lon": 30.40,
+            }
+        )
+
+    assert result["ok"]
+    assert result["reason"] == "onsite_added"
+    assert result["visit"]["kind"] == "onsite"
+    assert result["visit"]["planned_start_at"] == "2026-07-12T09:00:00"
+    assert result["visit"]["service_minutes"] == 240
+    # Заказ в маршруте — значит дорога до точки посчитана.
+    assert result["visit"]["id"] in result["route"]["order"]
+
+
 def test_onsite_entry_accepts_empty_company(config) -> None:
     """Список компаний у новичка пуст — работа на точке не должна на этом падать."""
     with connect(config) as connection:

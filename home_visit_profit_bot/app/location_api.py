@@ -156,6 +156,9 @@ def _handler_factory(config: AppConfig):
             if path == "/api/visits/candidate":
                 self._handle_visit_candidate()
                 return
+            if path == "/api/visits/onsite":
+                self._handle_visit_onsite()
+                return
             stop_label_action = re.fullmatch(r"/api/visits/(\d+)/stop-label", path)
             if stop_label_action:
                 self._handle_visit_stop_label(int(stop_label_action.group(1)))
@@ -450,6 +453,20 @@ def _handler_factory(config: AppConfig):
             if result.reason in {"needs_coordinates", "needs_manual_route", "no_active_day"}:
                 status = HTTPStatus.OK
             self._json_response(candidate_result_payload(result), status)
+
+        def _handle_visit_onsite(self) -> None:
+            """Работа на точке — заказ-якорь: сразу принят и сразу в маршруте."""
+            if not _authorize_request(self, config):
+                self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                payload = self._read_json()
+                with connect(config) as connection:
+                    result = MobileVisitService(connection).create_onsite(payload)
+            except (ValueError, TypeError, json.JSONDecodeError) as error:
+                self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            self._json_response(result)
 
         def _handle_visit_action(self, visit_id: int, action: str) -> None:
             if not _authorize_request(self, config):
