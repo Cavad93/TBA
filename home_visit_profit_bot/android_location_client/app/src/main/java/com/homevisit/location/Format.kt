@@ -236,6 +236,9 @@ internal fun qualityWord(value: Int): String = when (value) {
     else -> "отлично"
 }
 
+/** Текстовые настройки, которые допустимо очистить (сервер принимает пустое значение). */
+private val CLEARABLE_TEXT_SETTINGS = setOf("default_start_address", "default_finish_address")
+
 internal fun collectSettingsChanges(
     sections: List<SettingsSection>,
     textEdits: Map<String, String>,
@@ -261,7 +264,14 @@ internal fun collectSettingsChanges(
                 }
                 else -> {
                     val edited = (textEdits[field.key] ?: field.textValue).trim()
-                    if (edited.isNotEmpty() && edited != field.textValue) changes[field.key] = edited
+                    // Пустое значение обычно означает «поле не трогали» и не отправляется.
+                    // Исключение — старт и финиш: их можно осознанно очистить, пока
+                    // пользователь не выбрал шаблон. Остальные текстовые поля сервер
+                    // пустыми не принимает, и отправка пустоты уронила бы синхронизацию.
+                    val clearable = field.key in CLEARABLE_TEXT_SETTINGS
+                    if (edited != field.textValue && (edited.isNotEmpty() || clearable)) {
+                        changes[field.key] = edited
+                    }
                 }
             }
         }

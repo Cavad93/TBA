@@ -108,6 +108,16 @@ def test_update_accepts_values_wrapper_and_ignores_unknown(config) -> None:
     assert _field(result, "fuel_price_per_liter")["value"] == 72
 
 
+def test_start_and_finish_may_stay_empty(config) -> None:
+    """«Дом» больше не подставляется: пока пользователь не завёл шаблоны, старт пуст."""
+    with connect(config) as connection:
+        result = SettingsService(connection).read()
+        assert _field(result, "default_start_address")["value"] == ""
+
+        updated = SettingsService(connection).update({"default_start_address": "  "})
+        assert _field(updated, "default_start_address")["value"] == ""
+
+
 def test_update_rejects_invalid_values(config) -> None:
     with connect(config) as connection:
         service = SettingsService(connection)
@@ -116,7 +126,7 @@ def test_update_rejects_invalid_values(config) -> None:
         with pytest.raises(ValueError):
             service.update({"fuel_price_per_liter": -1})
         with pytest.raises(ValueError):
-            service.update({"default_start_address": "   "})
+            service.update({"address_templates": "   "})
         with pytest.raises(ValueError):
             service.update({"only_unknown_key": 1})
 

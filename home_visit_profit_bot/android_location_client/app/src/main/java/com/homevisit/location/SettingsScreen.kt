@@ -318,6 +318,11 @@ internal fun AppSettingsSection(
     if (fields.isEmpty()) return
 
     SectionHeader(section.title)
+    // Шаблоны нужны Старту и Финишу как источник вариантов — берём их из текущего
+    // состояния редактора, чтобы только что добавленный шаблон сразу был доступен.
+    val templatesField = section.fields.firstOrNull { it.key == "address_templates" }
+    val templates = templatesField?.let { parseAddressTemplates(textEdits[it.key] ?: it.textValue) }.orEmpty()
+
     fields.forEach { field ->
         // Шаблоны адресов хранятся как JSON — вместо сырого текстового поля даём
         // нормальный редактор «название + адрес».
@@ -327,6 +332,19 @@ internal fun AppSettingsSection(
                 label = field.label,
                 templates = parseAddressTemplates(raw),
                 onChange = { items -> textEdits[field.key] = serializeAddressTemplates(items) },
+            )
+            SettingHint(field.hint)
+            return@forEach
+        }
+        // Старт и финиш — не свободный текст, а выбор из своих же шаблонов: «Дом»
+        // раньше был заглушкой, за которой не стояло адреса, и смена начиналась без
+        // координат.
+        if (field.key == "default_start_address" || field.key == "default_finish_address") {
+            DefaultAddressPicker(
+                label = field.label,
+                value = textEdits[field.key] ?: field.textValue,
+                templates = templates,
+                onValue = { textEdits[field.key] = it },
             )
             SettingHint(field.hint)
             return@forEach
@@ -379,6 +397,89 @@ internal fun AppSettingsSection(
     if (section.key == "car") {
         FuelCostPerKmHint(textEdits = textEdits, fields = fields)
     }
+}
+
+/**
+ * Старт или финиш по умолчанию: выбор из шаблонов адресов, которые пользователь завёл
+ * сам, плюс ручной ввод.
+ *
+ * Раньше здесь было текстовое поле со словом «Дом» — заглушкой, за которой не стояло
+ * никакого адреса. Геокодер такое не находит, и смена начиналась вообще без координат
+ * старта: маршрут строить было не от чего. Поэтому здесь честно: либо шаблон, либо
+ * настоящий адрес, либо пусто — и мы об этом предупреждаем.
+ */
+@Composable
+internal fun DefaultAddressPicker(
+    label: String,
+    value: String,
+    templates: List<AddressTemplate>,
+    onValue: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val matched = templates.firstOrNull { it.address == value || it.name.equals(value, ignoreCase = true) }
+    val display = when {
+        matched != null -> "${matched.name} · ${matched.address}"
+        value.isBlank() -> "Не выбрано"
+        else -> value
+    }
+
+    Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(display, modifier = Modifier.weight(1f), textAlign = TextAlign.Start, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = "Выбрать адрес")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (templates.isEmpty()) {
+                DropdownMenuItem(
+                    text = { Text("Сначала добавьте шаблон адреса ниже") },
+                    enabled = false,
+                    onClick = {},
+                )
+            }
+            templates.forEach { template ->
+                DropdownMenuItem(
+                    text = { Text("${template.name} · ${template.address}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    onClick = {
+                        // В настройку кладём АДРЕС, а не название: координаты считаются
+                        // по адресу, за которым закреплён шаблон.
+                        onValue(template.address)
+                        expanded = false
+                    },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("Не выбрано") },
+                onClick = { onValue(""); expanded = false },
+            )
+        }
+    }
+    OutlinedTextField(
+        modifier = Modifier.fillMaxWidth(),
+        value = value,
+        onValueChange = onValue,
+        singleLine = true,
+        label = { Text("Или введите адрес") },
+    )
+    if (value.isNotBlank() && matched == null && !looksLikeAddress(value)) {
+        Text(
+            "«$value» не похоже на адрес и не совпадает ни с одним шаблоном — карта его не найдёт, " +
+                "и смена начнётся без точки старта.",
+            style = MaterialTheme.typography.bodySmall,
+            color = VerdictColors.edge,
+        )
+    }
+}
+
+/**
+ * Похоже ли это на адрес, который вообще можно найти на карте. «Дом» или «Офис» —
+ * ярлык, а не адрес: признак настоящего — номер дома или запятая-разделитель.
+ * Та же проверка есть на сервере (address_resolver.looks_like_address).
+ */
+internal fun looksLikeAddress(value: String): Boolean {
+    val text = value.trim()
+    if (text.length < 4) return false
+    return text.any { it.isDigit() } || text.contains(',')
 }
 
 /** Одно предложение под полем: что это и зачем. Приходит с сервера вместе с настройкой. */

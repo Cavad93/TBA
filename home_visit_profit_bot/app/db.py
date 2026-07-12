@@ -628,8 +628,9 @@ def _ensure_column(db: Database, table: str, column: str, definition: str) -> No
 
 def seed_default_settings(db: Database, config: AppConfig) -> None:
     defaults = {
-        "default_start_address": "Дом",
-        "default_finish_address": "Дом",
+        # Пусто: старт и финиш выбираются из шаблонов, которые пользователь заводит сам.
+        "default_start_address": "",
+        "default_finish_address": "",
         "address_templates": "[]",
         "frequent_income": "0",
         "car_cost_per_km": str(config.car.car_cost_per_km),

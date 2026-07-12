@@ -222,12 +222,12 @@ class MobileApiService:
         # Разворачиваем шаблон («Дом») и геокодируем: без координат старта и финиша
         # маршрут строить не от чего.
         start = resolve_address(
-            _optional_str(payload.get("start_address")) or self.settings.get("default_start_address", "Дом") or "Дом",
+            _optional_str(payload.get("start_address")) or self.settings.get("default_start_address", "") or "",
             self.connection,
             self.settings,
         )
         finish = resolve_address(
-            _optional_str(payload.get("finish_address")) or self.settings.get("default_finish_address", "Дом") or "Дом",
+            _optional_str(payload.get("finish_address")) or self.settings.get("default_finish_address", "") or "",
             self.connection,
             self.settings,
         )

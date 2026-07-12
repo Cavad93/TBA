@@ -301,14 +301,14 @@ def _handler_factory(config: AppConfig):
                 # создавался вообще без координат (по умолчанию там строка «Дом»), и
                 # маршрут строить было не от чего — расчёт откатывался на грубую оценку.
                 start = resolve_address(
-                    str(payload.get("start_address") or settings.get("default_start_address", "Дом") or "Дом"),
+                    str(payload.get("start_address") or settings.get("default_start_address", "") or ""),
                     connection,
                     settings,
                     lat=payload.get("start_lat"),
                     lon=payload.get("start_lon"),
                 )
                 finish = resolve_address(
-                    str(payload.get("finish_address") or settings.get("default_finish_address", "Дом") or "Дом"),
+                    str(payload.get("finish_address") or settings.get("default_finish_address", "") or ""),
                     connection,
                     settings,
                     lat=payload.get("finish_lat"),
