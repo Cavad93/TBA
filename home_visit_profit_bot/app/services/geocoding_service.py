@@ -143,14 +143,25 @@ def detect_base_district_by_location(
     lon: float | None,
     base_districts: list[str],
 ) -> str | None:
-    mapped = _map_municipal_to_administrative(district)
-    if mapped and is_base_district(mapped, base_districts):
-        return mapped
-    if lat is None or lon is None:
-        return None
-    for name, min_lat, max_lat, min_lon, max_lon in _BASE_DISTRICT_BOXES:
-        if name in base_districts and min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
-            return name
+    """Совпадает ли район адреса с одной из зон обслуживания.
+
+    Раньше здесь были зашиты границы трёх районов Петербурга и таблица его
+    муниципальных округов. Это работало ровно для одного города и молча не работало
+    для всех остальных: у любого другого района определение по координатам не
+    срабатывало вовсе. Теперь сравниваем только по названию — оно приходит от
+    геокодера и не зависит от города.
+    """
+    if district and is_base_district(district, base_districts):
+        return _canonical_base_district(district, base_districts)
+    return None
+
+
+def _canonical_base_district(district: str, base_districts: list[str]) -> str | None:
+    """Вернуть название так, как его записал пользователь в зонах обслуживания."""
+    normalized = district.lower().replace(" район", "").strip()
+    for item in base_districts:
+        if item.lower().replace(" район", "").strip() == normalized:
+            return item
     return None
 
 
@@ -301,42 +312,4 @@ def _extract_district(address: dict) -> str | None:
     return None
 
 
-_MUNICIPAL_TO_ADMINISTRATIVE = {
-    "комендантский аэродром": "Приморский",
-    "озеро долгое": "Приморский",
-    "юнтолово": "Приморский",
-    "коломяги": "Приморский",
-    "лахта-ольгино": "Приморский",
-    "чёрная речка": "Приморский",
-    "черная речка": "Приморский",
-    "светлановское": "Выборгский",
-    "сосновское": "Выборгский",
-    "шувалово-озерки": "Выборгский",
-    "сампсониевское": "Выборгский",
-    "парнас": "Выборгский",
-    "гражданка": "Калининский",
-    "академическое": "Калининский",
-    "северный": "Калининский",
-    "пискарёвка": "Калининский",
-    "пискаревка": "Калининский",
-    "финляндский": "Калининский",
-}
 
-_BASE_DISTRICT_BOXES = [
-    ("Приморский", 59.965, 60.125, 30.140, 30.370),
-    ("Выборгский", 60.000, 60.135, 30.245, 30.465),
-    ("Калининский", 59.975, 60.075, 30.335, 30.505),
-]
-
-
-def _map_municipal_to_administrative(district: str | None) -> str | None:
-    if not district:
-        return None
-    normalized = (
-        district.lower()
-        .replace("муниципальный", "")
-        .replace("округ", "")
-        .replace("район", "")
-        .strip()
-    )
-    return _MUNICIPAL_TO_ADMINISTRATIVE.get(normalized)

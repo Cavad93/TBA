@@ -147,8 +147,21 @@ class SettingsRepository:
         return str(value).strip().lower() in {"1", "true", "yes", "on", "да"}
 
     def base_districts(self) -> list[str]:
-        value = self.get("base_districts", "") or ""
-        return [part.strip() for part in value.split(",") if part.strip()]
+        """Названия базовых территорий для сравнения с районом из геокодера.
+
+        Источник — зоны обслуживания (область → город → районы). Если у зоны не
+        указан ни один район, базовым считается весь город. Старый плоский ключ
+        `base_districts` остаётся запасным: у тех, кто настроил его до перехода на
+        зоны, ничего не должно сломаться.
+        """
+        from app.services.base_zones_service import parse_base_zones, zone_district_names
+
+        zones = parse_base_zones(self.get("base_zones", "") or "")
+        names = zone_district_names(zones)
+        if names:
+            return names
+        legacy = self.get("base_districts", "") or ""
+        return [part.strip() for part in legacy.split(",") if part.strip()]
 
 
 class WorkDayRepository:

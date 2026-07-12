@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.repositories import SettingsRepository
+from app.services.base_zones_service import parse_base_zones, serialize_base_zones
 
 
 # Имена клиник не захардкожены: список полностью задаётся настройками
@@ -29,65 +30,139 @@ class SettingField:
     key: str
     section: str
     label: str
-    type: str  # "number" | "text" | "bool" | "list"
+    type: str  # "number" | "text" | "bool" | "list" | "zones"
     default: Any
     min: float | None = None
     max: float | None = None
+    # Одно короткое предложение: что это и зачем. Показывается под названием поля.
+    hint: str = ""
 
 
 SECTION_TITLES: dict[str, str] = {
-    "economics": "Экономика",
-    "car": "Авто",
-    "addresses": "Дом / старт / финиш",
+    "economics": "Деньги",
+    "car": "Машина",
+    "addresses": "Старт и финиш",
     "clinics": "Компании",
-    "districts": "Базовые районы",
-    "routing": "Маршрутизация и OSRM",
+    "districts": "Зоны обслуживания",
+    "routing": "Маршрут и время",
     "gps": "GPS",
-    "fatigue": "Нагрузка и автообучение",
+    "fatigue": "Нагрузка",
 }
 
+# Технические параметры (адрес OSRM, коэффициент дорог, таймауты, запасной расчёт без
+# OSRM) в каталог намеренно не входят: пользователю они ничего не говорят, а ошибка в
+# них ломает расчёт маршрута. Они зафиксированы дефолтами сервера (app/db.py, config).
 SETTINGS_CATALOG: list[SettingField] = [
-    # Экономика
-    SettingField("min_hourly_income", "economics", "Минимум ₽/час", "number", 600.0, min=0),
-    SettingField("min_marginal_hourly_income", "economics", "Минимум ₽/час на адрес", "number", 600.0, min=0),
-    SettingField("outside_zone_min_hourly_income", "economics", "Минимум ₽/час вне зоны", "number", 600.0, min=0),
-    SettingField("outside_zone_min_extra_payment", "economics", "Надбавка вне зоны, ₽", "number", 0.0, min=0),
-    SettingField("daily_income_goal", "economics", "Цель по доходу за день, ₽", "number", 0.0, min=0),
-    SettingField("monthly_income_goal", "economics", "Цель по доходу за месяц, ₽", "number", 0.0, min=0),
-    SettingField("frequent_income", "economics", "Частый доход (тариф по умолчанию), ₽", "number", 0.0, min=0),
-    # Авто
-    SettingField("car_cost_per_km", "car", "Топливо за км, ₽", "number", 17.05, min=0),
-    SettingField("amortization_factor", "car", "Амортизация (× от топлива)", "number", 0.8, min=0),
-    SettingField("fuel_price_per_liter", "car", "Цена литра, ₽", "number", 70.0, min=0),
-    SettingField("fuel_consumption_l_per_100km", "car", "Расход, л/100 км", "number", 10.0, min=0),
+    # Деньги
+    SettingField(
+        "min_hourly_income", "economics", "Минимум ₽/час", "number", 600.0, min=0,
+        hint="Ниже этой ставки за час работа считается невыгодной.",
+    ),
+    SettingField(
+        "min_marginal_hourly_income", "economics", "Минимум ₽/час на заказ", "number", 600.0, min=0,
+        hint="Столько должен приносить сам заказ с учётом дороги до него, иначе он тянет день вниз.",
+    ),
+    SettingField(
+        "outside_zone_min_hourly_income", "economics", "Минимум ₽/час вне зоны", "number", 600.0, min=0,
+        hint="Повышенная планка для заказов за пределами ваших зон обслуживания.",
+    ),
+    SettingField(
+        "outside_zone_min_extra_payment", "economics", "Надбавка вне зоны, ₽", "number", 0.0, min=0,
+        hint="Сколько минимум должны доплатить, чтобы поездка за пределы зоны имела смысл.",
+    ),
+    SettingField(
+        "daily_income_goal", "economics", "Цель за день, ₽", "number", 0.0, min=0,
+        hint="Дневной план — по нему считается прогресс на вкладке «Смена».",
+    ),
+    SettingField(
+        "monthly_income_goal", "economics", "Цель за месяц, ₽", "number", 0.0, min=0,
+        hint="Месячный план — по нему считается прогресс в отчётах.",
+    ),
+    SettingField(
+        "frequent_income", "economics", "Частый тариф, ₽", "number", 0.0, min=0,
+        hint="Ваша обычная цена заказа — подставляется в «Оценку», чтобы не вводить её каждый раз.",
+    ),
+    # Машина. «Топливо за км» не спрашиваем: оно выводится из цены литра и расхода.
+    SettingField(
+        "fuel_price_per_liter", "car", "Цена литра, ₽", "number", 70.0, min=0,
+        hint="Сколько стоит литр топлива — из неё считается стоимость километра.",
+    ),
+    SettingField(
+        "fuel_consumption_l_per_100km", "car", "Расход, л/100 км", "number", 10.0, min=0,
+        hint="Реальный расход вашей машины — вместе с ценой литра даёт стоимость километра.",
+    ),
+    SettingField(
+        "amortization_factor", "car", "Износ машины (× от топлива)", "number", 0.8, min=0,
+        hint="Во сколько раз износ, шины и обслуживание дороже топлива: 0,8 — плюс 80% к расходам на бензин.",
+    ),
     # Адреса
-    SettingField("home_address", "addresses", "Дом", "text", "Дом"),
-    SettingField("default_start_address", "addresses", "Старт по умолчанию", "text", "Дом"),
-    SettingField("default_finish_address", "addresses", "Финиш по умолчанию", "text", "Дом"),
-    # Шаблоны адресов для Старта/Финиша: JSON-массив [{"name":..., "address":...}].
+    SettingField(
+        "default_start_address", "addresses", "Старт по умолчанию", "text", "Дом",
+        hint="Откуда вы обычно выезжаете — подставляется в начало Ленты, в самой Ленте можно поменять.",
+    ),
+    SettingField(
+        "default_finish_address", "addresses", "Финиш по умолчанию", "text", "Дом",
+        hint="Куда возвращаетесь в конце смены — подставляется в конец Ленты, в самой Ленте можно поменять.",
+    ),
+    # Шаблоны адресов: JSON-массив [{"name":..., "address":...}].
     # JSON, а не list, потому что в адресах есть запятые («ул. Ленина, 40»).
-    SettingField("address_templates", "addresses", "Шаблоны адресов", "text", "[]"),
-    # Клиники (значения сеедятся из config.yaml, дальше редактируются пользователем)
-    SettingField("clinics", "clinics", "Компании", "list", []),
-    SettingField("telemed_clinics", "clinics", "Компании удалённых заказов", "list", []),
-    # Базовые районы
-    SettingField("base_districts", "districts", "Базовые районы", "list", []),
-    # Маршрутизация и OSRM
-    SettingField("osrm_url", "routing", "OSRM URL", "text", "https://router.project-osrm.org"),
-    SettingField("routing_fallback_to_estimate", "routing", "Fallback без OSRM", "bool", True),
-    SettingField("straight_line_factor", "routing", "Коэффициент дорог", "number", 1.35, min=0),
-    SettingField("default_route_time_factor", "routing", "Поправка OSRM по времени", "number", 1.0, min=0),
-    SettingField("default_avg_speed_kmh", "routing", "Скорость по умолчанию, км/ч", "number", 30.0, min=0),
-    SettingField("default_service_minutes", "routing", "Время на адресе, мин", "number", 20.0, min=0),
-    SettingField("default_telemed_minutes", "routing", "Удалённые заказы по умолчанию, мин", "number", 3.0, min=0),
-    SettingField("auto_optimize", "routing", "Авто-оптимизация маршрута", "bool", True),
+    SettingField(
+        "address_templates", "addresses", "Шаблоны адресов", "text", "[]",
+        hint="Частые адреса под коротким названием: наберите «Дом» в Оценке — подставится полный адрес.",
+    ),
+    # Компании
+    SettingField(
+        "clinics", "clinics", "Компании", "list", [],
+        hint="От кого вы получаете заказы — список появится в «Оценке». Можно оставить пустым.",
+    ),
+    SettingField(
+        "telemed_clinics", "clinics", "Компании удалённых заказов", "list", [],
+        hint="Из списка выше — те, кто даёт удалённые заказы (без выезда).",
+    ),
+    # Зоны обслуживания: JSON [{"region":..,"city":..,"districts":[..]}].
+    SettingField(
+        "base_zones", "districts", "Зоны обслуживания", "zones", "[]",
+        hint="Где вы работаете обычно: заказы отсюда оцениваются по обычной планке, а всё за их пределами — по повышенной.",
+    ),
+    # Маршрут и время
+    SettingField(
+        "auto_optimize", "routing", "Сам строить порядок заказов", "bool", True,
+        hint="После каждого нового заказа приложение само переставляет Ленту в выгодный порядок.",
+    ),
+    SettingField(
+        "default_service_minutes", "routing", "Время на адресе, мин", "number", 20.0, min=0,
+        hint="Сколько в среднем занимает один заказ на месте — из этого считается время смены.",
+    ),
+    SettingField(
+        "default_avg_speed_kmh", "routing", "Средняя скорость, км/ч", "number", 30.0, min=0,
+        hint="Запасная оценка скорости, когда карта не смогла построить маршрут.",
+    ),
+    SettingField(
+        "default_telemed_minutes", "routing", "Удалённый заказ, мин", "number", 3.0, min=0,
+        hint="Сколько занимает один удалённый заказ — подставляется по умолчанию.",
+    ),
     # GPS
-    SettingField("location_geofence_radius_m", "gps", "Радиус геозоны, м", "number", 120.0, min=0),
-    SettingField("location_dwell_minutes", "gps", "Порог стоянки, мин", "number", 12.0, min=0),
-    SettingField("location_notification_cooldown_minutes", "gps", "Cooldown уведомлений, мин", "number", 60.0, min=0),
-    # Усталость
-    SettingField("fatigue_enabled", "fatigue", "Учёт нагрузки", "bool", True),
-    SettingField("fatigue_learning_enabled", "fatigue", "Автообучение нагрузки", "bool", True),
+    SettingField(
+        "location_geofence_radius_m", "gps", "Радиус адреса, м", "number", 120.0, min=0,
+        hint="Насколько близко нужно подъехать, чтобы приложение поняло: вы на адресе.",
+    ),
+    SettingField(
+        "location_dwell_minutes", "gps", "Долгая остановка, мин", "number", 12.0, min=0,
+        hint="Сколько простоять у адреса, чтобы пришло уведомление «закрыть заказ».",
+    ),
+    SettingField(
+        "location_notification_cooldown_minutes", "gps", "Пауза между уведомлениями, мин", "number", 60.0, min=0,
+        hint="Чтобы приложение не напоминало об одной и той же остановке слишком часто.",
+    ),
+    # Нагрузка
+    SettingField(
+        "fatigue_enabled", "fatigue", "Считать нагрузку", "bool", True,
+        hint="Приложение следит за переработкой и запасом сил и предупреждает о перегрузе.",
+    ),
+    SettingField(
+        "fatigue_learning_enabled", "fatigue", "Подстраивать под вас", "bool", True,
+        hint="Оценка нагрузки уточняется по вашим же ответам о самочувствии.",
+    ),
 ]
 
 _FIELD_BY_KEY: dict[str, SettingField] = {field.key: field for field in SETTINGS_CATALOG}
@@ -134,6 +209,9 @@ def _read_value(settings: SettingsRepository, field: SettingField) -> Any:
         if raw is None:
             return list(field.default)
         return _parse_list(raw)
+    if field.type == "zones":
+        raw = settings.get(field.key)
+        return raw if raw else "[]"
     raw = settings.get(field.key)
     return raw if raw is not None else str(field.default)
 
@@ -154,6 +232,9 @@ def _coerce(field: SettingField, value: Any) -> str:
         return "true" if _parse_bool(value) else "false"
     if field.type == "list":
         return _stored_list(_parse_list(value))
+    if field.type == "zones":
+        # Нормализуем через парсер: кривой JSON не должен попасть в хранилище.
+        return serialize_base_zones(parse_base_zones(value))
     text = str(value).strip()
     if not text:
         raise ValueError(f"{field.key}: значение не может быть пустым")
@@ -184,6 +265,7 @@ class SettingsService:
                     "default": field.default,
                     "min": field.min,
                     "max": field.max,
+                    "hint": field.hint,
                 }
             )
         return {

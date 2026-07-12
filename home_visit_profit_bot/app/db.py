@@ -597,7 +597,6 @@ def _ensure_column(db: Database, table: str, column: str, definition: str) -> No
 
 def seed_default_settings(db: Database, config: AppConfig) -> None:
     defaults = {
-        "home_address": "Дом",
         "default_start_address": "Дом",
         "default_finish_address": "Дом",
         "address_templates": "[]",
@@ -616,6 +615,8 @@ def seed_default_settings(db: Database, config: AppConfig) -> None:
         "fatigue_learning_enabled": "true",
         "fatigue_learning_weights_json": "{}",
         "base_districts": ", ".join(config.geo.base_districts),
+        # Зоны обслуживания: область → город → районы. Пусто — пользователь задаёт сам.
+        "base_zones": "[]",
         "clinics": ", ".join(config.geo.clinics),
         "telemed_clinics": ", ".join(config.geo.telemed_clinics),
         "default_avg_speed_kmh": str(config.defaults.avg_speed_kmh),

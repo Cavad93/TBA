@@ -21,16 +21,13 @@ def test_parse_coordinates_rejects_out_of_range_values() -> None:
     assert parse_coordinates("159.9386, 30.3141") is None
 
 
-def test_detect_base_district_from_municipal_name() -> None:
+def test_detect_base_district_matches_zone_by_name_in_any_city() -> None:
+    """Зоны обслуживания задаёт пользователь — никаких зашитых районов и границ."""
     assert (
-        detect_base_district_by_location(
-            "округ Комендантский аэродром",
-            59.99822,
-            30.28202,
-            ["Приморский", "Выборгский", "Калининский"],
-        )
-        == "Приморский"
+        detect_base_district_by_location("Ленинский район", 55.75, 37.62, ["Ленинский", "Советский"])
+        == "Ленинский"
     )
+    assert detect_base_district_by_location("Кировский", 55.75, 37.62, ["Ленинский"]) is None
 
 
 def test_geocode_empty_nominatim_payload_returns_none(monkeypatch) -> None:

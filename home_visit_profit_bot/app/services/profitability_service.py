@@ -21,6 +21,20 @@ def calculate_car_expenses(car_km: float, fuel_cost_per_km: float, amortization_
     return fuel_expenses, amortization_expenses, fuel_expenses + amortization_expenses
 
 
+def fuel_cost_per_km(settings_repo: SettingsRepository) -> float:
+    """Стоимость километра — из цены литра и расхода, а не отдельной настройкой.
+
+    Спрашивать у пользователя «топливо за км» бессмысленно: он знает цену на
+    заправке и расход своей машины, а рубли за километр — это уже наш арифметический
+    вывод. Раньше это была третья независимая настройка, и она расходилась с двумя
+    первыми: 70 ₽/л × 10 л/100 км = 7 ₽/км, а в настройке стояло 17,05 ₽/км — то есть
+    план и факт считались по разным ставкам.
+    """
+    price_per_liter = settings_repo.get_float("fuel_price_per_liter", 70.0)
+    consumption_l_per_100km = settings_repo.get_float("fuel_consumption_l_per_100km", 10.0)
+    return price_per_liter * consumption_l_per_100km / 100
+
+
 def calculate_day_income(day: WorkDay, visits: list[Visit]) -> float:
     visit_income = sum(visit.income for visit in visits if visit.status in {"accepted", "completed", "candidate"})
     return (
@@ -60,12 +74,12 @@ def calculate_day_profitability(
     *,
     strict_routing: bool = False,
 ) -> tuple[float, float, float, float, RouteSummary]:
-    fuel_cost_per_km = settings_repo.get_float("car_cost_per_km", 17.05)
+    cost_per_km = fuel_cost_per_km(settings_repo)
     amortization_factor = settings_repo.get_float("amortization_factor", 0.8)
     service_minutes = day.planned_service_minutes
     route = calculate_route_summary(day, visits, settings_repo, strict_routing=strict_routing)
     total_income = calculate_day_income(day, visits)
-    total_expenses = calculate_known_expenses(day, route.total_km, fuel_cost_per_km, amortization_factor)
+    total_expenses = calculate_known_expenses(day, route.total_km, cost_per_km, amortization_factor)
     net_profit = total_income - total_expenses
     total_minutes = route.total_minutes + route.visits_count * service_minutes + day.telemed_minutes + day.office_minutes
     return net_profit, total_minutes, route.total_km, route.total_minutes, route
@@ -147,7 +161,7 @@ def calculate_candidate_impact(
     *,
     strict_routing: bool = False,
 ) -> CandidateCalculation:
-    fuel_cost_per_km = settings_repo.get_float("car_cost_per_km", 17.05)
+    cost_per_km = fuel_cost_per_km(settings_repo)
     amortization_factor = settings_repo.get_float("amortization_factor", 0.8)
     min_hourly = settings_repo.get_float("min_hourly_income", 600)
     min_marginal_hourly = settings_repo.get_float("min_marginal_hourly_income", min_hourly)
@@ -170,7 +184,7 @@ def calculate_candidate_impact(
     paid_extra_km = max(0.0, extra_km)
     paid_extra_drive_minutes = max(0.0, extra_drive_minutes)
     extra_total_minutes = paid_extra_drive_minutes + service_minutes
-    _, _, extra_car_cost = calculate_car_expenses(paid_extra_km, fuel_cost_per_km, amortization_factor)
+    _, _, extra_car_cost = calculate_car_expenses(paid_extra_km, cost_per_km, amortization_factor)
     marginal_profit = candidate.income - extra_car_cost
     marginal_hourly = _safe_hourly(marginal_profit, extra_total_minutes)
 
@@ -199,7 +213,7 @@ def calculate_candidate_impact(
         extra_total_minutes=extra_total_minutes,
         extra_car_cost=extra_car_cost,
         before_hourly=before_hourly,
-        fuel_cost_per_km=fuel_cost_per_km,
+        fuel_cost_per_km=cost_per_km,
         amortization_factor=amortization_factor,
         min_hourly=min_hourly,
         min_marginal_hourly=min_marginal_hourly,
@@ -458,8 +472,14 @@ def _finish_point(day: WorkDay) -> Point | None:
 
 
 def _fallback_enabled(settings_repo: SettingsRepository) -> bool:
-    value = settings_repo.get("routing_fallback_to_estimate", "true") or "true"
-    return value.strip().lower() in {"1", "true", "yes", "да", "on"}
+    """Запасной расчёт маршрута включён всегда.
+
+    Когда сервис карт недоступен, расстояние оценивается по прямой с поправкой на
+    дороги. Раньше это был тумблер в настройках, но выключать его незачем: без
+    запасного расчёта оценка заказа просто переставала бы работать при любом сбое
+    карт. Пользователю такой переключатель ничего не даёт, а сломать может всё.
+    """
+    return True
 
 
 def _zero_tiny(value: float, *, epsilon: float) -> float:

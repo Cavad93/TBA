@@ -147,10 +147,17 @@ def test_car_expenses_include_fuel_and_amortization() -> None:
         )
     ]
 
+    # Стоимость километра больше не отдельная настройка: 50 ₽/л × 20 л/100 км = 10 ₽/км.
     net_profit, *_ = calculate_day_profitability(
         day,
         visits,
-        FakeSettings({"car_cost_per_km": 10, "amortization_factor": 0.8}),
+        FakeSettings(
+            {
+                "fuel_price_per_liter": 50,
+                "fuel_consumption_l_per_100km": 20,
+                "amortization_factor": 0.8,
+            }
+        ),
     )
 
     assert net_profit == 820

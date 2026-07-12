@@ -18,6 +18,7 @@ from app.repositories import (
     WorkDayRepository,
 )
 from app.services.clinic_report_service import ClinicBreakdown, build_active_clinic_breakdown, build_period_clinic_breakdown
+from app.services.profitability_service import fuel_cost_per_km as settings_fuel_cost_per_km
 from app.services.fatigue_service import estimate_active_day_fatigue
 
 
@@ -49,7 +50,7 @@ class MobileReportService:
         telemed_entries = self.telemed.list_for_day(day.id)
         office_entries = self.office.list_for_day(day.id)
 
-        fuel_cost_per_km = self.settings.get_float("car_cost_per_km", 17.05)
+        fuel_cost_per_km = settings_fuel_cost_per_km(self.settings)
         amortization_factor = self.settings.get_float("amortization_factor", 0.8)
         route_km = sum(visit.estimated_extra_km for visit in active_visits)
         route_minutes = sum(visit.estimated_extra_minutes for visit in active_visits)
