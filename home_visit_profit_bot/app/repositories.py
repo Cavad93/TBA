@@ -80,7 +80,19 @@ def _visit_from_row(row: Any) -> Visit:
         estimated_day_hourly_before=row["estimated_day_hourly_before"],
         estimated_day_hourly_after=row["estimated_day_hourly_after"],
         completed_at=row["completed_at"],
+        kind=_row_value(row, "kind") or "field",
+        service_minutes=float(_row_value(row, "service_minutes") or 0),
+        planned_start_at=_row_value(row, "planned_start_at"),
+        planned_end_at=_row_value(row, "planned_end_at"),
     )
+
+
+def _row_value(row: Any, column: str) -> Any:
+    """Безопасное чтение колонки: строки старых визитов её могут не иметь."""
+    try:
+        return row[column]
+    except (KeyError, IndexError):
+        return None
 
 
 def _driving_from_row(row: Any | None) -> DrivingBehaviorDaily | None:
@@ -330,6 +342,49 @@ class VisitRepository:
                 income,
                 route_km,
                 route_minutes,
+                now_iso(),
+            ),
+        )
+        self.connection.commit()
+        return self.get(int(new_id))
+
+    def create_onsite(
+        self,
+        day_id: int,
+        address: str,
+        income: float,
+        service_minutes: float,
+        planned_start_at: str | None,
+        planned_end_at: str | None,
+        *,
+        lat: float | None = None,
+        lon: float | None = None,
+        clinic: str | None = None,
+        district: str | None = None,
+        is_base_district: bool = False,
+    ) -> Visit:
+        """Работа на точке — сразу принятый заказ-якорь (его не оценивают, на него едут)."""
+        new_id = self.connection.insert(
+            """
+            INSERT INTO visits(
+                work_day_id, status, address, normalized_address, clinic, district, is_base_district,
+                lat, lon, income, estimated_extra_km, estimated_extra_minutes,
+                kind, service_minutes, planned_start_at, planned_end_at, created_at
+            ) VALUES (?, 'accepted', ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'onsite', ?, ?, ?, ?)
+            """,
+            (
+                day_id,
+                address,
+                address,
+                clinic,
+                district,
+                int(is_base_district),
+                lat,
+                lon,
+                income,
+                service_minutes,
+                planned_start_at,
+                planned_end_at,
                 now_iso(),
             ),
         )

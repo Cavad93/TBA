@@ -66,9 +66,15 @@ class MobileReportService:
             + day.toll_compensation
             + day.clinic_compensation
         )
+        # У работы на точке своя продолжительность (приём с 9 до 13 — это не 20 минут
+        # обычного визита), поэтому считаем по заказам, а не по среднему на визит.
+        service_minutes = sum(
+            visit.service_minutes if visit.kind == "onsite" else day.planned_service_minutes
+            for visit in active_visits
+        )
         total_work_minutes = (
             route_minutes
-            + len(active_visits) * day.planned_service_minutes
+            + service_minutes
             + day.telemed_minutes
             + day.office_minutes
         )

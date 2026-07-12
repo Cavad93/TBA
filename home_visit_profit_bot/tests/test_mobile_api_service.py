@@ -157,13 +157,20 @@ def test_mobile_sync_saves_work_items_and_aggregates(config) -> None:
     assert day.sleep_hours == 6.5
     assert day.sleep_quality == 4
     assert day.break_hours_before == 12
-    assert len(visits) == 1
-    assert visits[0]["status"] == "accepted"
-    assert len(offices) == 1
+    # Работа на точке теперь тоже заказ в Ленте (kind='onsite'), а не агрегат дня:
+    # выездной заказ + точка = два визита, доход точки приходит через визит,
+    # поэтому office_income остаётся нулевым.
+    assert len(visits) == 2
+    assert {visit["kind"] for visit in visits} == {"field", "onsite"}
+    assert all(visit["status"] == "accepted" for visit in visits)
+    onsite = next(visit for visit in visits if visit["kind"] == "onsite")
+    assert onsite["income"] == 5000
+    assert onsite["service_minutes"] == 120
+    assert len(offices) == 0
     assert len(telemed) == 1
     assert len(expenses) == 1
-    assert day.office_income == 5000
-    assert day.office_minutes == 120
+    assert day.office_income == 0
+    assert day.office_minutes == 0
     assert day.telemed_income == 700
     assert day.telemed_minutes == 3
     assert day.coffee_expenses == 350

@@ -90,6 +90,10 @@ CREATE TABLE IF NOT EXISTS visits (
     estimated_day_hourly_after REAL,
     verdict TEXT,
     completed_at TEXT,
+    kind TEXT DEFAULT 'field',
+    service_minutes REAL DEFAULT 0,
+    planned_start_at TEXT,
+    planned_end_at TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY(work_day_id) REFERENCES work_days(id)
 );
@@ -517,6 +521,11 @@ def _ensure_columns(db: Database) -> None:
     _ensure_column(db, "visits", "clinic", "TEXT")
     # Вердикт заказа ('go'|'edge'|'skip'), вычисленный из решения профитабельности.
     _ensure_column(db, "visits", "verdict", "TEXT")
+    # Работа на точке: заказ-якорь с фиксированным временем и продолжительностью.
+    _ensure_column(db, "visits", "kind", "TEXT DEFAULT 'field'")
+    _ensure_column(db, "visits", "service_minutes", "REAL DEFAULT 0")
+    _ensure_column(db, "visits", "planned_start_at", "TEXT")
+    _ensure_column(db, "visits", "planned_end_at", "TEXT")
     _ensure_column(db, "work_days", "telemed_minutes", "REAL DEFAULT 0")
     _ensure_column(db, "work_days", "office_income", "REAL DEFAULT 0")
     _ensure_column(db, "work_days", "office_minutes", "REAL DEFAULT 0")

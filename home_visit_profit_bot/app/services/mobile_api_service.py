@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from app.models import EndDayData
 from app.repositories import (
+    AddressCacheRepository,
     DailyStatsRepository,
     ExpenseRepository,
     FatigueFeedbackRepository,
@@ -17,6 +18,7 @@ from app.repositories import (
     WorkDayRepository,
     now_iso,
 )
+from app.services.geocoding_service import GeocodingError, geocode_address, is_base_district
 from app.services.settings_service import (
     SettingsService,
     allowed_clinics,
@@ -291,24 +293,66 @@ class MobileApiService:
         return visit.id
 
     def _save_office(self, client_entity_id: str, payload: dict[str, Any]) -> int:
+        """Работа на точке — заказ-якорь в Ленте, а не отдельный агрегат дня.
+
+        Раньше это была запись в office_entries и прибавка к office_income. Тогда
+        дорога до точки нигде не считалась, а самой точки не было в маршруте.
+        Теперь это обычный принятый заказ (kind='onsite') с фиксированным временем:
+        маршрут до него строится как до любого адреса, а доход приходит через визит —
+        поэтому office_income больше не наращиваем, иначе он посчитался бы дважды.
+        """
         mapped = self._mapped(client_entity_id, "office_entry")
         if mapped is not None:
             self._log_mapped_entity_conflict(client_entity_id, "office_entry", mapped, payload)
             return mapped
         day_id = self._require_day_id(_required_str(payload, "work_day_id"))
+        address = _required_str(payload, "address")
         income = _non_negative_float(payload.get("income"))
         minutes = _non_negative_float(payload.get("minutes"))
-        server_id = self.office.add(
+        # Компания необязательна и произвольна — как у обычного заказа.
+        clinic = _optional_str(payload.get("clinic")) or ""
+        lat = payload.get("lat")
+        lon = payload.get("lon")
+
+        base_districts = self.settings.base_districts()
+        district = None
+        if lat is None or lon is None:
+            geo = self._geocode(address, base_districts)
+            if geo is not None:
+                lat, lon, district = geo.lat, geo.lon, geo.district
+
+        visit = self.visits.create_onsite(
             day_id=day_id,
-            address=_required_str(payload, "address"),
-            clinic=_clinic(payload, allowed_clinics(self.settings)),
+            address=address,
             income=income,
-            minutes=minutes,
+            service_minutes=minutes,
+            planned_start_at=_optional_str(payload.get("start_at")),
+            planned_end_at=_optional_str(payload.get("end_at")),
+            lat=float(lat) if lat is not None else None,
+            lon=float(lon) if lon is not None else None,
+            clinic=clinic,
+            district=district,
+            is_base_district=is_base_district(district, base_districts),
         )
-        self.days.add_money(day_id, "office_income", income)
-        self.days.add_money(day_id, "office_minutes", minutes)
-        self._map(client_entity_id, "office_entry", server_id)
-        return server_id
+        self._map(client_entity_id, "office_entry", visit.id)
+        return visit.id
+
+    def _geocode(self, address: str, base_districts: list[str]):
+        """Координаты точки нужны, чтобы посчитать дорогу до неё. Без них заказ всё
+        равно сохраняем — он просто не попадёт в оптимизацию маршрута."""
+        try:
+            return geocode_address(
+                address,
+                base_districts,
+                cache_repo=AddressCacheRepository(self.connection),
+                default_city=self.settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург",
+                default_region=self.settings.get("default_region", "Ленинградская область") or "Ленинградская область",
+                nominatim_url=self.settings.get("nominatim_url", "https://nominatim.openstreetmap.org") or "https://nominatim.openstreetmap.org",
+                user_agent=self.settings.get("geo_user_agent", "home-visit-profit-bot/1.0") or "home-visit-profit-bot/1.0",
+                timeout_seconds=self.settings.get_float("request_timeout_seconds", 10),
+            )
+        except GeocodingError:
+            return None
 
     def _save_telemed(self, client_entity_id: str, payload: dict[str, Any]) -> int:
         mapped = self._mapped(client_entity_id, "telemed_entry")

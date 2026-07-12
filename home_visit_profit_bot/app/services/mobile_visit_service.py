@@ -429,6 +429,10 @@ def visit_payload(visit: Visit | None) -> dict[str, Any] | None:
         "estimated_day_hourly_before": visit.estimated_day_hourly_before,
         "estimated_day_hourly_after": visit.estimated_day_hourly_after,
         "completed_at": visit.completed_at,
+        "kind": visit.kind,
+        "service_minutes": visit.service_minutes,
+        "planned_start_at": visit.planned_start_at,
+        "planned_end_at": visit.planned_end_at,
     }
 
 

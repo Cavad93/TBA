@@ -73,6 +73,17 @@ class Visit:
     estimated_day_hourly_after: float | None = None
     completed_at: str | None = None
     clinic: str | None = None
+    # 'field' — обычный выездной заказ, 'onsite' — работа на точке: адрес с
+    # фиксированным временем начала и окончания. Оптимизатор такой заказ не
+    # двигает (якорь), но дорогу до него считает как до любого другого.
+    kind: str = "field"
+    service_minutes: float = 0.0
+    planned_start_at: str | None = None
+    planned_end_at: str | None = None
+
+    @property
+    def is_anchor(self) -> bool:
+        return self.kind == "onsite"
 
 
 @dataclass(frozen=True)

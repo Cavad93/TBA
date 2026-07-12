@@ -63,7 +63,7 @@ def optimize_route(
         timeout_seconds=timeout_seconds,
         duration_factor=duration_factor,
     )
-    order_indices = _best_order(matrix, len(route_visits))
+    order_indices = _best_order(matrix, len(route_visits), _anchor_indices(route_visits))
     return _summary_from_order(points, matrix, order_indices)
 
 
@@ -91,13 +91,30 @@ def optimize_route_estimated(
     )
     if not route_visits:
         return _summary_from_order(points, matrix, [])
-    order_indices = _best_order(matrix, len(route_visits))
+    order_indices = _best_order(matrix, len(route_visits), _anchor_indices(route_visits))
     return _summary_from_order(points, matrix, order_indices)
 
 
-def _best_order(matrix: DistanceMatrix, visits_count: int) -> list[int]:
+def _anchor_indices(route_visits: list[Visit]) -> list[int]:
+    """Позиции работ на точке в матрице (1..n), в порядке времени начала.
+
+    Между собой якоря упорядочены временем: приём с 9:00 не может оказаться
+    после приёма с 14:00, как бы это ни было выгодно по километражу.
+    """
+    anchors = [
+        (index + 1, visit)
+        for index, visit in enumerate(route_visits)
+        if visit.kind == "onsite"
+    ]
+    anchors.sort(key=lambda item: (item[1].planned_start_at or "", item[0]))
+    return [index for index, _ in anchors]
+
+
+def _best_order(matrix: DistanceMatrix, visits_count: int, anchors: list[int] | None = None) -> list[int]:
     visit_indices = list(range(1, visits_count + 1))
     finish_index = visits_count + 1
+    if anchors:
+        return _order_around_anchors(matrix, visit_indices, anchors, finish_index)
     if visits_count <= 8:
         return min(
             permutations(visit_indices),
@@ -105,6 +122,33 @@ def _best_order(matrix: DistanceMatrix, visits_count: int) -> list[int]:
         )
     order = _nearest_neighbor_order(matrix, visit_indices, finish_index)
     return _two_opt(matrix, order, finish_index)
+
+
+def _order_around_anchors(
+    matrix: DistanceMatrix,
+    visit_indices: list[int],
+    anchors: list[int],
+    finish_index: int,
+) -> list[int]:
+    """Якоря стоят на своих местах, остальные заказы встраиваются вокруг них.
+
+    Каждый гибкий заказ ставим туда, где он добавляет меньше всего времени в пути
+    (cheapest insertion). Полный перебор здесь не подходит: он переставил бы и
+    якоря, а у них фиксированное время.
+    """
+    order = list(anchors)
+    flexible = [index for index in visit_indices if index not in anchors]
+    for index in flexible:
+        best_position = 0
+        best_cost = float("inf")
+        for position in range(len(order) + 1):
+            candidate = order[:position] + [index] + order[position:]
+            cost = _route_minutes(matrix, candidate, finish_index)
+            if cost < best_cost:
+                best_cost = cost
+                best_position = position
+        order.insert(best_position, index)
+    return order
 
 
 def _route_minutes(matrix: DistanceMatrix, order: list[int], finish_index: int) -> float:

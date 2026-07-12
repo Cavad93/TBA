@@ -129,7 +129,6 @@ import com.homevisit.location.domain.SettingField
 import com.homevisit.location.domain.SettingType
 import com.homevisit.location.domain.SettingsSection
 import com.homevisit.location.domain.EndDayDetails
-import com.homevisit.location.domain.ExpenseCategory
 import com.homevisit.location.domain.FatigueCorrelationCell
 import com.homevisit.location.domain.FatigueCorrelationReport
 import com.homevisit.location.domain.FatigueSnapshot
@@ -524,7 +523,11 @@ internal fun EvaluateForm(
     }
 }
 
-/** Свёрнутый блок прочих записей (точка/удалёнка/расход) — вне основного потока оценки. */
+/**
+ * Свёрнутый блок прочих записей — вне основного потока оценки: работа на точке и
+ * удалённая работа. Расходы отсюда убраны: их спрашивает мастер завершения смены,
+ * одним списком и по памяти всего дня, а не по одному в течение смены.
+ */
 @Composable
 internal fun OtherEntriesSection(uiState: HomeVisitUiState, workActions: WorkActions) {
     var expanded by rememberSaveable { mutableStateOf(false) }
@@ -547,7 +550,7 @@ internal fun OtherEntriesSection(uiState: HomeVisitUiState, workActions: WorkAct
     }
     if (expanded) {
         OptionGrid(
-            options = listOf(WorkForm.Office, WorkForm.Telemed, WorkForm.Expense),
+            options = listOf(WorkForm.Office, WorkForm.Telemed),
             selected = form,
             label = { it.title() },
             onSelect = { form = it },
@@ -555,8 +558,7 @@ internal fun OtherEntriesSection(uiState: HomeVisitUiState, workActions: WorkAct
         when (form) {
             WorkForm.Office -> OfficeInputCard(uiState.clinics.all, workActions.onAddOffice)
             WorkForm.Telemed -> TelemedInputCard(uiState.clinics.telemed, workActions.onAddTelemed)
-            WorkForm.Expense -> ExpenseInputCard(workActions.onAddExpense)
-            WorkForm.Visit -> Unit
+            WorkForm.Expense, WorkForm.Visit -> Unit
         }
     }
 }
@@ -803,42 +805,6 @@ internal fun TelemedInputCard(clinics: List<String>, onSubmit: (Double, Double, 
             },
         ) {
             Text("Сохранить удалённый заказ")
-        }
-    }
-}
-
-@Composable
-internal fun ExpenseInputCard(onSubmit: (ExpenseCategory, Double, String) -> Unit) {
-    var category by rememberSaveable { mutableStateOf(ExpenseCategory.Meal) }
-    var amountText by rememberSaveable { mutableStateOf("") }
-    var comment by rememberSaveable { mutableStateOf("") }
-    val amount = parseNumber(amountText)
-
-    InputCard("Расход") {
-        OptionGrid(
-            options = ExpenseCategory.entries.toList(),
-            selected = category,
-            label = { it.title },
-            onSelect = { category = it },
-        )
-        MoneyField(value = amountText, onValueChange = { amountText = it }, label = "Сумма")
-        OutlinedTextField(
-            modifier = Modifier.fillMaxWidth(),
-            value = comment,
-            onValueChange = { comment = it },
-            label = { Text("Комментарий") },
-            singleLine = true,
-        )
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            enabled = amount != null,
-            onClick = {
-                onSubmit(category, amount ?: 0.0, comment)
-                amountText = ""
-                comment = ""
-            },
-        ) {
-            Text("Сохранить расход")
         }
     }
 }
