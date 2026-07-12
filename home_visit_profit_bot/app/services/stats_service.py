@@ -12,8 +12,10 @@ from app.repositories import (
     VisitRepository,
     WorkDayRepository,
 )
+from app.services.cleanup_service import cleanup
 from app.services.day_metrics_service import build_closed_day_metrics, load_baselines, persist_day_metrics
 from app.services.fatigue_service import estimate_active_day_fatigue, stop_complexity_for_day
+from app.services.gps_metrics_service import collect as collect_gps_metrics
 from app.services.indices_service import economy_index
 from app.services.optimization_service import optimize_route
 from app.services.profitability_service import calculate_car_expenses
@@ -136,6 +138,21 @@ def finalize_day(
     )
     metrics["route_time_factor"] = round(route_time_factor, 2)
 
+    # Метрики, которые всё это время лежали в GPS-треке и не считались:
+    # непрерывная езда, остановки без причины, лишние километры сверх плана.
+    gps = collect_gps_metrics(
+        connection,
+        day.id,
+        planned_km=sum(max(0.0, visit.estimated_extra_km) for visit in completed_visits),
+        actual_km=data.actual_km,
+    )
+    if gps.continuous_drive_minutes > 0:
+        metrics["continuous_drive_minutes"] = gps.continuous_drive_minutes
+    if gps.idle_stop_minutes > 0:
+        metrics["idle_stop_minutes"] = gps.idle_stop_minutes
+    if gps.route_error_km > 0:
+        metrics["route_error_km"] = gps.route_error_km
+
     fatigue = estimate_active_day_fatigue(
         day=day,
         visits=completed_visits,
@@ -247,6 +264,12 @@ def finalize_day(
         },
     )
     stats_repo.create(day.id, stats)
+
+    # Очистка по сроку хранения — при закрытии смены, а не отдельной задачей по
+    # расписанию. Под RLS запрос видит только данные этого пользователя, а закрытие
+    # смены — единственный момент, когда мы точно знаем: всё, что нужно было из сырья,
+    # уже свёрнуто в метрики и личную норму.
+    cleanup(connection)
     return stats
 
 

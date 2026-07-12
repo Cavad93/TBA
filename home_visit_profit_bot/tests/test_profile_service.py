@@ -22,7 +22,13 @@ def test_profile_empty_returns_neutral_defaults(config) -> None:
     # Вождение без данных: максимально аккуратный балл, самосравнение нейтральное.
     assert payload["driving"]["score10"] == 10.0
     assert payload["driving"]["self_rating"]["stars"] == 3
-    assert payload["driving"]["speeding_per100km"] == 0.0
+    # Метрики «превышение скорости» здесь быть НЕ должно: чтобы знать превышение,
+    # нужен лимит дороги, а мы его ниоткуда не берём. Раньше она отдавалась
+    # захардкоженным нулём — то есть пользователю показывалась выдуманная цифра.
+    assert "speeding_per100km" not in payload["driving"]
+    # Индексы без истории не показываем: цифра из воздуха хуже честного «нет данных».
+    assert payload["indices"]["has_data"] is False
+    assert payload["indices"]["need_more_shifts"] == 7
 
 
 def test_profile_with_active_day_reports_wellbeing_and_driving(config) -> None:

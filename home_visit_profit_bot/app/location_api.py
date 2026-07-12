@@ -15,10 +15,14 @@ from app.database import current_user_id
 from app.db import connect
 from app.repositories import (
     DailyStatsRepository,
+    DayMetricRepository,
     DrivingBehaviorRepository,
+    DrivingSegmentRepository,
+    FatigueFeedbackRepository,
     LocationEventRepository,
     LocationSampleRepository,
     SettingsRepository,
+    UserBaselineRepository,
     VisitRepository,
     WorkDayLocationRepository,
     WorkDayRepository,
@@ -26,6 +30,8 @@ from app.repositories import (
 from app.services.address_resolver import resolve_address
 from app.services.auth_service import AuthError, AuthService
 from app.services.day_summary_service import build_end_day_preview, preview_payload
+from app.services.driving_service import save_segment as save_driving_segment
+from app.services.feedback_policy_service import should_ask_feedback
 from app.services.home_service import HomeService
 from app.services.location_service import calculate_location_day_estimate, process_location_update
 from app.services.mobile_api_service import MobileApiService
@@ -234,9 +240,18 @@ def _handler_factory(config: AppConfig):
                     location_state=location_state,
                     settings=settings,
                 )
+                active_day = days.active()
+                segment_index = (
+                    len(visits.list_for_day(active_day.id, ("completed",))) if active_day else 0
+                )
 
             # Проактивное уведомление теперь тянет приложение через
             # GET /api/visits/current-gps (pull вместо Telegram push).
+            #
+            # segment_index — номер текущего отрезка пути: сколько адресов уже закрыто.
+            # Телефон сам не знает, когда заказ завершён (это происходит на сервере),
+            # поэтому границу отрезка сообщаем ему мы. Увидев новый номер, клиент
+            # отправляет накопленную телеметрию за прошлый отрезок и обнуляет счётчики.
             self._json_response(
                 {
                     "ok": True,
@@ -247,6 +262,7 @@ def _handler_factory(config: AppConfig):
                     "avg_speed_kmh": round(result.avg_speed_kmh, 1),
                     "sample_valid": result.sample_valid,
                     "ready_to_complete": result.should_notify,
+                    "segment_index": segment_index,
                 }
             )
 
@@ -607,6 +623,7 @@ def _handler_factory(config: AppConfig):
                 return
             with connect(config) as connection:
                 payload = MobileFatigueService(connection).summary()
+                payload["ask_feedback"] = _feedback_ask(connection, payload.get("work_day_id"))
             self._json_response(payload)
 
         def _handle_fatigue_correlation(self) -> None:
@@ -692,16 +709,8 @@ def _handler_factory(config: AppConfig):
                 return
             try:
                 payload = self._read_json()
-                samples_count = int(payload.get("samples_count") or 0)
-                sensor_minutes = float(payload.get("sensor_minutes") or 0)
-                harsh_acceleration_count = int(payload.get("harsh_acceleration_count") or 0)
-                harsh_braking_count = int(payload.get("harsh_braking_count") or 0)
-                hard_cornering_count = int(payload.get("hard_cornering_count") or 0)
-                lane_change_proxy_count = int(payload.get("lane_change_proxy_count") or 0)
-                stop_go_count = int(payload.get("stop_go_count") or 0)
-                jerk_score = float(payload.get("jerk_score") or 0)
-                speed_variability_score = float(payload.get("speed_variability_score") or 0)
-                aggressive_score = float(payload.get("aggressive_score") or 0)
+                segment_index = payload.get("segment_index")
+                segment_index = int(segment_index) if segment_index is not None else None
             except (ValueError, TypeError, json.JSONDecodeError):
                 self._json_response({"error": "bad_request"}, HTTPStatus.BAD_REQUEST)
                 return
@@ -711,20 +720,33 @@ def _handler_factory(config: AppConfig):
                 if day is None:
                     self._json_response({"ok": False, "reason": "no_active_day"})
                     return
-                DrivingBehaviorRepository(connection).upsert(
-                    work_day_id=day.id,
-                    date=day.date,
-                    samples_count=max(0, samples_count),
-                    sensor_minutes=max(0.0, sensor_minutes),
-                    harsh_acceleration_count=max(0, harsh_acceleration_count),
-                    harsh_braking_count=max(0, harsh_braking_count),
-                    hard_cornering_count=max(0, hard_cornering_count),
-                    lane_change_proxy_count=max(0, lane_change_proxy_count),
-                    stop_go_count=max(0, stop_go_count),
-                    jerk_score=max(0.0, jerk_score),
-                    speed_variability_score=max(0.0, speed_variability_score),
-                    aggressive_score=max(0.0, min(100.0, aggressive_score)),
-                )
+                if segment_index is None:
+                    # Клиент старой версии шлёт один агрегат за сутки. Принимаем как есть:
+                    # обновление приложения не должно быть условием того, что данные вообще
+                    # доходят.
+                    DrivingBehaviorRepository(connection).upsert(
+                        work_day_id=day.id,
+                        date=day.date,
+                        samples_count=max(0, int(payload.get("samples_count") or 0)),
+                        sensor_minutes=max(0.0, float(payload.get("sensor_minutes") or 0)),
+                        harsh_acceleration_count=max(0, int(payload.get("harsh_acceleration_count") or 0)),
+                        harsh_braking_count=max(0, int(payload.get("harsh_braking_count") or 0)),
+                        hard_cornering_count=max(0, int(payload.get("hard_cornering_count") or 0)),
+                        lane_change_proxy_count=max(0, int(payload.get("lane_change_proxy_count") or 0)),
+                        stop_go_count=max(0, int(payload.get("stop_go_count") or 0)),
+                        jerk_score=max(0.0, float(payload.get("jerk_score") or 0)),
+                        speed_variability_score=max(0.0, float(payload.get("speed_variability_score") or 0)),
+                        aggressive_score=max(0.0, min(100.0, float(payload.get("aggressive_score") or 0))),
+                    )
+                else:
+                    save_driving_segment(
+                        DrivingSegmentRepository(connection),
+                        DrivingBehaviorRepository(connection),
+                        work_day_id=day.id,
+                        date=day.date,
+                        segment_index=max(0, segment_index),
+                        payload=payload,
+                    )
             self._json_response({"ok": True, "reason": "driving_saved"})
 
         def log_message(self, format: str, *args: Any) -> None:
@@ -779,6 +801,38 @@ def _handler_factory(config: AppConfig):
             self.wfile.write(body)
 
     return LocationApiHandler
+
+
+def _feedback_ask(connection: Any, work_day_id: Any) -> dict[str, object]:
+    """Спрашивать ли сегодня «согласен ли ты с оценкой».
+
+    Каждый день спрашивать нельзя: человек начнёт отвечать не думая, и обучение станет
+    хуже, чем его отсутствие. Поэтому — пока модель учится, потом только при аномалии
+    или раз в неделю.
+    """
+    if not work_day_id:
+        return {"should_ask": False, "reason": "Смены нет.", "feedback_count": 0}
+    ask = should_ask_feedback(
+        feedback_repo=FatigueFeedbackRepository(connection),
+        metric_repo=DayMetricRepository(connection),
+        baseline_repo=UserBaselineRepository(connection),
+        work_day_id=int(work_day_id),
+        days_since_last=_days_since_last_feedback(connection),
+    )
+    return ask.payload()
+
+
+def _days_since_last_feedback(connection: Any) -> int | None:
+    row = connection.execute(
+        "SELECT created_at FROM fatigue_feedback ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if not row or not row["created_at"]:
+        return None
+    try:
+        last = datetime.fromisoformat(str(row["created_at"]))
+    except ValueError:
+        return None
+    return max(0, (datetime.now() - last).days)
 
 
 def _path_only(path: str) -> str:

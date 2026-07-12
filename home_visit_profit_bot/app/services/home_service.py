@@ -5,9 +5,11 @@ from app.database import Database
 from datetime import date, datetime, timedelta
 
 
-from app.repositories import DailyStatsRepository, WorkDayRepository
+from app.repositories import DailyStatsRepository, SettingsRepository, WorkDayRepository
+from app.services.indices_service import level_for
 from app.services.mobile_fatigue_service import MobileFatigueService
 from app.services.mobile_report_service import MobileReportService
+from app.services.recovery_pricing_service import RecoveryPricing, build_pricing
 
 
 # Порог «зелёной зоны» восстановления: ниже — отдохнул, ресурс есть.
@@ -27,8 +29,18 @@ class HomeService:
         self.connection = connection
         self.days = WorkDayRepository(connection)
         self.stats = DailyStatsRepository(connection)
+        self.settings = SettingsRepository(connection)
         self.reports = MobileReportService(connection)
         self.fatigue = MobileFatigueService(connection)
+
+    def _pricing(self, debt: float) -> RecoveryPricing:
+        min_hourly = self.settings.get_float("min_hourly_income", 600)
+        return build_pricing(
+            debt=debt,
+            min_hourly=min_hourly,
+            outside_min_hourly=self.settings.get_float("outside_zone_min_hourly_income", min_hourly),
+            min_marginal_hourly=self.settings.get_float("min_marginal_hourly_income", min_hourly),
+        )
 
     def snapshot(self, nickname: str | None = None) -> dict[str, Any]:
         today = date.today()
@@ -72,6 +84,7 @@ class HomeService:
             },
             "start_prompt": self._start_prompt(latest_closed),
             "recovery": recovery,
+            "pricing": self._pricing(recovery["recovery_debt"]).payload() if recovery else None,
             "money": money,
             "trends": trends,
             "green_streak": streak,
@@ -181,27 +194,28 @@ class HomeService:
         debt = recovery["recovery_debt"]
         weekly = recovery["weekly_average"]
 
-        # 1. Восстановление.
-        if debt < GREEN_DEBT:
+        # 1. Состояние → уровень по матрице → что делать.
+        level, tone, advice = level_for(debt)
+        recs.append({
+            "kind": "recovery",
+            "tone": tone,
+            "title": f"{level}: {debt:.0f} из 100",
+            "text": f"Долг восстановления — {advice}.",
+        })
+
+        # 2. Что это значит для денег. Ради этой карточки всё и считалось: индекс,
+        # который не меняет решение, — просто украшение.
+        pricing = self._pricing(debt)
+        if pricing.changed:
             recs.append({
-                "kind": "recovery",
-                "tone": "go",
-                "title": "Ты хорошо восстановился",
-                "text": f"Долг восстановления низкий ({debt:.0f}). Ресурс есть — можно отработать полноценный день.",
-            })
-        elif debt < EDGE_DEBT:
-            recs.append({
-                "kind": "recovery",
-                "tone": "edge",
-                "title": "Восстановление на грани",
-                "text": f"Долг восстановления средний ({debt:.0f}). Работай в обычном темпе и не бери дальние заказы подряд.",
-            })
-        else:
-            recs.append({
-                "kind": "recovery",
-                "tone": "skip",
-                "title": "Ресурс на исходе",
-                "text": f"Высокий долг восстановления ({debt:.0f}). Сегодня лучше короткий день или отдых — иначе завтра будет тяжелее.",
+                "kind": "pricing",
+                "tone": "edge" if not pricing.blocks_outside_zone else "skip",
+                "title": f"Сегодня минимум {pricing.effective_min_hourly:.0f} ₽/ч",
+                "text": (
+                    f"Обычный минимум {pricing.base_min_hourly:.0f} ₽/ч, "
+                    f"сегодня выше на {pricing.markup * 100:.0f}% — так усталость не уходит в убыток. "
+                    + ("Заказы вне зоны сегодня лучше не брать." if pricing.blocks_outside_zone else "")
+                ).strip(),
             })
 
         # 2. Усталость (недельный фон).

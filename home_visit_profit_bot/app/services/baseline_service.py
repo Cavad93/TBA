@@ -148,12 +148,20 @@ def effective_baseline(baseline: Baseline | None, metric: str) -> Baseline:
     когда пользователь пересёк порог.
     """
     spec = POPULATION.get(metric)
-    population_median = spec.median if spec else 0.0
-    population_scale = spec.mad * MAD_TO_SIGMA if spec else 1.0
 
     if baseline is None or baseline.days <= 0:
-        return Baseline(metric=metric, median=population_median, scale=population_scale, days=0)
+        if spec is None:
+            return Baseline(metric=metric, median=0.0, scale=1.0, days=0)
+        return Baseline(metric=metric, median=spec.median, scale=spec.mad * MAD_TO_SIGMA, days=0)
 
+    if spec is None:
+        # Популяционной нормы для этой метрики нет (например, сам индекс нагрузки —
+        # он и есть производная от норм). Смешивать не с чем: смешать с нулём значило
+        # бы занижать норму тем сильнее, чем меньше у человека истории.
+        return baseline
+
+    population_median = spec.median
+    population_scale = spec.mad * MAD_TO_SIGMA
     weight = _blend_weight(baseline.days)
     blended_median = weight * baseline.median + (1 - weight) * population_median
     blended_scale = weight * baseline.scale + (1 - weight) * population_scale

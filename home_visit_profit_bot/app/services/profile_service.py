@@ -6,14 +6,29 @@ from datetime import date, datetime, timedelta, timezone
 
 
 from app.database import current_user_id
-from app.repositories import DailyStatsRepository, DrivingBehaviorRepository, WorkDayRepository
+from app.repositories import (
+    DailyStatsRepository,
+    DayMetricRepository,
+    DrivingBehaviorRepository,
+    DrivingSegmentRepository,
+    SettingsRepository,
+    UserBaselineRepository,
+    WorkDayRepository,
+)
+from app.services.day_metrics_service import load_baselines
+from app.services.driving_service import within_day_trend
+from app.services.indices_service import economy_index, load_index, recovery_result
 from app.services.mobile_fatigue_service import MobileFatigueService
 from app.services.mobile_report_service import parse_report_period
+from app.services.recovery_pricing_service import build_pricing
 
 
 # Окна для стиля вождения: последние 7 дней и 28 дней перед ними (самосравнение).
 RECENT_DAYS = 7
 PREV_DAYS = 28
+
+# Меньше этого числа смен личной нормы нет, и индекс был бы цифрой из воздуха.
+MIN_SHIFTS_FOR_INDICES = 7
 
 
 class ProfileService:
@@ -28,18 +43,76 @@ class ProfileService:
         self.days = WorkDayRepository(connection)
         self.stats = DailyStatsRepository(connection)
         self.driving = DrivingBehaviorRepository(connection)
+        self.segments = DrivingSegmentRepository(connection)
+        self.metrics = DayMetricRepository(connection)
+        self.baselines = UserBaselineRepository(connection)
+        self.settings = SettingsRepository(connection)
         self.fatigue = MobileFatigueService(connection)
 
     def snapshot(self, nickname: str | None = None) -> dict[str, Any]:
         today = date.today()
+        indices = self._indices_block()
         return {
             "ok": True,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "user": self._user_block(nickname, today),
             "month": self._month_block(today),
+            "indices": indices,
+            "pricing": self._pricing_block(indices),
             "wellbeing": self._wellbeing_block(),
             "driving": self._driving_block(today),
         }
+
+    # --- три индекса ------------------------------------------------------
+
+    def _indices_block(self) -> dict[str, Any]:
+        """Экономика, нагрузка, долг восстановления — по последней закрытой смене.
+
+        Индексы не пересчитываются на лету: они посчитаны при закрытии смены, вместе
+        с личной нормой, и лежат в day_metrics. Здесь мы их только читаем и заново
+        объясняем — чтобы «почему» строилось на актуальной норме.
+        """
+        latest = self.days.latest_closed()
+        if latest is None:
+            return {"has_data": False, "days": 0, "need_more_shifts": MIN_SHIFTS_FOR_INDICES}
+
+        metrics = self.metrics.for_day(latest.id)
+        if not metrics:
+            return {"has_data": False, "days": 0, "need_more_shifts": MIN_SHIFTS_FOR_INDICES}
+
+        baselines = load_baselines(self.baselines)
+        days = max((item.days for item in baselines.values()), default=0)
+
+        economy = economy_index(metrics, baselines)
+        load = load_index(metrics, baselines)
+        debt = float(metrics.get("recovery_debt") or 0)
+        recovery = recovery_result(debt, metrics, baselines)
+
+        return {
+            # Пока смен мало, личной нормы нет, и любой индекс — цифра из воздуха.
+            # Честнее сказать «нужно ещё N смен», чем нарисовать красивое число.
+            "has_data": days >= MIN_SHIFTS_FOR_INDICES,
+            "days": days,
+            "need_more_shifts": max(0, MIN_SHIFTS_FOR_INDICES - days),
+            "date": latest.date,
+            "economy": economy.payload(),
+            "load": load.payload(),
+            "recovery": recovery.payload(),
+        }
+
+    def _pricing_block(self, indices: dict[str, Any]) -> dict[str, Any] | None:
+        """Что состояние значит для денег сегодня — ради этого всё и считалось."""
+        recovery = indices.get("recovery")
+        if not recovery:
+            return None
+        min_hourly = self.settings.get_float("min_hourly_income", 600)
+        pricing = build_pricing(
+            debt=float(recovery.get("score") or 0),
+            min_hourly=min_hourly,
+            outside_min_hourly=self.settings.get_float("outside_zone_min_hourly_income", min_hourly),
+            min_marginal_hourly=self.settings.get_float("min_marginal_hourly_income", min_hourly),
+        )
+        return pricing.payload()
 
     # --- пользователь -----------------------------------------------------
 
@@ -149,18 +222,32 @@ class ProfileService:
         smooth_accel_pct = round(_clamp(100 - harsh_accel_per100, 0, 100), 1)
         smooth_brake_pct = round(_clamp(100 - harsh_brake_per100, 0, 100), 1)
 
+        # Метрики «превышение скорости» здесь больше нет. Она отдавалась захардкоженным
+        # нулём: чтобы знать превышение, нужен лимит дороги, а мы его ниоткуда не берём.
+        # Показывать выдуманную цифру хуже, чем не показывать никакой.
         return {
             "score10": score10,
             "smooth_accel_pct": smooth_accel_pct,
             "smooth_brake_pct": smooth_brake_pct,
             "harsh_brakes_per100km": round(harsh_brake_per100, 1),
-            # В данных нет счётчика превышений скорости — отдаём 0 до его появления.
-            "speeding_per100km": 0.0,
+            "harsh_accel_per100km": round(harsh_accel_per100, 1),
             "self_rating": _self_rating(
                 float(recent.get("avg_aggressive_score") or 0),
                 float(previous.get("avg_aggressive_score") or 0),
             ),
+            "within_day": self._within_day_trend(),
         }
+
+    def _within_day_trend(self) -> dict[str, Any] | None:
+        """«После пятого адреса стиль вождения стал менее стабильным».
+
+        Берём последнюю смену, по которой есть отрезки: сравнение первой половины дня
+        со второй имеет смысл только внутри одного дня, а не в среднем за неделю.
+        """
+        latest = self.days.latest_closed() or self.days.active()
+        if latest is None:
+            return None
+        return within_day_trend(self.segments, latest.id)
 
 
 # --- вспомогательные функции --------------------------------------------
