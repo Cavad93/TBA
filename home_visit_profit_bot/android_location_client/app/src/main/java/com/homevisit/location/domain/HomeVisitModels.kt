@@ -71,6 +71,7 @@ data class HomeSnapshot(
     val shiftWorkDayId: Int?,
     val startPrompt: HomeStartPrompt,
     val recovery: HomeRecovery?,
+    val pricing: RecoveryPricing?,
     val monthMoney: HomeMoney,
     val yesterdayMoney: HomeMoney,
     val hourlyVsMonth: Double,
@@ -156,9 +157,54 @@ data class ShiftOrder(
 data class ProfileSnapshot(
     val user: ProfileUser,
     val month: ProfileMonth,
+    val indices: ProfileIndices,
+    val pricing: RecoveryPricing?,
     val wellbeing: ProfileWellbeing,
     val driving: ProfileDriving?,
     val fromCache: Boolean = false,
+)
+
+/**
+ * Три индекса. Каждый считается как отклонение от личной нормы человека, а не по
+ * абсолютным порогам: двенадцать адресов — перегруз для одного и обычный вторник
+ * для другого.
+ */
+data class ProfileIndices(
+    val hasData: Boolean,
+    val days: Int,
+    val needMoreShifts: Int,
+    val economy: IndexCard?,
+    val load: IndexCard?,
+    val recovery: IndexCard?,
+)
+
+data class IndexCard(
+    val key: String,
+    val title: String,
+    val score: Double,
+    val level: String,
+    val tone: String,
+    val advice: String,
+    val why: List<IndexReason>,
+)
+
+/** «Сон 5,5 ч — на 21% меньше твоей нормы (7 ч): +12 к долгу». */
+data class IndexReason(
+    val metric: String,
+    val title: String,
+    val points: Double,
+    val text: String,
+)
+
+/** Во что состояние обходится в деньгах: обычный минимум против сегодняшнего. */
+data class RecoveryPricing(
+    val debt: Double,
+    val markupPercent: Int,
+    val baseMinHourly: Int,
+    val effectiveMinHourly: Int,
+    val changed: Boolean,
+    val blocksOutsideZone: Boolean,
+    val reason: String,
 )
 
 data class ProfileUser(
@@ -188,13 +234,28 @@ data class WellbeingGauge(
     val label: String,
 )
 
+/**
+ * Метрики «превышение скорости» здесь нет намеренно: чтобы знать превышение, нужен
+ * лимит дороги, а мы его ниоткуда не берём. Раньше она приходила захардкоженным нулём —
+ * то есть пользователю показывалась выдуманная цифра.
+ */
 data class ProfileDriving(
     val score10: Double,
     val smoothAccelPct: Int,
     val smoothBrakePct: Int,
     val harshBrakesPer100km: Double,
-    val speedingPer100km: Double,
+    val harshAccelPer100km: Double,
     val rating: DrivingRating,
+    val withinDay: DrivingWithinDay?,
+)
+
+/** «После 5-го адреса стиль вождения стал менее стабильным». */
+data class DrivingWithinDay(
+    val turningPoint: Int,
+    val earlyScore: Double,
+    val lateScore: Double,
+    val delta: Double,
+    val text: String,
 )
 
 data class DrivingRating(
@@ -234,9 +295,18 @@ data class CandidateEstimate(
     val marginalHourly: Double,
     val extraKm: Double,
     val extraDriveMinutes: Double,
-    val fatigueExtraPayment: Double,
     val fatigueLevel: String,
-)
+    // Состояние поднимает МИНИМАЛЬНЫЙ ТАРИФ, а не добавляет отдельную надбавку.
+    // Прежнее поле fatigueExtraPayment приходило с сервера и не показывалось ни на
+    // одном экране; складывать его с поднятым порогом значило бы взять наценку дважды.
+    val baseMinHourly: Double = 0.0,
+    val effectiveMinHourly: Double = 0.0,
+    val recoveryMarkupPercent: Int = 0,
+    val recoveryBlocksOutsideZone: Boolean = false,
+) {
+    /** Минимум сегодня выше обычного — это надо показать на экране Оценки. */
+    val tariffRaised: Boolean get() = recoveryMarkupPercent > 0 && effectiveMinHourly > baseMinHourly
+}
 
 data class CandidateRequestResult(
     val ok: Boolean,
@@ -301,6 +371,14 @@ data class EndDayDetails(
     val coffeeExpenses: Double = 0.0,
     val drinksExpenses: Double = 0.0,
     val parkingExpenses: Double = 0.0,
+    // Штуки, а не рубли: 300 ₽ — это одна чашка в аэропорту или три в ларьке,
+    // а на восстановление влияет количество кофеина, а не сумма чека.
+    val coffeeUnits: Double = 0.0,
+    val drinksUnits: Double = 0.0,
+    val mealUnits: Double = 0.0,
+    // Самооценка усталости 1–10. Она же — обратная связь: сравнивая её с нашей
+    // оценкой, система учится на конкретном человеке.
+    val selfRating: Double = 0.0,
 )
 
 /**

@@ -1,5 +1,10 @@
 package com.homevisit.location
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -92,20 +97,24 @@ private fun LoadingStep() {
 private enum class WizardStep {
     Intro,
     Expenses,
+    Units,
     Fuel,
     Odometer,
     Driving,
     WorkTime,
     ServiceTime,
+    SelfRating,
 }
 
 private val QUESTION_STEPS = listOf(
     WizardStep.Expenses,
+    WizardStep.Units,
     WizardStep.Fuel,
     WizardStep.Odometer,
     WizardStep.Driving,
     WizardStep.WorkTime,
     WizardStep.ServiceTime,
+    WizardStep.SelfRating,
 )
 
 @Composable
@@ -134,6 +143,11 @@ private fun WizardContent(
     var workHours by rememberSaveable { mutableStateOf(preview?.totalWorkMinutes.hoursText()) }
     var serviceMinutes by rememberSaveable { mutableStateOf(preview?.avgServiceMinutes.numberText()) }
 
+    var coffeeUnits by rememberSaveable { mutableStateOf("") }
+    var drinksUnits by rememberSaveable { mutableStateOf("") }
+    var mealUnits by rememberSaveable { mutableStateOf("") }
+    var selfRating by rememberSaveable { mutableStateOf(0) }
+
     fun details(): EndDayDetails = buildEndDayDetails(
         preview = preview,
         meal = meal,
@@ -148,11 +162,15 @@ private fun WizardContent(
         drivingHours = drivingHours,
         workHours = workHours,
         serviceMinutes = serviceMinutes,
+        coffeeUnits = coffeeUnits,
+        drinksUnits = drinksUnits,
+        mealUnits = mealUnits,
+        selfRating = selfRating,
     )
 
     fun next() {
         val index = QUESTION_STEPS.indexOf(step)
-        if (step == WizardStep.ServiceTime || index == QUESTION_STEPS.lastIndex) {
+        if (step == WizardStep.SelfRating || index == QUESTION_STEPS.lastIndex) {
             onFinish(details())
         } else {
             step = QUESTION_STEPS[index + 1]
@@ -182,6 +200,19 @@ private fun WizardContent(
             MoneyField(toll, { toll = it }, "Платная дорога, ₽")
             MoneyField(parking, { parking = it }, "Парковка, ₽")
             MoneyField(other, { other = it }, "Прочее, ₽")
+            StepButtons(onNext = { next() }, onSkip = { next() })
+        }
+
+        WizardStep.Units -> {
+            Text(
+                "Сколько штук — не рублей. На восстановление влияет количество кофеина, " +
+                    "а не сумма чека: 300 ₽ — это одна чашка в аэропорту или три в ларьке.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            MoneyField(coffeeUnits, { coffeeUnits = it }, "Кофе и энергетики, шт")
+            MoneyField(drinksUnits, { drinksUnits = it }, "Вода, бутылок")
+            MoneyField(mealUnits, { mealUnits = it }, "Полноценных приёмов пищи, шт")
             StepButtons(onNext = { next() }, onSkip = { next() })
         }
 
@@ -253,7 +284,12 @@ private fun WizardContent(
             hint = preview?.let {
                 "Расчёт: ${minutesText(it.avgServiceMinutes)} · заказов ${it.completedVisitsCount}"
             } ?: "Сколько в среднем занимает один адрес",
-            nextTitle = "Завершить смену",
+            onNext = { next() },
+        )
+
+        WizardStep.SelfRating -> SelfRatingStep(
+            value = selfRating,
+            onValue = { selfRating = it },
             onNext = { next() },
         )
     }
@@ -403,5 +439,66 @@ private fun Warning(text: String) {
             style = MaterialTheme.typography.bodySmall,
             color = VerdictColors.onEdgeContainer,
         )
+    }
+}
+
+/**
+ * Самооценка усталости 1–10 — последний шаг мастера. Она же обратная связь.
+ *
+ * Спрашивать «согласен ли ты с оценкой 63 из 100» неестественно — человек не мыслит
+ * в наших баллах. «На сколько ты вымотался от 1 до 10» — вопрос, на который отвечают
+ * не задумываясь. Ответ переводится в ту же шкалу и идёт туда же, откуда учится модель:
+ * пользователь отвечает на понятный вопрос, а система получает нужный ей сигнал.
+ */
+@Composable
+private fun SelfRatingStep(value: Int, onValue: (Int) -> Unit, onNext: () -> Unit) {
+    Text(
+        "Насколько вымотала смена?",
+        style = MaterialTheme.typography.titleMedium,
+    )
+    Text(
+        "1 — как будто и не работал, 10 — сил не осталось совсем. " +
+            "По этому ответу приложение подстраивается под тебя.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        (1..10).forEach { rating ->
+            val selected = value == rating
+            val tone = when {
+                rating <= 3 -> VerdictColors.go
+                rating <= 7 -> VerdictColors.edge
+                else -> VerdictColors.skip
+            }
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (selected) tone else MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .clickable { onValue(rating) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    rating.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontFamily = JetBrainsMono,
+                    color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+    Button(
+        onClick = onNext,
+        enabled = value > 0,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Завершить смену")
+    }
+    TextButton(onClick = onNext, modifier = Modifier.fillMaxWidth()) {
+        Text("Пропустить")
     }
 }

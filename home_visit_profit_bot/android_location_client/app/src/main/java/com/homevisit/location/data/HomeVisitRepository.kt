@@ -1097,6 +1097,13 @@ class HomeVisitRepository private constructor(
             .put("coffee_expenses", details.coffeeExpenses)
             .put("drinks_expenses", details.drinksExpenses)
             .put("parking_expenses", details.parkingExpenses)
+            // Штуки, а не рубли: на восстановление влияет количество кофеина,
+            // а не сумма чека.
+            .put("coffee_units", details.coffeeUnits)
+            .put("drinks_units", details.drinksUnits)
+            .put("meal_units", details.mealUnits)
+            // Самооценка 1–10 — она же обратная связь для обучения модели.
+            .put("self_rating", details.selfRating)
         details.userFatigueScore?.let { payload.put("user_fatigue_score", it) }
         return payload.toString()
     }
@@ -1311,8 +1318,11 @@ class HomeVisitRepository private constructor(
                 marginalHourly = calculation.optDouble("marginal_hourly", 0.0),
                 extraKm = calculation.optDouble("extra_km", 0.0),
                 extraDriveMinutes = calculation.optDouble("extra_drive_minutes", 0.0),
-                fatigueExtraPayment = calculation.optDouble("fatigue_extra_payment", 0.0),
                 fatigueLevel = calculation.optString("fatigue_level"),
+                baseMinHourly = calculation.optDouble("base_min_hourly", 0.0),
+                effectiveMinHourly = calculation.optDouble("effective_min_hourly", 0.0),
+                recoveryMarkupPercent = calculation.optInt("recovery_markup_percent", 0),
+                recoveryBlocksOutsideZone = calculation.optBoolean("recovery_blocks_outside_zone", false),
             )
         } else {
             null
@@ -1506,6 +1516,7 @@ class HomeVisitRepository private constructor(
                 breakHours = start.optDouble("break_hours", 0.0),
             ),
             recovery = parseHomeRecovery(response.optJSONObject("recovery")),
+            pricing = parsePricing(response.optJSONObject("pricing")),
             monthMoney = parseHomeMoney(money.optJSONObject("month")),
             yesterdayMoney = parseHomeMoney(money.optJSONObject("yesterday")),
             hourlyVsMonth = trends.optDouble("hourly_vs_month", 0.0),
@@ -1600,6 +1611,8 @@ class HomeVisitRepository private constructor(
                 netHourly = m.optDouble("net_hourly", 0.0),
                 visits = m.optInt("visits", 0),
             ),
+            indices = parseIndices(r.optJSONObject("indices")),
+            pricing = parsePricing(r.optJSONObject("pricing")),
             wellbeing = ProfileWellbeing(
                 hasData = w.optBoolean("has_data", false),
                 recovery = parseGauge(w.optJSONObject("recovery")),
@@ -1612,7 +1625,7 @@ class HomeVisitRepository private constructor(
                 smoothAccelPct = d.optInt("smooth_accel_pct", 0),
                 smoothBrakePct = d.optInt("smooth_brake_pct", 0),
                 harshBrakesPer100km = d.optDouble("harsh_brakes_per100km", 0.0),
-                speedingPer100km = d.optDouble("speeding_per100km", 0.0),
+                harshAccelPer100km = d.optDouble("harsh_accel_per100km", 0.0),
                 rating = d.optJSONObject("self_rating").let { sr ->
                     DrivingRating(
                         stars = sr?.optInt("stars", 0) ?: 0,
@@ -1620,8 +1633,66 @@ class HomeVisitRepository private constructor(
                         text = sr?.optString("text").orEmpty(),
                     )
                 },
+                withinDay = d.optJSONObject("within_day")?.let { wd ->
+                    DrivingWithinDay(
+                        turningPoint = wd.optInt("turning_point", 0),
+                        earlyScore = wd.optDouble("early_score", 0.0),
+                        lateScore = wd.optDouble("late_score", 0.0),
+                        delta = wd.optDouble("delta", 0.0),
+                        text = wd.optString("text"),
+                    )
+                },
             ),
             fromCache = r.optBoolean("_from_cache", false),
+        )
+    }
+
+    private fun parseIndices(o: JSONObject?): ProfileIndices {
+        if (o == null) return ProfileIndices(false, 0, 7, null, null, null)
+        return ProfileIndices(
+            hasData = o.optBoolean("has_data", false),
+            days = o.optInt("days", 0),
+            needMoreShifts = o.optInt("need_more_shifts", 0),
+            economy = parseIndexCard(o.optJSONObject("economy")),
+            load = parseIndexCard(o.optJSONObject("load")),
+            recovery = parseIndexCard(o.optJSONObject("recovery")),
+        )
+    }
+
+    private fun parseIndexCard(o: JSONObject?): IndexCard? {
+        if (o == null) return null
+        val why = mutableListOf<IndexReason>()
+        val array = o.optJSONArray("why")
+        for (i in 0 until (array?.length() ?: 0)) {
+            val item = array?.optJSONObject(i) ?: continue
+            why += IndexReason(
+                metric = item.optString("metric"),
+                title = item.optString("title"),
+                points = item.optDouble("points", 0.0),
+                text = item.optString("text"),
+            )
+        }
+        return IndexCard(
+            key = o.optString("key"),
+            title = o.optString("title"),
+            score = o.optDouble("score", 0.0),
+            level = o.optString("level"),
+            tone = o.optString("tone"),
+            advice = o.optString("advice"),
+            why = why,
+        )
+    }
+
+    private fun parsePricing(o: JSONObject?): RecoveryPricing? {
+        if (o == null) return null
+        return RecoveryPricing(
+            debt = o.optDouble("debt", 0.0),
+            markupPercent = o.optInt("markup_percent", 0),
+            baseMinHourly = o.optInt("base_min_hourly", 0),
+            effectiveMinHourly = o.optInt("effective_min_hourly", 0),
+            changed = o.optBoolean("changed", false),
+            blocksOutsideZone = o.optBoolean("blocks_outside_zone", false),
+            reason = o.optString("reason"),
         )
     }
 

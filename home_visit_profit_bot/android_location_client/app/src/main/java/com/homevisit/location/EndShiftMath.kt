@@ -64,6 +64,10 @@ internal fun buildEndDayDetails(
     drivingHours: String,
     workHours: String,
     serviceMinutes: String,
+    coffeeUnits: String = "",
+    drinksUnits: String = "",
+    mealUnits: String = "",
+    selfRating: Int = 0,
 ): EndDayDetails {
     val startOdometer = preview?.startOdometer ?: 0.0
     val suggestedKm = preview?.suggestedKm ?: 0.0
@@ -106,6 +110,12 @@ internal fun buildEndDayDetails(
         coffeeExpenses = parseNumber(coffee) ?: 0.0,
         drinksExpenses = parseNumber(drinks) ?: 0.0,
         parkingExpenses = parseNumber(parking) ?: 0.0,
+        // Штуки, а не рубли: 300 ₽ — это одна чашка в аэропорту или три в ларьке,
+        // а на восстановление влияет количество кофеина, а не сумма чека.
+        coffeeUnits = parseNumber(coffeeUnits) ?: 0.0,
+        drinksUnits = parseNumber(drinksUnits) ?: 0.0,
+        mealUnits = parseNumber(mealUnits) ?: 0.0,
+        selfRating = selfRating.toDouble(),
     ).let { details ->
         // Средняя длительность визита в контракт дня не входит: сервер выводит её
         // из общего времени. Но если пользователь её поправил, а заказы были —

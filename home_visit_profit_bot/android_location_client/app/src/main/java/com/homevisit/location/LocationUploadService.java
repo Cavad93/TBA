@@ -59,6 +59,8 @@ public class LocationUploadService extends Service implements LocationListener, 
     private float lastLinearAccel = 0f;
     private float lastSpeedKmh = -1f;
     private long lastSpeedTimeMs = 0L;
+    // Номер отрезка пути = сколько адресов уже закрыто. Присылает сервер.
+    private int segmentIndex = 0;
     private int samplesCount = 0;
     private double sensorSeconds = 0;
     private int harshAccelerationCount = 0;
@@ -252,10 +254,19 @@ public class LocationUploadService extends Service implements LocationListener, 
                     outputStream.write(body);
                 }
                 int code = connection.getResponseCode();
+                int serverSegment = segmentIndex;
                 if (code >= 200 && code < 300) {
-                    handleLocationResponse(readResponse(connection));
+                    String responseText = readResponse(connection);
+                    handleLocationResponse(responseText);
+                    serverSegment = readSegmentIndex(responseText, segmentIndex);
                 }
+                // Сначала досылаем то, что накопили на прошлом отрезке, и только потом
+                // переключаемся: иначе телеметрия последнего куска дороги к адресу
+                // потерялась бы вместе со счётчиками.
                 sendDrivingAggregateSync(serverUrl, apiKey);
+                if (serverSegment != segmentIndex) {
+                    startSegment(serverSegment);
+                }
             } catch (Exception ignored) {
             } finally {
                 if (connection != null) {
@@ -291,11 +302,22 @@ public class LocationUploadService extends Service implements LocationListener, 
         lastSpeedTimeMs = timeMs;
     }
 
+    /**
+     * Телеметрия отправляется отрезком пути между адресами, а не одним итогом за сутки.
+     * Дневной агрегат не различает «устал к вечеру» и «весь день ехал одинаково», а
+     * именно это и есть самый ценный сигнал: стиль портится не равномерно, а после
+     * какого-то адреса.
+     *
+     * Границу отрезка телефон сам не видит — заказ закрывается на сервере. Поэтому номер
+     * текущего отрезка сервер присылает в ответе на /location, и мы отправляем накопленное
+     * под тем номером, под которым его собирали.
+     */
     private void sendDrivingAggregateSync(String locationUrl, String apiKey) {
         persistAggregate();
         HttpURLConnection connection = null;
         try {
             JSONObject payload = new JSONObject();
+            payload.put("segment_index", segmentIndex);
             payload.put("samples_count", samplesCount);
             payload.put("sensor_minutes", sensorSeconds / 60.0);
             payload.put("harsh_acceleration_count", harshAccelerationCount);
@@ -340,6 +362,36 @@ public class LocationUploadService extends Service implements LocationListener, 
         } catch (Exception ignored) {
             return "";
         }
+    }
+
+    private int readSegmentIndex(String responseText, int fallback) {
+        if (responseText == null || responseText.isEmpty()) {
+            return fallback;
+        }
+        try {
+            return new JSONObject(responseText).optInt("segment_index", fallback);
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    /** Закрыт очередной адрес — начинаем новый отрезок пути с чистыми счётчиками. */
+    private void startSegment(int index) {
+        segmentIndex = index;
+        samplesCount = 0;
+        sensorSeconds = 0;
+        harshAccelerationCount = 0;
+        harshBrakingCount = 0;
+        hardCorneringCount = 0;
+        laneChangeProxyCount = 0;
+        stopGoCount = 0;
+        jerkTotal = 0;
+        speedDeltaTotal = 0;
+        speedDeltaSamples = 0;
+        lastLinearAccel = 0f;
+        lastSpeedKmh = -1f;
+        lastSpeedTimeMs = 0L;
+        persistAggregate();
     }
 
     private void handleLocationResponse(String responseText) {
@@ -472,6 +524,7 @@ public class LocationUploadService extends Service implements LocationListener, 
             resetAggregate(today);
             return;
         }
+        segmentIndex = prefs.getInt("driving_segment_index", 0);
         samplesCount = prefs.getInt("driving_samples_count", 0);
         sensorSeconds = Double.longBitsToDouble(prefs.getLong("driving_sensor_seconds", Double.doubleToLongBits(0)));
         harshAccelerationCount = prefs.getInt("driving_harsh_acceleration_count", 0);
@@ -488,6 +541,7 @@ public class LocationUploadService extends Service implements LocationListener, 
         getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
                 .edit()
                 .putString("driving_day", today())
+                .putInt("driving_segment_index", segmentIndex)
                 .putInt("driving_samples_count", samplesCount)
                 .putLong("driving_sensor_seconds", Double.doubleToLongBits(sensorSeconds))
                 .putInt("driving_harsh_acceleration_count", harshAccelerationCount)
@@ -511,6 +565,7 @@ public class LocationUploadService extends Service implements LocationListener, 
     }
 
     private void resetAggregate(String day) {
+        segmentIndex = 0;
         samplesCount = 0;
         sensorSeconds = 0;
         harshAccelerationCount = 0;

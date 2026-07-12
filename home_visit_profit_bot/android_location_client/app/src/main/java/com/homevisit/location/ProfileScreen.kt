@@ -178,6 +178,20 @@ internal fun ProfileScreen(profile: ProfileUiState, onRefresh: () -> Unit, onOpe
         ) {
             ProfileUserCard(snapshot.user.nickname, snapshot.user.occupation, snapshot.user.daysInService)
 
+            // Индексы идут первыми: это главное, ради чего человек сюда заходит.
+            // Деньги за месяц он и так знает — а вот стоит ли сегодня вообще ехать,
+            // и почему сегодня его минимум выше обычного, знаем только мы.
+            if (snapshot.indices.hasData) {
+                snapshot.pricing?.takeIf { it.changed }?.let { PricingCard(it) }
+
+                SectionHeader("Индексы · по последней смене")
+                snapshot.indices.recovery?.let { IndexCardView(it) }
+                snapshot.indices.load?.let { IndexCardView(it) }
+                snapshot.indices.economy?.let { IndexCardView(it) }
+            } else {
+                IndicesNotReadyCard(snapshot.indices.needMoreShifts)
+            }
+
             SectionHeader("Показатели · за месяц")
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 MoneyTile(Modifier.weight(1f), "Среднее на адресе", "${snapshot.month.avgOnSiteMin.toInt()} мин", null)
@@ -196,6 +210,7 @@ internal fun ProfileScreen(profile: ProfileUiState, onRefresh: () -> Unit, onOpe
             snapshot.driving?.let {
                 SectionHeader("Стиль вождения · по данным приложения")
                 DrivingCard(it)
+                it.withinDay?.let { trend -> WithinDayCard(trend) }
             }
 
             Spacer(Modifier.height(4.dp))
@@ -304,7 +319,10 @@ internal fun DrivingCard(d: ProfileDriving) {
             MetricBar("Плавность разгона", "${d.smoothAccelPct}%", d.smoothAccelPct / 100f, VerdictColors.go)
             MetricBar("Плавность торможения", "${d.smoothBrakePct}%", d.smoothBrakePct / 100f, VerdictColors.go)
             MetricLine("Резких торможений", "${oneDecimal(d.harshBrakesPer100km)}/100 км", if (d.harshBrakesPer100km > 3) VerdictColors.edge else MaterialTheme.colorScheme.onSurfaceVariant)
-            MetricLine("Превышений скорости", "${oneDecimal(d.speedingPer100km)}/100 км", if (d.speedingPer100km > 1) VerdictColors.edge else MaterialTheme.colorScheme.onSurfaceVariant)
+            // Метрики «превышений скорости» здесь больше нет: она показывала
+            // захардкоженный ноль. Чтобы знать превышение, нужен лимит дороги —
+            // мы его ниоткуда не берём, а врать пользователю нельзя.
+            MetricLine("Резких ускорений", "${oneDecimal(d.harshAccelPer100km)}/100 км", if (d.harshAccelPer100km > 3) VerdictColors.edge else MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

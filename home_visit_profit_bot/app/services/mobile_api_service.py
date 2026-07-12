@@ -570,6 +570,12 @@ def _end_day_data_from_payload(day: Any, payload: dict[str, Any]) -> EndDayData:
         parking_compensation=_non_negative_float(payload.get("parking_compensation"), default=float(day.parking_compensation or 0)),
         toll_expenses=_non_negative_float(payload.get("toll_expenses"), default=float(day.toll_expenses or 0)),
         toll_compensation=_non_negative_float(payload.get("toll_compensation"), default=float(day.toll_compensation or 0)),
+        # Штуки, а не рубли: на восстановление влияет количество кофеина, а не сумма чека.
+        coffee_units=_non_negative_float(payload.get("coffee_units"), default=0.0),
+        drinks_units=_non_negative_float(payload.get("drinks_units"), default=0.0),
+        meal_units=_non_negative_float(payload.get("meal_units"), default=0.0),
+        # Самооценка 1–10 — она же обратная связь: система учится на конкретном человеке.
+        self_rating=_non_negative_float(payload.get("self_rating"), default=0.0),
     )
 
 

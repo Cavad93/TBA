@@ -124,6 +124,7 @@ import com.homevisit.location.data.HomeVisitRepository
 import com.homevisit.location.domain.AuthUser
 import com.homevisit.location.ui.AuthFlow
 import com.homevisit.location.ui.AuthViewModel
+import com.homevisit.location.domain.CandidateEstimate
 import com.homevisit.location.domain.ClinicReportRow
 import com.homevisit.location.domain.SettingField
 import com.homevisit.location.domain.SettingType
@@ -724,6 +725,11 @@ internal fun CandidateGauge(candidate: CandidateUiState, onAccept: () -> Unit, o
                     GaugeTile(Modifier.weight(1f), "+${oneDecimal(estimate.extraKm)} км", "дорога")
                     GaugeTile(Modifier.weight(1f), "+${oneDecimal(estimate.extraDriveMinutes)} мин", "в пути")
                 }
+                // Состояние подняло минимальный тариф — вердикт выше уже посчитан по
+                // новому порогу, и человек должен понимать, почему сегодня строже.
+                if (estimate.tariffRaised) {
+                    RaisedTariffRow(estimate)
+                }
                 Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
                         modifier = Modifier.weight(1f),
@@ -862,3 +868,41 @@ internal fun TelemedInputCard(clinics: List<String>, onSubmit: (Double, Double, 
     }
 }
 
+
+/**
+ * «Обычный минимум 900 ₽/ч → сегодня 1 150 ₽/ч».
+ *
+ * Это и есть смысл всех индексов: состояние меняет экономическое решение. Раньше
+ * усталость считалась на сервере, доезжала до телефона и нигде не показывалась —
+ * то есть не влияла ни на что.
+ */
+@Composable
+private fun RaisedTariffRow(estimate: CandidateEstimate) {
+    val tone = if (estimate.recoveryBlocksOutsideZone) VerdictColors.skip else VerdictColors.edge
+    val container = if (estimate.recoveryBlocksOutsideZone) VerdictColors.skipContainer else VerdictColors.edgeContainer
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(container)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Bolt, contentDescription = null, tint = tone, modifier = Modifier.size(18.dp))
+        Column {
+            Text(
+                "Сегодня твой минимум выше",
+                style = MaterialTheme.typography.labelMedium,
+                color = tone,
+            )
+            Text(
+                "${money(estimate.baseMinHourly)} → ${money(estimate.effectiveMinHourly)} " +
+                    "(+${estimate.recoveryMarkupPercent}%) — по долгу восстановления",
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = JetBrainsMono,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
