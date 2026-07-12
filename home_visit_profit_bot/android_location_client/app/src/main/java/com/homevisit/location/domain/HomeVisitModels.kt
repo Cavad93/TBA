@@ -515,6 +515,8 @@ enum class SettingType(val wire: String) {
     Text("text"),
     Bool("bool"),
     ListValue("list"),
+    /** Зоны обслуживания: область → город → районы (JSON). */
+    Zones("zones"),
     Unknown("");
 
     companion object {
@@ -529,6 +531,8 @@ data class SettingField(
     val textValue: String = "",
     val boolValue: Boolean = false,
     val listValue: List<String> = emptyList(),
+    /** Одно предложение: что это за параметр и зачем он нужен. */
+    val hint: String = "",
 )
 
 data class SettingsSection(

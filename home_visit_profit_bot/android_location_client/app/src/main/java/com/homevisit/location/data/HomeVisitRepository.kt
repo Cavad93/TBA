@@ -910,7 +910,7 @@ class HomeVisitRepository private constructor(
                         type = type,
                         textValue = when (type) {
                             SettingType.Number -> formatSettingNumber(fieldJson.optDouble("value", 0.0))
-                            SettingType.Text -> fieldJson.optString("value")
+                            SettingType.Text, SettingType.Zones -> fieldJson.optString("value")
                             else -> ""
                         },
                         boolValue = type == SettingType.Bool && fieldJson.optBoolean("value", false),
@@ -920,6 +920,7 @@ class HomeVisitRepository private constructor(
                         } else {
                             emptyList()
                         },
+                        hint = fieldJson.optString("hint"),
                     )
                 )
             }

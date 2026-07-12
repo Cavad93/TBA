@@ -174,17 +174,25 @@ internal fun SettingsScreen(
     onSync: () -> Unit,
     onOpenReports: () -> Unit = {},
     onOpenFatigue: () -> Unit = {},
+    onOpenAppSettings: () -> Unit = {},
+    onOpenZones: () -> Unit = {},
 ) {
+    // Настройки — это меню, а не простыня полей: сами параметры живут на своих
+    // страницах, а здесь только вход в них. Аккаунт — последним пунктом.
     ScreenColumn {
-        SettingsMenuItem("Подробные отчёты", "День, месяц, год и разбивка по клиникам", onOpenReports)
-        SettingsMenuItem("Нагрузка и восстановление", "Тренды, самочувствие, калибровка", onOpenFatigue)
-        GpsSettingsCard(settingsState)
-        OrderSourceCard()
-        AppSettingsCard(
-            appSettings = appSettings,
-            onRefresh = workActions.onRefreshAppSettings,
-            onSave = workActions.onSaveAppSettings,
+        SettingsMenuItem(
+            "Параметры расчёта",
+            "Деньги, машина, старт и финиш, компании, время и GPS",
+            onOpenAppSettings,
         )
+        SettingsMenuItem(
+            "Зоны обслуживания",
+            "Где вы работаете обычно: область, город, районы",
+            onOpenZones,
+        )
+        SettingsMenuItem("Подробные отчёты", "День, месяц, год и разбивка по компаниям", onOpenReports)
+        SettingsMenuItem("Нагрузка и восстановление", "Тренды, самочувствие, калибровка", onOpenFatigue)
+        OrderSourceCard()
         SyncControlCard(
             syncState = syncState,
             onSync = onSync,
@@ -195,10 +203,7 @@ internal fun SettingsScreen(
             onImportBackup = workActions.onImportBackup,
             showImport = true,
         )
-        CompactCard(
-            title = "Что здесь важно",
-            body = "Вход выполняется по вашему аккаунту — данные видны только вам. Адрес сервера подставлен автоматически и нужен для расчёта маршрутов, отчётов, нагрузки и синхронизации. Настройки экономики, авто, компаний и районов редактируются здесь и уходят на сервер.",
-        )
+        AccountCard(settingsState)
     }
 }
 
@@ -315,8 +320,12 @@ internal fun AppSettingsSection(
     textEdits: MutableMap<String, String>,
     boolEdits: MutableMap<String, Boolean>,
 ) {
+    // Зоны обслуживания — не поле, а отдельная страница со своим объяснением.
+    val fields = section.fields.filter { it.type != SettingType.Zones }
+    if (fields.isEmpty()) return
+
     SectionHeader(section.title)
-    section.fields.forEach { field ->
+    fields.forEach { field ->
         // Шаблоны адресов хранятся как JSON — вместо сырого текстового поля даём
         // нормальный редактор «название + адрес».
         if (field.key == "address_templates") {
@@ -326,6 +335,7 @@ internal fun AppSettingsSection(
                 templates = parseAddressTemplates(raw),
                 onChange = { items -> textEdits[field.key] = serializeAddressTemplates(items) },
             )
+            SettingHint(field.hint)
             return@forEach
         }
         when (field.type) {
@@ -371,6 +381,51 @@ internal fun AppSettingsSection(
                 )
             }
         }
+        SettingHint(field.hint)
+    }
+    if (section.key == "car") {
+        FuelCostPerKmHint(textEdits = textEdits, fields = fields)
+    }
+}
+
+/** Одно предложение под полем: что это и зачем. Приходит с сервера вместе с настройкой. */
+@Composable
+private fun SettingHint(hint: String) {
+    if (hint.isBlank()) return
+    Text(
+        hint,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(bottom = 4.dp),
+    )
+}
+
+/**
+ * Стоимость километра пользователь не вводит — она считается из цены литра и расхода.
+ * Показываем результат, чтобы было видно, во что превращаются введённые числа.
+ */
+@Composable
+private fun FuelCostPerKmHint(textEdits: Map<String, String>, fields: List<SettingField>) {
+    fun value(key: String): Double? {
+        val field = fields.firstOrNull { it.key == key } ?: return null
+        return parseNumber(textEdits[key] ?: field.textValue)
+    }
+
+    val price = value("fuel_price_per_liter") ?: return
+    val consumption = value("fuel_consumption_l_per_100km") ?: return
+    if (price <= 0 || consumption <= 0) return
+
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = VerdictColors.goContainer),
+    ) {
+        Text(
+            "Получается ${money(price * consumption / 100)} за километр — по этой цифре " +
+                "считается, выгоден ли заказ.",
+            modifier = Modifier.padding(12.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = VerdictColors.onGoContainer,
+        )
     }
 }
 
@@ -622,7 +677,16 @@ internal fun SyncControlCard(
 }
 
 @Composable
-internal fun GpsSettingsCard(settingsState: GpsSettingsState) {
+/**
+ * Аккаунт — в самом низу настроек: «Выйти» и «Удалить» не должны попадаться под руку
+ * при обычной правке параметров.
+ *
+ * Адреса сервера и интервала GPS здесь больше нет. Это детали работы приложения:
+ * менять их незачем, а ошибка в них молча ломает вообще всё — заказы перестают
+ * оцениваться, отчёты не грузятся.
+ */
+@Composable
+internal fun AccountCard(settingsState: GpsSettingsState) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -645,6 +709,11 @@ internal fun GpsSettingsCard(settingsState: GpsSettingsState) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            Text(
+                "Данные видны только вам.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(modifier = Modifier.weight(1f), onClick = settingsState.onLogout) {
                     Text("Выйти")
@@ -655,32 +724,6 @@ internal fun GpsSettingsCard(settingsState: GpsSettingsState) {
                     onClick = { showDeleteConfirm = true },
                 ) {
                     Text("Удалить аккаунт")
-                }
-            }
-
-            Text("Подключение к серверу", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            OutlinedTextField(
-                value = settingsState.serverUrl,
-                onValueChange = settingsState.onServerUrlChange,
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                label = { Text("URL сервера") },
-                placeholder = { Text(MainActivity.DEFAULT_SERVER_URL) },
-            )
-            OutlinedTextField(
-                value = settingsState.intervalSeconds,
-                onValueChange = settingsState.onIntervalChange,
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                label = { Text("Интервал GPS, сек") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(modifier = Modifier.weight(1f), onClick = settingsState.onSave) {
-                    Text("Сохранить")
-                }
-                OutlinedButton(modifier = Modifier.width(132.dp), onClick = settingsState.onStartGps) {
-                    Text("GPS")
                 }
             }
         }

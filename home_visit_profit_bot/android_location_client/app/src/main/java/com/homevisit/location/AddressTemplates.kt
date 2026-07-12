@@ -45,6 +45,20 @@ internal fun parseAddressTemplates(json: String): List<AddressTemplate> {
     }
 }
 
+/**
+ * Развернуть название шаблона в полный адрес.
+ *
+ * Пользователь завёл «Дом → ул. Ленина, 40» и в «Оценке» набирает просто «Дом» —
+ * геокодер такой адрес не найдёт, поэтому подставляем сохранённый. Если введённое не
+ * совпало ни с одним названием, возвращаем как есть: это обычный адрес.
+ */
+internal fun resolveAddressTemplate(input: String, templates: List<AddressTemplate>): String {
+    val query = input.trim()
+    if (query.isEmpty()) return query
+    val match = templates.firstOrNull { it.name.trim().equals(query, ignoreCase = true) }
+    return match?.address ?: query
+}
+
 internal fun serializeAddressTemplates(items: List<AddressTemplate>): String {
     val array = JSONArray()
     items.forEach { template ->

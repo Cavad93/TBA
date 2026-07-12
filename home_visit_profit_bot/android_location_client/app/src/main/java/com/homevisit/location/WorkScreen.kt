@@ -427,6 +427,7 @@ internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
             // «Частый тариф» из настроек; если не задан — доход последнего заказа смены.
             frequentIncome = uiState.appSettings.settingNumber("frequent_income")
                 ?: uiState.routeVisits.lastOrNull()?.income,
+            templates = uiState.appSettings.addressTemplates(),
             onCalculate = workActions.onCalculateVisit,
             onReopenResult = { showResult = true },
         )
@@ -459,6 +460,7 @@ internal fun EvaluateForm(
     candidate: CandidateUiState,
     clinics: List<String>,
     frequentIncome: Double?,
+    templates: List<AddressTemplate>,
     onCalculate: (String, Double, String, Double?, Double?) -> Unit,
     onReopenResult: () -> Unit,
 ) {
@@ -482,6 +484,15 @@ internal fun EvaluateForm(
             label = { Text("Адрес") },
             singleLine = false,
         )
+        // Набрали название шаблона — показываем, какой адрес за ним стоит.
+        val resolved = resolveAddressTemplate(address, templates)
+        if (resolved != address.trim() && address.isNotBlank()) {
+            Text(
+                "Шаблон «${address.trim()}» → $resolved",
+                style = MaterialTheme.typography.labelMedium,
+                color = VerdictColors.go,
+            )
+        }
         MoneyField(value = incomeText, onValueChange = { incomeText = it }, label = "Доход, ₽")
         if (frequentIncome != null && frequentIncome > 0 && incomeText.isBlank()) {
             OutlinedButton(onClick = { incomeText = frequentIncome.toLong().toString() }) {
@@ -505,7 +516,9 @@ internal fun EvaluateForm(
             enabled = address.isNotBlank() && income != null && !candidate.isLoading,
             onClick = {
                 onCalculate(
-                    address,
+                    // Набрали название шаблона («Дом») — отправляем сохранённый за ним
+                    // адрес: геокодер по названию ничего не найдёт.
+                    resolveAddressTemplate(address, templates),
                     income ?: 0.0,
                     clinic,
                     if (hasManualRoute) routeKm else null,

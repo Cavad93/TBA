@@ -773,6 +773,8 @@ internal fun FirstFloor(
 
 internal enum class SettingsPage(val title: String) {
     Main("Настройки"),
+    App("Параметры расчёта"),
+    Zones("Зоны обслуживания"),
     Reports("Подробные отчёты"),
     Fatigue("Нагрузка и восстановление"),
 }
@@ -791,6 +793,14 @@ internal fun SettingsOverlay(
     onBack: () -> Unit,
 ) {
     var page by rememberSaveable { mutableStateOf(SettingsPage.Main) }
+    // Страницы параметров и зон бесполезны без каталога с сервера — тянем его сразу,
+    // чтобы пользователь не жал «Загрузить настройки» руками.
+    LaunchedEffect(page) {
+        val needsCatalog = page == SettingsPage.App || page == SettingsPage.Zones
+        if (needsCatalog && appSettings.snapshot == null && !appSettings.isLoading) {
+            workActions.onRefreshAppSettings()
+        }
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -813,7 +823,11 @@ internal fun SettingsOverlay(
                     settingsState, syncState, appSettings, workActions, onSync,
                     onOpenReports = { page = SettingsPage.Reports },
                     onOpenFatigue = { page = SettingsPage.Fatigue },
+                    onOpenAppSettings = { page = SettingsPage.App },
+                    onOpenZones = { page = SettingsPage.Zones },
                 )
+                SettingsPage.App -> AppSettingsPage(appSettings, workActions)
+                SettingsPage.Zones -> BaseZonesPage(appSettings, workActions)
                 SettingsPage.Reports -> ReportsScreen(reportState, workActions)
                 SettingsPage.Fatigue -> FatigueScreen(fatigueState, workActions)
             }
