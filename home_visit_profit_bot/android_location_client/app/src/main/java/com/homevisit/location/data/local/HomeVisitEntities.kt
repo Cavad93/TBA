@@ -4,6 +4,7 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.homevisit.location.domain.ExpenseCategory
+import com.homevisit.location.domain.VisitKind
 import com.homevisit.location.domain.VisitStatus
 import com.homevisit.location.domain.WorkDayStatus
 
