@@ -308,6 +308,52 @@ def test_mobile_sync_full_day_close_creates_stats_and_fatigue_feedback(config) -
     assert feedback["feedback_type"] == "mobile_end_day"
 
 
+def test_mobile_sync_close_day_takes_expenses_from_wizard_without_double_counting_food(config) -> None:
+    """Мастер завершения присылает расходы по категориям.
+
+    `food_expenses` — легаси-агрегат, который в finalize_day складывается с едой,
+    кофе и напитками. Мастер его НЕ шлёт, иначе еда посчиталась бы дважды.
+    """
+    with connect(config) as connection:
+        service = MobileApiService(connection)
+        service.process_sync_event(
+            _event("event-day", "day_started", "work_day", "client-day", {"id": "client-day", "start_odometer": 1000})
+        )
+        service.process_sync_event(
+            _event(
+                "event-close",
+                "day_closed",
+                "work_day",
+                "client-day",
+                {
+                    "id": "client-day",
+                    "actual_km": 40,
+                    "completed_visits_count": 0,
+                    "total_work_minutes": 480,
+                    "actual_route_minutes": 120,
+                    "start_odometer": 1000,
+                    "end_odometer": 1050,
+                    "food_meal_expenses": 400,
+                    "coffee_expenses": 150,
+                    "drinks_expenses": 50,
+                    "parking_expenses": 300,
+                    "toll_expenses": 200,
+                    "other_expenses": 100,
+                },
+            )
+        )
+        stats = connection.execute("SELECT * FROM daily_stats WHERE work_day_id = 1").fetchone()
+
+    assert stats["food_meal_expenses"] == 400
+    assert stats["coffee_expenses"] == 150
+    assert stats["drinks_expenses"] == 50
+    # Еда + кофе + напитки, ровно один раз.
+    assert stats["food_expenses"] == 600
+    assert stats["parking_expenses"] == 300
+    assert stats["toll_expenses"] == 200
+    assert stats["other_expenses"] == 100
+
+
 def _event(event_id: str, event_type: str, entity_type: str, entity_id: str, payload: dict) -> dict:
     return {
         "event_id": event_id,

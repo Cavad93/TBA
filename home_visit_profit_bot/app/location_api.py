@@ -14,6 +14,7 @@ from app.config import AppConfig
 from app.database import current_user_id
 from app.db import connect
 from app.repositories import (
+    DailyStatsRepository,
     DrivingBehaviorRepository,
     LocationEventRepository,
     LocationSampleRepository,
@@ -23,6 +24,7 @@ from app.repositories import (
     WorkDayRepository,
 )
 from app.services.auth_service import AuthError, AuthService
+from app.services.day_summary_service import build_end_day_preview, preview_payload
 from app.services.home_service import HomeService
 from app.services.location_service import calculate_location_day_estimate, process_location_update
 from app.services.mobile_api_service import MobileApiService
@@ -77,6 +79,9 @@ def _handler_factory(config: AppConfig):
                 return
             if path == "/api/day/gps-estimate":
                 self._handle_day_gps_estimate()
+                return
+            if path == "/api/day/end-preview":
+                self._handle_day_end_preview()
                 return
             if path == "/api/route/active":
                 self._handle_active_route()
@@ -331,6 +336,27 @@ def _handler_factory(config: AppConfig):
                     },
                 }
             )
+
+        def _handle_day_end_preview(self) -> None:
+            """Расчётные итоги смены для мастера завершения (пользователь их подтверждает)."""
+            if not _authorize_request(self, config):
+                self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            with connect(config) as connection:
+                day = WorkDayRepository(connection).active()
+                if day is None:
+                    self._json_response({"ok": False, "reason": "no_active_day"})
+                    return
+                preview = build_end_day_preview(
+                    day=day,
+                    visits=VisitRepository(connection),
+                    samples=LocationSampleRepository(connection),
+                    location_state=WorkDayLocationRepository(connection),
+                    events=LocationEventRepository(connection),
+                    settings=SettingsRepository(connection),
+                    stats=DailyStatsRepository(connection),
+                )
+            self._json_response({"ok": True, "reason": "end_preview", "preview": preview_payload(preview)})
 
         def _handle_day_end(self) -> None:
             if not _authorize_request(self, config):

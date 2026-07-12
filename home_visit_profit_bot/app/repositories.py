@@ -686,6 +686,25 @@ class LocationSampleRepository:
         meters = float(row["meters"] or 0)
         return meters / 1000 / (seconds / 3600)
 
+    def total_km(self, work_day_id: int) -> float:
+        """Фактический пробег за смену по GPS-треку.
+
+        Отсекаем разрывы трека (`seconds_from_prev > 180`): после паузы в записи
+        следующая точка даёт «прыжок» по прямой, который пробегом не является.
+        """
+        row = self.connection.execute(
+            """
+            SELECT COALESCE(SUM(distance_from_prev_m), 0) AS meters
+            FROM location_samples
+            WHERE work_day_id = ?
+              AND is_valid = 1
+              AND seconds_from_prev > 0
+              AND seconds_from_prev <= 180
+            """,
+            (work_day_id,),
+        ).fetchone()
+        return float(row["meters"] or 0) / 1000 if row else 0.0
+
     def route_minutes_between(self, work_day_id: int, start_at: str | None, end_at: str | None, moving_speed_kmh: float) -> float:
         where = [
             "work_day_id = ?",

@@ -1,0 +1,166 @@
+"""Предрасчёт итогов смены для мастера завершения.
+
+Мастер завершения смены не заставляет пользователя вводить цифры с нуля: сервер
+считает всё, что может (пробег, одометр, длительности, уже записанные расходы),
+а пользователь только подтверждает или правит. Здесь собирается этот предрасчёт.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from app.models import WorkDay
+from app.repositories import (
+    DailyStatsRepository,
+    LocationEventRepository,
+    LocationSampleRepository,
+    SettingsRepository,
+    VisitRepository,
+    WorkDayLocationRepository,
+)
+from app.services.location_service import calculate_location_day_estimate
+
+# Насколько цена литра может отличаться от прошлой заправки, прежде чем мы
+# заподозрим опечатку в сумме или объёме и попросим подтверждение.
+FUEL_PRICE_WARN_RATIO = 0.10
+
+# Ниже этого GPS-трек считаем недостоверным (телефон лежал без связи, GPS был
+# выключен) и откатываемся на плановый километраж по заказам.
+MIN_TRUSTED_GPS_KM = 0.5
+
+
+@dataclass(frozen=True)
+class EndDayPreview:
+    """Расчётные значения, которые мастер показывает на подтверждение."""
+
+    gps_km: float = 0.0
+    planned_km: float = 0.0
+    suggested_km: float = 0.0
+    km_source: str = "planned"  # gps | planned
+
+    start_odometer: float = 0.0
+    suggested_end_odometer: float = 0.0
+
+    total_work_minutes: float = 0.0
+    driving_minutes: float = 0.0
+    avg_service_minutes: float = 0.0
+    completed_visits_count: int = 0
+    minutes_source: str = "planned"  # gps | planned
+
+    expenses: dict[str, float] = field(default_factory=dict)
+
+    last_fuel_price_per_liter: float = 0.0
+    fuel_consumption_l_per_100km: float = 0.0
+    fuel_price_warn_ratio: float = FUEL_PRICE_WARN_RATIO
+
+
+def last_fuel_price_per_liter(
+    stats: DailyStatsRepository,
+    settings: SettingsRepository,
+    days: int = 14,
+) -> float:
+    """Цена литра по последней известной заправке, иначе — из настроек.
+
+    Пользователь просил именно «последнюю», а не среднее: если он заправился
+    вчера по новой цене, сравнивать сегодняшний ввод нужно с ней.
+    """
+    for row in stats.last(days):
+        keys = row.keys()
+        if "fuel_purchase_expenses" not in keys or "fuel_liters" not in keys:
+            continue
+        expenses = float(row["fuel_purchase_expenses"] or 0)
+        liters = float(row["fuel_liters"] or 0)
+        if expenses > 0 and liters > 0:
+            return expenses / liters
+    return settings.get_float("fuel_price_per_liter", 70.0)
+
+
+def build_end_day_preview(
+    *,
+    day: WorkDay,
+    visits: VisitRepository,
+    samples: LocationSampleRepository,
+    location_state: WorkDayLocationRepository,
+    events: LocationEventRepository,
+    settings: SettingsRepository,
+    stats: DailyStatsRepository,
+) -> EndDayPreview:
+    day_visits = visits.list_for_day(day.id, ("accepted", "completed"))
+    completed = [visit for visit in day_visits if visit.status == "completed"]
+
+    planned_km = sum(visit.estimated_extra_km for visit in day_visits)
+    planned_route_minutes = sum(visit.estimated_extra_minutes for visit in day_visits)
+
+    gps_km = samples.total_km(day.id)
+    use_gps_km = gps_km >= MIN_TRUSTED_GPS_KM
+    suggested_km = gps_km if use_gps_km else planned_km
+
+    estimate = calculate_location_day_estimate(
+        day=day,
+        samples=samples,
+        location_state=location_state,
+        events=events,
+    )
+    use_gps_minutes = estimate.total_work_minutes > 0
+    if use_gps_minutes:
+        total_work_minutes = estimate.total_work_minutes
+        driving_minutes = estimate.route_minutes
+        avg_service_minutes = estimate.avg_service_minutes
+    else:
+        total_work_minutes = (
+            planned_route_minutes
+            + len(day_visits) * day.planned_service_minutes
+            + day.telemed_minutes
+            + day.office_minutes
+        )
+        driving_minutes = planned_route_minutes
+        avg_service_minutes = day.planned_service_minutes
+    if avg_service_minutes <= 0:
+        avg_service_minutes = day.planned_service_minutes
+
+    start_odometer = float(day.start_odometer or 0)
+
+    return EndDayPreview(
+        gps_km=round(gps_km, 1),
+        planned_km=round(planned_km, 1),
+        suggested_km=round(suggested_km, 1),
+        km_source="gps" if use_gps_km else "planned",
+        start_odometer=start_odometer,
+        suggested_end_odometer=round(start_odometer + suggested_km, 1),
+        total_work_minutes=round(total_work_minutes),
+        driving_minutes=round(driving_minutes),
+        avg_service_minutes=round(avg_service_minutes),
+        completed_visits_count=len(completed),
+        minutes_source="gps" if use_gps_minutes else "planned",
+        expenses={
+            "food_meal_expenses": float(day.food_meal_expenses or 0),
+            "coffee_expenses": float(day.coffee_expenses or 0),
+            "drinks_expenses": float(day.drinks_expenses or 0),
+            "parking_expenses": float(day.parking_expenses or 0),
+            "toll_expenses": float(day.toll_expenses or 0),
+            "other_expenses": float(day.other_expenses or 0),
+        },
+        last_fuel_price_per_liter=round(last_fuel_price_per_liter(stats, settings), 2),
+        fuel_consumption_l_per_100km=settings.get_float("fuel_consumption_l_per_100km", 10.0),
+    )
+
+
+def preview_payload(preview: EndDayPreview) -> dict[str, Any]:
+    return {
+        "gps_km": preview.gps_km,
+        "planned_km": preview.planned_km,
+        "suggested_km": preview.suggested_km,
+        "km_source": preview.km_source,
+        "start_odometer": preview.start_odometer,
+        "suggested_end_odometer": preview.suggested_end_odometer,
+        "total_work_minutes": preview.total_work_minutes,
+        "driving_minutes": preview.driving_minutes,
+        "avg_service_minutes": preview.avg_service_minutes,
+        "completed_visits_count": preview.completed_visits_count,
+        "minutes_source": preview.minutes_source,
+        "expenses": preview.expenses,
+        "last_fuel_price_per_liter": preview.last_fuel_price_per_liter,
+        "fuel_consumption_l_per_100km": preview.fuel_consumption_l_per_100km,
+        "fuel_price_warn_ratio": preview.fuel_price_warn_ratio,
+    }
