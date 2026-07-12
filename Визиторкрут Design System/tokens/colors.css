@@ -1,0 +1,152 @@
+/* ============================================================
+   Визиторкрут — Color tokens
+   Warm, high-contrast "wayfinding" palette built for glanceable,
+   in-sunlight reading. Green is the brand because the whole
+   product exists to find the trips worth taking (стоит ехать).
+   The verdict scale (go / edge / skip) is the semantic spine.
+   ============================================================ */
+
+:root {
+  /* ---------- Base ramps ---------- */
+
+  /* Green — brand + "стоит ехать" (worth it / go) */
+  --green-50:  #E9F8EF;
+  --green-100: #C8EDD5;
+  --green-200: #97DEB2;
+  --green-300: #5FCB8C;
+  --green-400: #26B268;
+  --green-500: #12A150;   /* brand primary */
+  --green-600: #0C8442;
+  --green-700: #0B6A37;
+  --green-800: #0C532D;
+  --green-900: #0B3E23;
+
+  /* Red — danger + "не стоит" (skip) */
+  --red-50:  #FDECEC;
+  --red-100: #FAD3D3;
+  --red-200: #F3AEAE;
+  --red-300: #EC8585;
+  --red-400: #E35B5B;
+  --red-500: #D93B3B;
+  --red-600: #BE2A2A;
+  --red-700: #9C2020;
+  --red-800: #7C1B1B;
+  --red-900: #5E1717;
+
+  /* Amber — warning + "на грани" (borderline) */
+  --amber-50:  #FEF5E4;
+  --amber-100: #FBE7BC;
+  --amber-200: #F7D485;
+  --amber-300: #F2BE4B;
+  --amber-400: #F2A81E;   /* borderline fill */
+  --amber-500: #E8930C;
+  --amber-600: #B5760B;
+  --amber-700: #8E5B0A;
+  --amber-800: #6E470B;
+  --amber-900: #52360A;
+
+  /* Blue — info + route line + links (the "navigator" nod) */
+  --blue-50:  #EAF1FD;
+  --blue-100: #CDDDFA;
+  --blue-200: #A6C2F4;
+  --blue-300: #75A0EC;
+  --blue-400: #4A80E4;
+  --blue-500: #2F6FE0;
+  --blue-600: #1E57C4;
+  --blue-700: #18449B;
+  --blue-800: #163878;
+  --blue-900: #142E5C;
+
+  /* Warm neutrals — paper & ink */
+  --neutral-0:   #FFFFFF;
+  --neutral-50:  #F7F6F1;
+  --neutral-100: #EEEBE3;
+  --neutral-200: #DEDACE;
+  --neutral-300: #C6C1B2;
+  --neutral-400: #A39D8C;
+  --neutral-500: #7E786C;
+  --neutral-600: #5E594F;
+  --neutral-700: #46423A;
+  --neutral-800: #2E2B25;
+  --neutral-900: #1B1914;
+  --neutral-950: #100F0B;
+
+  --paper: #F4F2EB;   /* app / page background */
+  --ink:   #17160F;   /* warm near-black — brand foundation */
+
+  /* ---------- Semantic aliases ---------- */
+
+  /* Surfaces */
+  --color-bg: var(--paper);
+  --color-bg-sunken: var(--neutral-100);
+  --color-surface: var(--neutral-0);
+  --color-surface-sunken: var(--neutral-50);
+  --color-surface-inverse: var(--ink);
+  --color-scrim: rgba(23, 22, 15, 0.55);
+
+  /* Text */
+  --text-primary: var(--ink);
+  --text-secondary: var(--neutral-600);
+  --text-tertiary: var(--neutral-500);
+  --text-disabled: var(--neutral-400);
+  --text-inverse: #FFFFFF;
+  --text-on-brand: #FFFFFF;
+  --text-link: var(--blue-600);
+  --text-link-hover: var(--blue-700);
+
+  /* Borders */
+  --border-subtle: var(--neutral-100);
+  --border-default: var(--neutral-200);
+  --border-strong: var(--neutral-300);
+  --border-inverse: rgba(255, 255, 255, 0.16);
+
+  /* Brand */
+  --brand: var(--green-500);
+  --brand-hover: var(--green-600);
+  --brand-active: var(--green-700);
+  --brand-subtle: var(--green-50);
+  --brand-subtle-border: var(--green-100);
+  --on-brand: #FFFFFF;
+  --focus-ring: rgba(18, 161, 80, 0.40);
+
+  /* Status */
+  --success: var(--green-500);
+  --success-bg: var(--green-50);
+  --success-border: var(--green-200);
+  --success-text: var(--green-700);
+
+  --danger: var(--red-500);
+  --danger-bg: var(--red-50);
+  --danger-border: var(--red-200);
+  --danger-text: var(--red-700);
+  --danger-hover: var(--red-600);
+
+  --warning: var(--amber-400);
+  --warning-bg: var(--amber-50);
+  --warning-border: var(--amber-200);
+  --warning-text: var(--amber-700);
+
+  --info: var(--blue-500);
+  --info-bg: var(--blue-50);
+  --info-border: var(--blue-200);
+  --info-text: var(--blue-700);
+
+  /* ---------- Verdict scale (product core) ---------- */
+  --verdict-go: var(--green-500);
+  --verdict-go-bg: var(--green-50);
+  --verdict-go-border: var(--green-200);
+  --verdict-go-text: var(--green-700);
+
+  --verdict-edge: var(--amber-400);
+  --verdict-edge-bg: var(--amber-50);
+  --verdict-edge-border: var(--amber-200);
+  --verdict-edge-text: var(--amber-700);
+
+  --verdict-skip: var(--red-500);
+  --verdict-skip-bg: var(--red-50);
+  --verdict-skip-border: var(--red-200);
+  --verdict-skip-text: var(--red-700);
+
+  /* Route / navigation accent */
+  --route: var(--blue-500);
+}

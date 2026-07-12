@@ -98,6 +98,57 @@ def test_preview_returns_recorded_expenses_as_defaults(config) -> None:
     assert preview.expenses["other_expenses"] == 0
 
 
+def test_reconcile_trims_km_above_odometer_instead_of_failing() -> None:
+    from app.models import EndDayData
+    from app.services.day_summary_service import reconcile_end_day_data
+
+    data = EndDayData(
+        actual_km=120,  # больше, чем показывает одометр
+        completed_visits_count=3,
+        total_work_minutes=480,
+        actual_route_minutes=120,
+        start_odometer=1000,
+        end_odometer=1050,
+        odometer_km=50,
+        fuel_expenses=0,
+        fuel_liters=0,
+        fuel_consumption_l_per_100km=0,
+        telemed_income=0,
+        telemed_minutes=0,
+        parking_expenses=0,
+    )
+
+    fixed = reconcile_end_day_data(data)
+
+    assert fixed.actual_km == 50
+
+
+def test_reconcile_raises_total_time_to_fit_driving_and_remote_work() -> None:
+    from app.models import EndDayData
+    from app.services.day_summary_service import reconcile_end_day_data
+
+    data = EndDayData(
+        actual_km=40,
+        completed_visits_count=1,
+        total_work_minutes=200,  # меньше, чем дорога + удалёнка + работа на точке
+        actual_route_minutes=120,
+        start_odometer=1000,
+        end_odometer=1100,
+        odometer_km=100,
+        fuel_expenses=0,
+        fuel_liters=0,
+        fuel_consumption_l_per_100km=0,
+        telemed_income=0,
+        telemed_minutes=90,
+        parking_expenses=0,
+        office_minutes=60,
+    )
+
+    fixed = reconcile_end_day_data(data)
+
+    assert fixed.total_work_minutes == 270
+
+
 def test_preview_uses_settings_fuel_price_until_first_refuel(config) -> None:
     with connect(config) as connection:
         days = WorkDayRepository(connection)

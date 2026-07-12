@@ -1,0 +1,50 @@
+/* ============================================================
+   Визиторкрут — Spacing, radii & sizing
+   4px base grid. Chunky-but-not-bubbly radii: confident field
+   tool, large touch targets (min 44px), never fully-rounded
+   unless it's a pill.
+   ============================================================ */
+
+:root {
+  /* Spacing scale (4px base) */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+  --space-32: 128px;
+
+  /* Corner radii */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;   /* inputs, small controls */
+  --radius-lg: 12px;   /* buttons */
+  --radius-xl: 16px;   /* cards */
+  --radius-2xl: 20px;  /* large surfaces / sheets */
+  --radius-3xl: 28px;  /* hero panels */
+  --radius-pill: 999px;
+
+  /* Control heights — thumb-friendly */
+  --control-sm: 36px;
+  --control-md: 44px;   /* default tap target */
+  --control-lg: 52px;
+  --control-xl: 60px;   /* primary "взять заказ" */
+
+  /* Border widths */
+  --border-width: 1px;
+  --border-width-strong: 1.5px;
+  --border-width-focus: 2px;
+
+  /* Layout */
+  --container-max: 1200px;
+  --app-width: 390px;      /* reference phone width */
+  --page-gutter: var(--space-6);
+}

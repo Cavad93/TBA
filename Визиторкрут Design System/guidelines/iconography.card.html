@@ -1,0 +1,42 @@
+<!-- @dsCard group="Brand" viewport="700x180" name="Иконки — Lucide" subtitle="Stroke 1.75 · rounded · substitution, see readme" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 24px; }
+  .grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 14px 10px; }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+  .cell svg { width: 26px; height: 26px; stroke-width: 1.75; color: var(--ink); }
+  .cell.go svg { color: var(--brand); }
+  .lbl { font-family: var(--font-mono); font-size: 9px; color: var(--text-tertiary); }
+</style>
+</head>
+<body>
+  <div class="grid">
+    <div class="cell go"><i data-lucide="navigation"></i><span class="lbl">navigation</span></div>
+    <div class="cell"><i data-lucide="map-pin"></i><span class="lbl">map-pin</span></div>
+    <div class="cell"><i data-lucide="route"></i><span class="lbl">route</span></div>
+    <div class="cell"><i data-lucide="car-front"></i><span class="lbl">car</span></div>
+    <div class="cell"><i data-lucide="bike"></i><span class="lbl">bike</span></div>
+    <div class="cell"><i data-lucide="package"></i><span class="lbl">package</span></div>
+    <div class="cell"><i data-lucide="stethoscope"></i><span class="lbl">stethoscope</span></div>
+    <div class="cell"><i data-lucide="wrench"></i><span class="lbl">wrench</span></div>
+    <div class="cell go"><i data-lucide="wallet"></i><span class="lbl">wallet</span></div>
+    <div class="cell"><i data-lucide="fuel"></i><span class="lbl">fuel</span></div>
+    <div class="cell"><i data-lucide="clock"></i><span class="lbl">clock</span></div>
+    <div class="cell"><i data-lucide="gauge"></i><span class="lbl">gauge</span></div>
+    <div class="cell go"><i data-lucide="circle-check"></i><span class="lbl">check</span></div>
+    <div class="cell"><i data-lucide="circle-x"></i><span class="lbl">x</span></div>
+    <div class="cell"><i data-lucide="banknote"></i><span class="lbl">banknote</span></div>
+    <div class="cell"><i data-lucide="timer"></i><span class="lbl">timer</span></div>
+    <div class="cell"><i data-lucide="star"></i><span class="lbl">star</span></div>
+    <div class="cell"><i data-lucide="bell"></i><span class="lbl">bell</span></div>
+    <div class="cell"><i data-lucide="user-round"></i><span class="lbl">user</span></div>
+    <div class="cell"><i data-lucide="settings"></i><span class="lbl">settings</span></div>
+  </div>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

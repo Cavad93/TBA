@@ -1,0 +1,15 @@
+/* ============================================================
+   Визиторкрут — Fonts
+   Webfonts loaded from Google Fonts CDN (see readme "Caveats").
+   - Unbounded  : display / big verdict moments (full Cyrillic)
+   - Golos Text : UI + body workhorse (Paratype, Cyrillic-first)
+   - JetBrains Mono : data / numbers (tabular, Cyrillic)
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Unbounded:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --font-display: 'Unbounded', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-sans: 'Golos Text', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
+}

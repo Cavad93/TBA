@@ -1,0 +1,42 @@
+<!-- @dsCard group="Colors" viewport="700x172" name="Семантика и синий-маршрут" subtitle="Status colors + the blue that means «road»" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 24px; }
+  .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .cell { display: flex; flex-direction: column; gap: 8px; }
+  .bar { height: 44px; border-radius: 10px; display: flex; align-items: center;
+         padding: 0 14px; color: #fff; font-weight: 700; font-size: 14px; }
+  .sub { display: flex; align-items: center; gap: 8px; }
+  .tint { height: 24px; flex: 1; border-radius: 6px; border: 1px solid; }
+  .tok { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="cell">
+      <div class="bar" style="background:var(--success)">Success</div>
+      <div class="sub"><div class="tint" style="background:var(--success-bg);border-color:var(--success-border)"></div></div>
+      <div class="tok">--success</div>
+    </div>
+    <div class="cell">
+      <div class="bar" style="background:var(--warning);color:var(--ink)">Warning</div>
+      <div class="sub"><div class="tint" style="background:var(--warning-bg);border-color:var(--warning-border)"></div></div>
+      <div class="tok">--warning</div>
+    </div>
+    <div class="cell">
+      <div class="bar" style="background:var(--danger)">Danger</div>
+      <div class="sub"><div class="tint" style="background:var(--danger-bg);border-color:var(--danger-border)"></div></div>
+      <div class="tok">--danger</div>
+    </div>
+    <div class="cell">
+      <div class="bar" style="background:var(--info)">Info · Route</div>
+      <div class="sub"><div class="tint" style="background:var(--info-bg);border-color:var(--info-border)"></div></div>
+      <div class="tok">--info · --route</div>
+    </div>
+  </div>
+</body>
+</html>

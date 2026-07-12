@@ -1,0 +1,50 @@
+<!-- @dsCard group="Colors" viewport="700x210" name="Вердикт" subtitle="The three-color spine: стоит / на грани / не стоит" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 24px; }
+  .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .card {
+    border-radius: var(--radius-xl); padding: 16px 18px; display: flex;
+    flex-direction: column; gap: 10px; border: 1.5px solid;
+  }
+  .go   { background: var(--verdict-go-bg);   border-color: var(--verdict-go-border); }
+  .edge { background: var(--verdict-edge-bg); border-color: var(--verdict-edge-border); }
+  .skip { background: var(--verdict-skip-bg); border-color: var(--verdict-skip-border); }
+  .pill {
+    align-self: flex-start; border-radius: var(--radius-pill); padding: 6px 14px;
+    color: #fff; font-weight: 700; font-size: 13px; letter-spacing: .01em;
+  }
+  .go   .pill { background: var(--verdict-go); }
+  .edge .pill { background: var(--verdict-edge); color: var(--ink); }
+  .skip .pill { background: var(--verdict-skip); }
+  .name { font-weight: 700; font-size: 15px; }
+  .go   .name { color: var(--verdict-go-text); }
+  .edge .name { color: var(--verdict-edge-text); }
+  .skip .name { color: var(--verdict-skip-text); }
+  .tok { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="card go">
+      <span class="pill">Стоит ехать</span>
+      <span class="name">₽·час выше нормы</span>
+      <span class="tok">--verdict-go · #12A150</span>
+    </div>
+    <div class="card edge">
+      <span class="pill">На грани</span>
+      <span class="name">Решай сам</span>
+      <span class="tok">--verdict-edge · #F2A81E</span>
+    </div>
+    <div class="card skip">
+      <span class="pill">Не стоит</span>
+      <span class="name">Уйдёшь в минус по времени</span>
+      <span class="tok">--verdict-skip · #D93B3B</span>
+    </div>
+  </div>
+</body>
+</html>

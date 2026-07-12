@@ -272,6 +272,37 @@ data class EndDayDetails(
     val tollCompensation: Double,
     val otherExpenses: Double,
     val userFatigueScore: Double?,
+    val foodMealExpenses: Double = 0.0,
+    val coffeeExpenses: Double = 0.0,
+    val drinksExpenses: Double = 0.0,
+    val parkingExpenses: Double = 0.0,
+)
+
+/**
+ * Расчётные итоги смены с сервера: их мастер показывает на подтверждение, чтобы
+ * пользователь не вводил цифры с нуля.
+ */
+data class EndDayPreview(
+    val gpsKm: Double,
+    val plannedKm: Double,
+    val suggestedKm: Double,
+    val kmSource: String,
+    val startOdometer: Double,
+    val suggestedEndOdometer: Double,
+    val totalWorkMinutes: Double,
+    val drivingMinutes: Double,
+    val avgServiceMinutes: Double,
+    val completedVisitsCount: Int,
+    val minutesSource: String,
+    val foodMealExpenses: Double,
+    val coffeeExpenses: Double,
+    val drinksExpenses: Double,
+    val parkingExpenses: Double,
+    val tollExpenses: Double,
+    val otherExpenses: Double,
+    val lastFuelPricePerLiter: Double,
+    val fuelConsumptionLitersPer100Km: Double,
+    val fuelPriceWarnRatio: Double,
 )
 
 data class GpsDayEstimate(

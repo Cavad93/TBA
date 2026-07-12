@@ -1,0 +1,28 @@
+/* ============================================================
+   Визиторкрут — Elevation & borders
+   Warm-tinted shadows (never pure black) over a paper surface.
+   The system leans on crisp 1px borders first, soft shadow
+   second — a practical, high-legibility look, not floaty cards.
+   ============================================================ */
+
+:root {
+  /* Shadows — tinted with ink, soft and low */
+  --shadow-xs: 0 1px 2px rgba(23, 22, 15, 0.06);
+  --shadow-sm: 0 1px 2px rgba(23, 22, 15, 0.06), 0 1px 3px rgba(23, 22, 15, 0.05);
+  --shadow-md: 0 2px 4px rgba(23, 22, 15, 0.05), 0 6px 16px rgba(23, 22, 15, 0.08);
+  --shadow-lg: 0 4px 8px rgba(23, 22, 15, 0.06), 0 12px 32px rgba(23, 22, 15, 0.12);
+  --shadow-xl: 0 8px 16px rgba(23, 22, 15, 0.08), 0 24px 56px rgba(23, 22, 15, 0.16);
+
+  /* Bottom-sheet / raised nav casts upward */
+  --shadow-sheet: 0 -2px 8px rgba(23, 22, 15, 0.06), 0 -8px 32px rgba(23, 22, 15, 0.10);
+
+  /* Inset — pressed / sunken fields */
+  --shadow-inset: inset 0 1px 2px rgba(23, 22, 15, 0.08);
+
+  /* Focus ring (composable) */
+  --ring-focus: 0 0 0 3px var(--focus-ring);
+
+  /* Colored glows for verdict emphasis (used sparingly) */
+  --glow-go: 0 4px 20px rgba(18, 161, 80, 0.22);
+  --glow-skip: 0 4px 20px rgba(217, 59, 59, 0.20);
+}

@@ -9,6 +9,7 @@ import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.CandidateEstimate
 import com.homevisit.location.domain.ClinicOptions
 import com.homevisit.location.domain.EndDayDetails
+import com.homevisit.location.domain.EndDayPreview
 import com.homevisit.location.domain.ExpenseCategory
 import com.homevisit.location.domain.FatigueCorrelationReport
 import com.homevisit.location.domain.FatigueSnapshot
@@ -43,6 +44,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     private val candidateState = MutableStateFlow(CandidateUiState())
     private val routeState = MutableStateFlow(RouteUiState())
     private val gpsEstimateState = MutableStateFlow(GpsEstimateUiState())
+    private val endShiftState = MutableStateFlow(EndShiftUiState())
     private val gpsHintState = MutableStateFlow(GpsHintUiState())
     private val reportState = MutableStateFlow(ReportUiState())
     private val fatigueState = MutableStateFlow(FatigueUiState())
@@ -101,8 +103,14 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
 
-    private val operationalState = combine(routeState, gpsEstimateState, gpsHintState, reportState, fatigueState) { route, gpsEstimate, gpsHint, report, fatigue ->
-        OperationalUiState(route, gpsEstimate, gpsHint, report, fatigue)
+    // combine принимает максимум пять потоков, поэтому оценку дня и состояние мастера
+    // завершения сначала сводим в пару.
+    private val estimatesState = combine(gpsEstimateState, endShiftState) { gpsEstimate, endShift ->
+        gpsEstimate to endShift
+    }
+
+    private val operationalState = combine(routeState, estimatesState, gpsHintState, reportState, fatigueState) { route, estimates, gpsHint, report, fatigue ->
+        OperationalUiState(route, estimates.first, gpsHint, report, fatigue, estimates.second)
     }
 
     private val auxState = combine(appSettingsState, clinicsState, homeStateFlow, shiftStateFlow, profileStateFlow) { appSettings, clinics, home, shift, profile ->
@@ -132,6 +140,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             gpsHint = operational.gpsHint,
             report = operational.report,
             fatigue = operational.fatigue,
+            endShift = operational.endShift,
             sync = sync,
             appSettings = aux.appSettings,
             clinics = aux.clinics,
@@ -480,6 +489,31 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /**
+     * Готовит мастер завершения: спрашивает у сервера расчётные итоги смены.
+     * Если сервер недоступен, мастер всё равно откроется — просто без подсказок.
+     */
+    fun prepareEndShift(serverUrl: String, apiKey: String) {
+        viewModelScope.launch {
+            endShiftState.value = EndShiftUiState(isLoading = true)
+            if (serverUrl.isBlank() || apiKey.isBlank()) {
+                endShiftState.value = EndShiftUiState(message = "Нет связи с сервером — введите значения вручную")
+                return@launch
+            }
+            repository.syncPending(serverUrl, apiKey)
+            val preview = repository.fetchEndDayPreview(serverUrl, apiKey)
+            endShiftState.value = if (preview == null) {
+                EndShiftUiState(message = "Не удалось получить расчёт — введите значения вручную")
+            } else {
+                EndShiftUiState(preview = preview)
+            }
+        }
+    }
+
+    fun clearEndShift() {
+        endShiftState.value = EndShiftUiState()
+    }
+
     fun refreshActiveReport(serverUrl: String, apiKey: String, clinic: String? = null) {
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) {
@@ -803,6 +837,7 @@ data class HomeVisitUiState(
     val routeVisits: List<RouteVisitUi> = emptyList(),
     val serverRoute: RouteUiState = RouteUiState(),
     val gpsEstimate: GpsEstimateUiState = GpsEstimateUiState(),
+    val endShift: EndShiftUiState = EndShiftUiState(),
     val gpsHint: GpsHintUiState = GpsHintUiState(),
     val report: ReportUiState = ReportUiState(),
     val fatigue: FatigueUiState = FatigueUiState(),
@@ -823,6 +858,14 @@ private data class OperationalUiState(
     val gpsHint: GpsHintUiState,
     val report: ReportUiState,
     val fatigue: FatigueUiState,
+    val endShift: EndShiftUiState,
+)
+
+/** Расчётные итоги смены для мастера завершения. */
+data class EndShiftUiState(
+    val isLoading: Boolean = false,
+    val preview: EndDayPreview? = null,
+    val message: String = "",
 )
 
 private data class AuxUiState(

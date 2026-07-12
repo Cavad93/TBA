@@ -1,0 +1,55 @@
+/* ============================================================
+   Визиторкрут — Base
+   Minimal reset + brand defaults. Consumers linking styles.css
+   get a paper background, Golos Text body, and branded links
+   out of the box.
+   ============================================================ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--text-primary);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4, h5, h6, p, figure { margin: 0; }
+
+a {
+  color: var(--text-link);
+  text-decoration: none;
+}
+a:hover { color: var(--text-link-hover); text-decoration: underline; }
+
+button { font-family: inherit; }
+
+img, svg, video { display: block; max-width: 100%; }
+
+::selection { background: var(--green-200); color: var(--ink); }
+
+:focus-visible {
+  outline: var(--border-width-focus) solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* Tabular numerals wherever a metric is shown */
+.tnum { font-feature-settings: var(--numeric-tabular); }
+
+/* Common surfaces */
+.surface {
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-xl);
+}
+.surface-sunken {
+  background: var(--color-surface-sunken);
+  border-radius: var(--radius-xl);
+}

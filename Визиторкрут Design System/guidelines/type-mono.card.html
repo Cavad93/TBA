@@ -1,0 +1,27 @@
+<!-- @dsCard group="Type" viewport="700x220" name="Данные — JetBrains Mono" subtitle="Tabular figures for ₽ · км · мин · ₽·ч" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 24px; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .metric { border: 1px solid var(--border-default); border-radius: var(--radius-lg);
+            padding: 12px 14px; background: var(--color-surface); }
+  .cap { font-family: var(--font-sans); font-size: 11px; font-weight: 700; letter-spacing: .08em;
+         text-transform: uppercase; color: var(--text-tertiary); }
+  .val { margin-top: 6px; }
+  .meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); margin-top: 12px; }
+</style>
+</head>
+<body>
+  <div class="grid">
+    <div class="metric"><div class="cap">Оплата</div><div class="val t-data-xl" style="color:var(--brand)">₽2 480</div></div>
+    <div class="metric"><div class="cap">Дистанция</div><div class="val t-data-xl">8,2<span style="font-size:16px"> км</span></div></div>
+    <div class="metric"><div class="cap">Время</div><div class="val t-data-xl">19<span style="font-size:16px"> мин</span></div></div>
+    <div class="metric"><div class="cap">Чистыми</div><div class="val t-data-xl">₽640<span style="font-size:16px">/ч</span></div></div>
+  </div>
+  <div class="meta">data-xl · JetBrains Mono 600 · tnum lnum — цифры всегда моноширинные, чтобы колонки не «прыгали».</div>
+</body>
+</html>

@@ -1,0 +1,53 @@
+<!-- @dsCard group="Components" viewport="700x340" name="Вердикт и метрики" subtitle="Verdict + Metric — ядро продукта" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+  body { margin: 0; padding: 24px; }
+  .demo { display: flex; flex-direction: column; gap: 16px; }
+  .blocks { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .metrics { display: flex; gap: 28px; padding: 16px; border: 1px solid var(--border-default);
+             border-radius: var(--radius-xl); background: var(--color-surface); }
+  .lbl { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+         color: var(--text-tertiary); width: 100%; margin-bottom: -4px; }
+</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script src="../../_ds_bundle.js"></script>
+  <script type="text/babel" data-presets="react">
+    const { Verdict, Metric, Icon } = window.DesignSystem_ee81bc;
+    function Demo() {
+      return (
+        <div className="demo">
+          <div className="blocks">
+            <Verdict level="go" reason="₽640/ч чистыми — выше твоей нормы" />
+            <Verdict level="edge" reason="Окупится только без пробок" />
+          </div>
+          <div className="row">
+            <span className="lbl">size sm — пилюли для ленты</span>
+            <Verdict level="go" size="sm" />
+            <Verdict level="edge" size="sm" />
+            <Verdict level="skip" size="sm" />
+          </div>
+          <span className="lbl">Metric — приборная панель</span>
+          <div className="metrics">
+            <Metric label="Оплата" value="2 480" unit="₽" tone="brand" size="lg" />
+            <Metric label="До клиента" value="8,2" unit="км" size="lg" />
+            <Metric label="В пути" value="19" unit="мин" size="lg" />
+            <Metric label={<>Чистыми/ч</>} icon={<Icon name="wallet" size={13} />} value="₽640" tone="go" size="lg" />
+          </div>
+        </div>
+      );
+    }
+    ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+  </script>
+</body>
+</html>

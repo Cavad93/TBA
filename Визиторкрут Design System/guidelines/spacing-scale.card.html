@@ -1,0 +1,25 @@
+<!-- @dsCard group="Spacing" viewport="700x196" name="Шкала отступов" subtitle="4px base grid" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 24px; display: flex; flex-direction: column; gap: 7px; }
+  .row { display: flex; align-items: center; gap: 12px; }
+  .bar { height: 16px; background: var(--brand); border-radius: 3px; }
+  .tok { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); width: 88px; }
+  .px { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
+</style>
+</head>
+<body>
+  <div class="row"><span class="tok">--space-1</span><div class="bar" style="width:4px"></div><span class="px">4</span></div>
+  <div class="row"><span class="tok">--space-2</span><div class="bar" style="width:8px"></div><span class="px">8</span></div>
+  <div class="row"><span class="tok">--space-3</span><div class="bar" style="width:12px"></div><span class="px">12</span></div>
+  <div class="row"><span class="tok">--space-4</span><div class="bar" style="width:16px"></div><span class="px">16</span></div>
+  <div class="row"><span class="tok">--space-6</span><div class="bar" style="width:24px"></div><span class="px">24</span></div>
+  <div class="row"><span class="tok">--space-8</span><div class="bar" style="width:32px"></div><span class="px">32</span></div>
+  <div class="row"><span class="tok">--space-12</span><div class="bar" style="width:48px"></div><span class="px">48</span></div>
+  <div class="row"><span class="tok">--space-16</span><div class="bar" style="width:64px"></div><span class="px">64</span></div>
+</body>
+</html>

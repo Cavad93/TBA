@@ -1,0 +1,39 @@
+<!-- @dsCard group="Colors" viewport="700x168" name="Поверхности и текст" subtitle="Surface + text tokens, on paper and on ink" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 24px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .panel { border-radius: var(--radius-lg); padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+  .light { background: var(--color-bg); border: 1px solid var(--border-default); }
+  .inverse { background: var(--color-surface-inverse); }
+  .card-demo { background: var(--color-surface); border: 1px solid var(--border-default);
+               border-radius: 8px; padding: 10px 12px; box-shadow: var(--shadow-sm); margin-bottom: 8px; }
+  .l1 { font-weight: 700; font-size: 15px; }
+  .l2 { font-size: 13px; }
+  .l3 { font-size: 12px; }
+  .tok { font-family: var(--font-mono); font-size: 10px; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="panel light">
+      <div class="card-demo">
+        <div class="l1" style="color:var(--text-primary)">Основной текст · --text-primary</div>
+        <div class="l2" style="color:var(--text-secondary)">Вторичный · --text-secondary</div>
+        <div class="l3" style="color:var(--text-tertiary)">Третичный · --text-tertiary</div>
+      </div>
+      <span class="tok" style="color:var(--text-tertiary)">surface на bg (paper)</span>
+    </div>
+    <div class="panel inverse">
+      <div class="l1" style="color:var(--text-inverse)">Инверсия · --text-inverse</div>
+      <div class="l2" style="color:rgba(255,255,255,.72)">Приглушённый на тёмном</div>
+      <div class="l3" style="color:rgba(255,255,255,.5)">--color-surface-inverse</div>
+      <span class="tok" style="color:rgba(255,255,255,.5); margin-top:6px;">ink surface</span>
+    </div>
+  </div>
+</body>
+</html>

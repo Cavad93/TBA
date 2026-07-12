@@ -1,0 +1,30 @@
+<!-- @dsCard group="Spacing" viewport="700x210" name="Движение" subtitle="Snappy, decisive — no bounce on functional UI" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 22px 24px; display: flex; flex-direction: column; gap: 12px; }
+  .track { display: flex; align-items: center; gap: 14px; }
+  .rail { position: relative; flex: 1; height: 12px; background: var(--neutral-100);
+          border-radius: var(--radius-pill); overflow: hidden; }
+  .dot { position: absolute; top: 1px; left: 1px; width: 10px; height: 10px; border-radius: 50%;
+         background: var(--brand); animation: run 2.4s infinite; }
+  .e-standard { animation-timing-function: cubic-bezier(0.2,0,0,1); }
+  .e-out { animation-timing-function: cubic-bezier(0.16,1,0.3,1); }
+  .e-inout { animation-timing-function: cubic-bezier(0.65,0,0.35,1); }
+  @keyframes run { 0% { left:1px } 45%,55% { left: calc(100% - 11px) } 100% { left:1px } }
+  .tok { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); width: 190px; }
+</style>
+</head>
+<body>
+  <div class="track"><span class="tok">--ease-standard</span><div class="rail"><div class="dot e-standard"></div></div></div>
+  <div class="track"><span class="tok">--ease-out</span><div class="rail"><div class="dot e-out"></div></div></div>
+  <div class="track"><span class="tok">--ease-in-out</span><div class="rail"><div class="dot e-inout"></div></div></div>
+  <div class="track" style="margin-top:2px;">
+    <span class="tok" style="color:var(--text-tertiary)">fast 120 · base 200 · slow 320</span>
+    <span class="tok" style="width:auto; color:var(--text-tertiary)">press → scale(0.97) · hover → lift 1px</span>
+  </div>
+</body>
+</html>

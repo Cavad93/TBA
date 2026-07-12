@@ -22,6 +22,7 @@ from app.services.settings_service import (
     allowed_clinics,
     allowed_telemed_clinics,
 )
+from app.services.day_summary_service import reconcile_end_day_data
 from app.services.stats_service import finalize_day
 
 
@@ -237,7 +238,7 @@ class MobileApiService:
                 raise ValueError("work_day_not_found")
             stats = finalize_day(
                 day=day,
-                data=_end_day_data_from_payload(day, payload),
+                data=reconcile_end_day_data(_end_day_data_from_payload(day, payload)),
                 day_repo=self.days,
                 visit_repo=self.visits,
                 stats_repo=DailyStatsRepository(self.connection),

@@ -1,0 +1,35 @@
+/* ============================================================
+   Визиторкрут — Motion
+   Snappy and decisive — a field tool must feel instant. Short
+   durations, a confident standard ease, no bounce on functional
+   UI. Press = quick scale-down; hover = subtle darken/lift.
+   ============================================================ */
+
+:root {
+  --duration-instant: 80ms;   /* @kind other */
+  --duration-fast: 120ms;     /* @kind other */
+  --duration-base: 200ms;     /* @kind other */
+  --duration-slow: 320ms;     /* @kind other */
+  --duration-slower: 480ms;   /* @kind other */
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);   /* @kind other */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);     /* @kind other */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);         /* @kind other */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1); /* @kind other */
+
+  /* Interaction primitives */
+  --press-scale: 0.97;          /* @kind other */
+  --lift: translateY(-1px);     /* @kind other */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 0ms;  /* @kind other */
+    --duration-fast: 0ms;     /* @kind other */
+    --duration-base: 0ms;     /* @kind other */
+    --duration-slow: 0ms;     /* @kind other */
+    --duration-slower: 0ms;   /* @kind other */
+    --press-scale: 1;         /* @kind other */
+    --lift: none;             /* @kind other */
+  }
+}

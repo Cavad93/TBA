@@ -1,0 +1,52 @@
+<!-- @dsCard group="Components" viewport="700x240" name="Выбор" subtitle="Checkbox · Radio · Switch — зелёный в активном состоянии" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+  body { margin: 0; padding: 24px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; }
+  .col { display: flex; flex-direction: column; gap: 14px; }
+  .lbl { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-tertiary); }
+</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script src="../../_ds_bundle.js"></script>
+  <script type="text/babel" data-presets="react">
+    const { Checkbox, Radio, Switch } = window.DesignSystem_ee81bc;
+    function Demo() {
+      const [c, setC] = React.useState(true);
+      const [shift, setShift] = React.useState('full');
+      const [online, setOnline] = React.useState(true);
+      return (
+        <div className="cols">
+          <div className="col">
+            <span className="lbl">Checkbox</span>
+            <Checkbox label="Только заказы рядом" description="В радиусе 5 км" checked={c} onChange={(e)=>setC(e.target.checked)} />
+            <Checkbox label="Учитывать пробки" defaultChecked />
+            <Checkbox label="Выбрать все" indeterminate />
+          </div>
+          <div className="col">
+            <span className="lbl">Radio · смена</span>
+            <Radio name="s" checked={shift==='full'} onChange={()=>setShift('full')} label="Полный день" />
+            <Radio name="s" checked={shift==='short'} onChange={()=>setShift('short')} label="Пара часов" description="Заканчиваю к обеду" />
+            <Radio name="s" checked={shift==='auto'} onChange={()=>setShift('auto')} label="По ситуации" />
+          </div>
+          <div className="col">
+            <span className="lbl">Switch</span>
+            <Switch label="Я на смене" checked={online} onChange={(e)=>setOnline(e.target.checked)} />
+            <Switch label="Считать бензин" labelPosition="left" spread defaultChecked />
+            <Switch label="Пуши" size="sm" />
+          </div>
+        </div>
+      );
+    }
+    ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+  </script>
+</body>
+</html>

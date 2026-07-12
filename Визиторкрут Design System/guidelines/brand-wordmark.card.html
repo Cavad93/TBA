@@ -1,0 +1,23 @@
+<!-- @dsCard group="Brand" viewport="700x180" name="Вордмарк" subtitle="Typographic only — no logo provided (see readme)" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; }
+  .panel { display: flex; align-items: center; justify-content: center; padding: 28px; }
+  .light { background: var(--paper); }
+  .dark { background: var(--ink); }
+  .mark { font-family: var(--font-display); font-weight: 800; font-size: 34px;
+          letter-spacing: -0.02em; }
+  .note { position: absolute; bottom: 10px; left: 16px; font-family: var(--font-mono);
+          font-size: 10px; color: var(--text-tertiary); }
+</style>
+</head>
+<body>
+  <div class="panel light"><span class="mark" style="color:var(--ink)">Визиторкрут</span></div>
+  <div class="panel dark"><span class="mark" style="color:#fff">Визиторкрут</span></div>
+  <span class="note">Unbounded 800 · −0.02em · wordmark, не логотип</span>
+</body>
+</html>

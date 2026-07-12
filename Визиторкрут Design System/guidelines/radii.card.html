@@ -1,0 +1,28 @@
+<!-- @dsCard group="Spacing" viewport="700x180" name="Радиусы скругления" subtitle="From controls to hero panels" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 24px; }
+  .row { display: flex; gap: 16px; align-items: flex-end; }
+  .cell { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  .box { width: 76px; height: 76px; background: var(--brand-subtle);
+         border: 1.5px solid var(--brand); border-bottom: none; border-right: none; }
+  .tok { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); }
+  .px { font-family: var(--font-mono); font-size: 10px; color: var(--text-tertiary); }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="cell"><div class="box" style="border-top-left-radius:var(--radius-sm)"></div><span class="tok">sm</span><span class="px">6</span></div>
+    <div class="cell"><div class="box" style="border-top-left-radius:var(--radius-md)"></div><span class="tok">md</span><span class="px">10</span></div>
+    <div class="cell"><div class="box" style="border-top-left-radius:var(--radius-lg)"></div><span class="tok">lg</span><span class="px">12</span></div>
+    <div class="cell"><div class="box" style="border-top-left-radius:var(--radius-xl)"></div><span class="tok">xl</span><span class="px">16</span></div>
+    <div class="cell"><div class="box" style="border-top-left-radius:var(--radius-2xl)"></div><span class="tok">2xl</span><span class="px">20</span></div>
+    <div class="cell"><div class="box" style="border-top-left-radius:var(--radius-3xl)"></div><span class="tok">3xl</span><span class="px">28</span></div>
+    <div class="cell"><div class="box" style="border-radius:var(--radius-pill)"></div><span class="tok">pill</span><span class="px">999</span></div>
+  </div>
+</body>
+</html>

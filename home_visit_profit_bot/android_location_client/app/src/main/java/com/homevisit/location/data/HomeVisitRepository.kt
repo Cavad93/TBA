@@ -20,6 +20,7 @@ import com.homevisit.location.domain.CbiInfo
 import com.homevisit.location.domain.ClinicOptions
 import com.homevisit.location.domain.ClinicReportRow
 import com.homevisit.location.domain.EndDayDetails
+import com.homevisit.location.domain.EndDayPreview
 import com.homevisit.location.domain.ExpenseCategory
 import com.homevisit.location.domain.FatigueCorrelationCell
 import com.homevisit.location.domain.FatigueCorrelationReport
@@ -700,6 +701,41 @@ class HomeVisitRepository private constructor(
         parseGpsDayEstimate(response.optJSONObject("estimate"))
     }
 
+    suspend fun fetchEndDayPreview(serverUrl: String, apiKey: String): EndDayPreview? = withContext(Dispatchers.IO) {
+        val response = getJson(normalizeApiUrl(serverUrl, "/api/day/end-preview"), apiKey) ?: return@withContext null
+        if (!response.optBoolean("ok", false)) {
+            return@withContext null
+        }
+        parseEndDayPreview(response.optJSONObject("preview"))
+    }
+
+    private fun parseEndDayPreview(json: JSONObject?): EndDayPreview? {
+        if (json == null) return null
+        val expenses = json.optJSONObject("expenses") ?: JSONObject()
+        return EndDayPreview(
+            gpsKm = json.optDouble("gps_km", 0.0),
+            plannedKm = json.optDouble("planned_km", 0.0),
+            suggestedKm = json.optDouble("suggested_km", 0.0),
+            kmSource = json.optString("km_source", "planned"),
+            startOdometer = json.optDouble("start_odometer", 0.0),
+            suggestedEndOdometer = json.optDouble("suggested_end_odometer", 0.0),
+            totalWorkMinutes = json.optDouble("total_work_minutes", 0.0),
+            drivingMinutes = json.optDouble("driving_minutes", 0.0),
+            avgServiceMinutes = json.optDouble("avg_service_minutes", 0.0),
+            completedVisitsCount = json.optInt("completed_visits_count", 0),
+            minutesSource = json.optString("minutes_source", "planned"),
+            foodMealExpenses = expenses.optDouble("food_meal_expenses", 0.0),
+            coffeeExpenses = expenses.optDouble("coffee_expenses", 0.0),
+            drinksExpenses = expenses.optDouble("drinks_expenses", 0.0),
+            parkingExpenses = expenses.optDouble("parking_expenses", 0.0),
+            tollExpenses = expenses.optDouble("toll_expenses", 0.0),
+            otherExpenses = expenses.optDouble("other_expenses", 0.0),
+            lastFuelPricePerLiter = json.optDouble("last_fuel_price_per_liter", 0.0),
+            fuelConsumptionLitersPer100Km = json.optDouble("fuel_consumption_l_per_100km", 0.0),
+            fuelPriceWarnRatio = json.optDouble("fuel_price_warn_ratio", 0.10),
+        )
+    }
+
     suspend fun fetchCurrentGpsHint(serverUrl: String, apiKey: String): GpsVisitHint? = withContext(Dispatchers.IO) {
         val response = getJson(normalizeApiUrl(serverUrl, "/api/visits/current-gps"), apiKey) ?: return@withContext null
         parseGpsVisitHint(response.optJSONObject("hint"))
@@ -1017,6 +1053,13 @@ class HomeVisitRepository private constructor(
             .put("toll_expenses", details.tollExpenses)
             .put("toll_compensation", details.tollCompensation)
             .put("other_expenses", details.otherExpenses)
+            // Расходы из мастера завершения. `food_expenses` намеренно не шлём:
+            // на сервере это агрегат, который складывается с едой/кофе/напитками,
+            // и еда посчиталась бы дважды.
+            .put("food_meal_expenses", details.foodMealExpenses)
+            .put("coffee_expenses", details.coffeeExpenses)
+            .put("drinks_expenses", details.drinksExpenses)
+            .put("parking_expenses", details.parkingExpenses)
         details.userFatigueScore?.let { payload.put("user_fatigue_score", it) }
         return payload.toString()
     }

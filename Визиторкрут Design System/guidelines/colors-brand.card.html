@@ -1,0 +1,46 @@
+<!-- @dsCard group="Colors" viewport="700x188" name="Бренд — зелёный" subtitle="Green is the identity: «стоит ехать»" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 24px; }
+  .wrap { display: flex; gap: 20px; align-items: stretch; }
+  .hero {
+    flex: 0 0 220px; border-radius: var(--radius-xl); background: var(--brand);
+    color: var(--on-brand); padding: 18px 20px; display: flex; flex-direction: column;
+    justify-content: space-between; box-shadow: var(--glow-go);
+  }
+  .hero .k { font-family: var(--font-mono); font-size: 12px; opacity: 0.85; }
+  .hero .v { font-family: var(--font-mono); font-size: 20px; font-weight: 600; }
+  .ramp { flex: 1; display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; }
+  .sw { display: flex; flex-direction: column; gap: 6px; }
+  .chip { height: 76px; border-radius: 8px; border: 1px solid rgba(23,22,15,.08); }
+  .lbl { font-family: var(--font-mono); font-size: 10px; color: var(--text-tertiary); text-align: center; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <div class="k">--brand</div>
+      <div>
+        <div class="v">#12A150</div>
+        <div class="k" style="margin-top:4px;">green-500 · primary</div>
+      </div>
+    </div>
+    <div class="ramp">
+      <div class="sw"><div class="chip" style="background:var(--green-50)"></div><div class="lbl">50</div></div>
+      <div class="sw"><div class="chip" style="background:var(--green-100)"></div><div class="lbl">100</div></div>
+      <div class="sw"><div class="chip" style="background:var(--green-200)"></div><div class="lbl">200</div></div>
+      <div class="sw"><div class="chip" style="background:var(--green-300)"></div><div class="lbl">300</div></div>
+      <div class="sw"><div class="chip" style="background:var(--green-400)"></div><div class="lbl">400</div></div>
+      <div class="sw"><div class="chip" style="background:var(--green-500);outline:2px solid var(--ink);outline-offset:1px"></div><div class="lbl">500</div></div>
+      <div class="sw"><div class="chip" style="background:var(--green-600)"></div><div class="lbl">600</div></div>
+      <div class="sw"><div class="chip" style="background:var(--green-700)"></div><div class="lbl">700</div></div>
+      <div class="sw"><div class="chip" style="background:var(--green-800)"></div><div class="lbl">800</div></div>
+      <div class="sw"><div class="chip" style="background:var(--green-900)"></div><div class="lbl">900</div></div>
+    </div>
+  </div>
+</body>
+</html>

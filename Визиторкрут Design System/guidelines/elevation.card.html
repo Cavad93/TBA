@@ -1,0 +1,26 @@
+<!-- @dsCard group="Spacing" viewport="700x200" name="Тени и высота" subtitle="Warm-tinted elevation over paper" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 28px 24px; background: var(--paper); }
+  .row { display: flex; gap: 22px; align-items: center; }
+  .cell { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+  .box { width: 88px; height: 62px; background: var(--color-surface);
+         border-radius: var(--radius-lg); border: 1px solid var(--border-subtle); }
+  .tok { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="cell"><div class="box" style="box-shadow:var(--shadow-xs)"></div><span class="tok">xs</span></div>
+    <div class="cell"><div class="box" style="box-shadow:var(--shadow-sm)"></div><span class="tok">sm</span></div>
+    <div class="cell"><div class="box" style="box-shadow:var(--shadow-md)"></div><span class="tok">md</span></div>
+    <div class="cell"><div class="box" style="box-shadow:var(--shadow-lg)"></div><span class="tok">lg</span></div>
+    <div class="cell"><div class="box" style="box-shadow:var(--shadow-xl)"></div><span class="tok">xl</span></div>
+    <div class="cell"><div class="box" style="box-shadow:var(--glow-go);border-color:var(--green-200)"></div><span class="tok">glow-go</span></div>
+  </div>
+</body>
+</html>

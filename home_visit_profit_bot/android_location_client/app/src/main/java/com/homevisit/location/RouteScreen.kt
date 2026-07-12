@@ -188,6 +188,7 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
     // Лента «Фокус»: Старт (редактируемый) → текущий заказ крупной карточкой →
     // «Далее» списком → порядок маршрута → Финиш (редактируемый) → слайдер завершения.
     var reordering by rememberSaveable { mutableStateOf(false) }
+    var wizardOpen by rememberSaveable { mutableStateOf(false) }
     val templates = uiState.appSettings.addressTemplates()
     val orders = uiState.routeVisits
 
@@ -230,7 +231,29 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
             onSave = workActions.onUpdateFinish,
         )
         // Единственная точка завершения смены — внизу Ленты (модель «двухэтажного дома»).
-        EndShiftSection(onEndShift = workActions.onEndDay)
+        // Слайдер не закрывает день сразу: сначала мастер уточняет итоги, и уже он
+        // отправляет расчёт. Без него день закрывался бы без статистики.
+        EndShiftSection(
+            onEndShift = {
+                wizardOpen = true
+                workActions.onPrepareEndShift()
+            },
+        )
+    }
+
+    if (wizardOpen) {
+        EndShiftWizard(
+            endShift = uiState.endShift,
+            onFinish = { details ->
+                wizardOpen = false
+                workActions.onEndDayWithDetails(details)
+                workActions.onClearEndShift()
+            },
+            onDismiss = {
+                wizardOpen = false
+                workActions.onClearEndShift()
+            },
+        )
     }
 }
 

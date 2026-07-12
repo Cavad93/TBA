@@ -7,10 +7,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
-from app.models import WorkDay
+from app.models import EndDayData, WorkDay
 from app.repositories import (
     DailyStatsRepository,
     LocationEventRepository,
@@ -144,6 +144,33 @@ def build_end_day_preview(
         last_fuel_price_per_liter=round(last_fuel_price_per_liter(stats, settings), 2),
         fuel_consumption_l_per_100km=settings.get_float("fuel_consumption_l_per_100km", 10.0),
     )
+
+
+def reconcile_end_day_data(data: EndDayData) -> EndDayData:
+    """Приводит итоги смены из мобильного мастера к согласованным.
+
+    finalize_day намеренно строгий: он отказывается считать день, если пробег по
+    одометру меньше рабочего или если дорога с удалёнкой не помещаются в рабочее
+    время. Для ручного ввода это защита от опечатки, но для синхронизации —
+    ловушка: событие day_closed упало бы с ошибкой, и смена, уже закрытая на
+    телефоне, осталась бы открытой на сервере. Поэтому здесь мы не отвергаем
+    данные, а подрезаем их до непротиворечивых.
+    """
+    odometer_km = (
+        data.end_odometer - data.start_odometer
+        if data.start_odometer > 0 and data.end_odometer > 0
+        else data.odometer_km
+    )
+    actual_km = data.actual_km
+    if odometer_km > 0 and actual_km > odometer_km:
+        actual_km = odometer_km
+
+    busy_minutes = data.actual_route_minutes + data.telemed_minutes + data.office_minutes
+    total_work_minutes = max(data.total_work_minutes, busy_minutes)
+
+    if actual_km == data.actual_km and total_work_minutes == data.total_work_minutes:
+        return data
+    return replace(data, actual_km=actual_km, total_work_minutes=total_work_minutes)
 
 
 def preview_payload(preview: EndDayPreview) -> dict[str, Any]:

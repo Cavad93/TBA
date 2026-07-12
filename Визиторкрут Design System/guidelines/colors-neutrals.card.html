@@ -1,0 +1,31 @@
+<!-- @dsCard group="Colors" viewport="700x188" name="Нейтральные — бумага и чернила" subtitle="Warm neutrals from paper to ink" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 24px; }
+  .ramp { display: grid; grid-template-columns: repeat(11, 1fr); gap: 6px; }
+  .sw { display: flex; flex-direction: column; gap: 6px; }
+  .chip { height: 88px; border-radius: 8px; border: 1px solid rgba(23,22,15,.08); }
+  .lbl { font-family: var(--font-mono); font-size: 10px; color: var(--text-tertiary); text-align: center; }
+  .lbl b { display:block; color: var(--text-secondary); font-weight: 500; }
+</style>
+</head>
+<body>
+  <div class="ramp">
+    <div class="sw"><div class="chip" style="background:var(--paper)"></div><div class="lbl"><b>paper</b>F4F2EB</div></div>
+    <div class="sw"><div class="chip" style="background:var(--neutral-50)"></div><div class="lbl"><b>50</b></div></div>
+    <div class="sw"><div class="chip" style="background:var(--neutral-100)"></div><div class="lbl"><b>100</b></div></div>
+    <div class="sw"><div class="chip" style="background:var(--neutral-200)"></div><div class="lbl"><b>200</b></div></div>
+    <div class="sw"><div class="chip" style="background:var(--neutral-300)"></div><div class="lbl"><b>300</b></div></div>
+    <div class="sw"><div class="chip" style="background:var(--neutral-400)"></div><div class="lbl"><b>400</b></div></div>
+    <div class="sw"><div class="chip" style="background:var(--neutral-500)"></div><div class="lbl"><b>500</b></div></div>
+    <div class="sw"><div class="chip" style="background:var(--neutral-600)"></div><div class="lbl"><b>600</b></div></div>
+    <div class="sw"><div class="chip" style="background:var(--neutral-700)"></div><div class="lbl"><b>700</b></div></div>
+    <div class="sw"><div class="chip" style="background:var(--neutral-800)"></div><div class="lbl"><b>800</b></div></div>
+    <div class="sw"><div class="chip" style="background:var(--ink)"></div><div class="lbl"><b>ink</b>17160F</div></div>
+  </div>
+</body>
+</html>

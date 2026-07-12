@@ -1,0 +1,37 @@
+<!-- @dsCard group="Brand" viewport="700x260" name="Голос бренда" subtitle="Direct, on «ты», numbers-first, никакого канцелярита" -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 22px 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .col h4 { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+            margin-bottom: 10px; }
+  .yes h4 { color: var(--green-700); }
+  .no h4 { color: var(--red-700); }
+  .line { display: flex; gap: 8px; align-items: baseline; font-size: 14px; margin-bottom: 7px;
+          line-height: 1.35; }
+  .mark { font-family: var(--font-mono); font-weight: 700; }
+  .yes .mark { color: var(--green-600); }
+  .no .mark { color: var(--red-500); }
+  .no .line span:last-child { color: var(--text-tertiary); text-decoration: line-through; }
+</style>
+</head>
+<body>
+  <div class="col yes">
+    <h4>Говорим так</h4>
+    <div class="line"><span class="mark">+</span><span>«Стоит ехать. ₽640 в час чистыми.»</span></div>
+    <div class="line"><span class="mark">+</span><span>«Не гоняй впустую — тут ты уйдёшь в минус.»</span></div>
+    <div class="line"><span class="mark">+</span><span>«Взять заказ» · «Пропустить» · «Показать расчёт»</span></div>
+    <div class="line"><span class="mark">+</span><span>«Пока тихо. Хорошие заказы появятся здесь.»</span></div>
+  </div>
+  <div class="col no">
+    <h4>Не говорим</h4>
+    <div class="line"><span class="mark">–</span><span>«Осуществите приём заказа»</span></div>
+    <div class="line"><span class="mark">–</span><span>«Данный заказ является нерентабельным»</span></div>
+    <div class="line"><span class="mark">–</span><span>«Уведомляем вас о поступлении»</span></div>
+    <div class="line"><span class="mark">–</span><span>«Упс! Что-то пошло не так 🙈»</span></div>
+  </div>
+</body>
+</html>
