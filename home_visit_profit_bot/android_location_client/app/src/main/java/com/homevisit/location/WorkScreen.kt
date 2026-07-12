@@ -773,15 +773,15 @@ internal fun OfficeInputCard(
     onSubmit: (String, Double, Double, String, String?, String?) -> Unit,
 ) {
     var address by rememberSaveable { mutableStateOf("") }
-    var startText by rememberSaveable { mutableStateOf("") }
-    var endText by rememberSaveable { mutableStateOf("") }
+    // Время храним минутами от полуночи: барабан крутит именно их. По умолчанию —
+    // типовой приём с 9:00 до 13:00, чтобы обычный случай не требовал вообще ничего.
+    var startMinutes by rememberSaveable { mutableStateOf(9 * 60) }
+    var endMinutes by rememberSaveable { mutableStateOf(13 * 60) }
     var incomeText by rememberSaveable { mutableStateOf("") }
     var clinic by rememberSaveable { mutableStateOf("") }
 
     val income = parseNumber(incomeText)
-    val start = parseTimeOfDay(startText)
-    val end = parseTimeOfDay(endText)
-    val minutes = if (start != null && end != null) minutesBetween(start, end) else null
+    val minutes = durationMinutes(startMinutes, endMinutes)
 
     InputCard("На точке") {
         OutlinedTextField(
@@ -792,43 +792,43 @@ internal fun OfficeInputCard(
             singleLine = false,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MoneyField(
-                value = startText,
-                onValueChange = { startText = it },
-                label = "Начало, 9:00",
-                modifier = Modifier.weight(1f),
-            )
-            MoneyField(
-                value = endText,
-                onValueChange = { endText = it },
-                label = "Окончание, 13:00",
-                modifier = Modifier.weight(1f),
-            )
+            Column(Modifier.weight(1f)) {
+                LabeledTimeWheel(
+                    label = "Начало",
+                    minutesOfDay = startMinutes,
+                    onChange = { startMinutes = it },
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                LabeledTimeWheel(
+                    label = "Окончание",
+                    minutesOfDay = endMinutes,
+                    onChange = { endMinutes = it },
+                )
+            }
         }
-        if (minutes != null) {
-            Text(
-                "Продолжительность: ${minutesText(minutes.toDouble())}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(
+            "Продолжительность: ${minutesText(minutes.toDouble())}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         MoneyField(value = incomeText, onValueChange = { incomeText = it }, label = "Стоимость, ₽")
         CompanyPicker(clinics = clinics, value = clinic, onValue = { clinic = it })
         Button(
             modifier = Modifier.fillMaxWidth(),
-            enabled = address.isNotBlank() && income != null && minutes != null && minutes > 0,
+            enabled = address.isNotBlank() && income != null && minutes > 0,
             onClick = {
                 onSubmit(
                     address,
-                    (minutes ?: 0L).toDouble(),
+                    minutes.toDouble(),
                     income ?: 0.0,
                     clinic,
-                    start?.let { todayAtIso(it) },
-                    end?.let { todayAtIso(it) },
+                    todayAtIso(minutesToLocalTime(startMinutes)),
+                    todayAtIso(minutesToLocalTime(endMinutes)),
                 )
                 address = ""
-                startText = ""
-                endText = ""
+                startMinutes = 9 * 60
+                endMinutes = 13 * 60
                 incomeText = ""
             },
         ) {

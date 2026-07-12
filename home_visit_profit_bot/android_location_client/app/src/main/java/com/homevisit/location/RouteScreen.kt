@@ -152,6 +152,7 @@ import com.homevisit.location.domain.FatigueTrendReport
 import com.homevisit.location.domain.HomeRecommendation
 import com.homevisit.location.domain.HomeRecovery
 import com.homevisit.location.domain.HomeSnapshot
+import com.homevisit.location.domain.LateWarning
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
 import com.homevisit.location.domain.ProfileWellbeing
@@ -202,6 +203,7 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
             isLoading = uiState.serverRoute.isLoading,
             onSave = workActions.onUpdateStart,
         )
+        LateWarningsCard(uiState.serverRoute.snapshot?.lateWarnings.orEmpty())
         if (reordering) {
             ReorderCard(orders = orders, onReorder = workActions.onReorderRoute)
         } else {
@@ -531,6 +533,51 @@ internal fun UpNextList(orders: List<RouteVisitUi>, activeLocalId: String?) {
     }
 }
 
+
+/**
+ * «К приёму не успеваете».
+ *
+ * Оптимизатор работу на точке не двигает, но и за часами не следит: перед приёмом в
+ * 9:00 могут оказаться два заказа, на которые уйдёт всё утро. Сервер считает прогноз
+ * прибытия по текущему порядку Ленты — здесь мы про это честно предупреждаем и
+ * подсказываем, что порядок можно поправить.
+ */
+@Composable
+internal fun LateWarningsCard(warnings: List<LateWarning>) {
+    if (warnings.isEmpty()) return
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = VerdictColors.edgeContainer),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                if (warnings.size == 1) "Не успеваете на точку" else "Не успеваете на точки",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = VerdictColors.onEdgeContainer,
+            )
+            warnings.forEach { warning ->
+                val start = timeOfDayText(warning.plannedStartAt)
+                val eta = timeOfDayText(warning.etaAt)
+                Text(
+                    buildString {
+                        append(warning.address)
+                        if (start != null) append(" · к $start")
+                        if (eta != null) append(", приедете к $eta")
+                        append(" (+${warning.lateMinutes} мин)")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = VerdictColors.onEdgeContainer,
+                )
+            }
+            Text(
+                "Переставьте заказы кнопкой «Изменить порядок» или отмените лишний.",
+                style = MaterialTheme.typography.labelMedium,
+                color = VerdictColors.onEdgeContainer,
+            )
+        }
+    }
+}
 
 /**
  * Время работы на точке. Показываем его явно: это заказ-якорь — оптимизатор его не

@@ -37,6 +37,7 @@ import com.homevisit.location.domain.HomeMoney
 import com.homevisit.location.domain.HomeRecommendation
 import com.homevisit.location.domain.HomeRecovery
 import com.homevisit.location.domain.HomeSnapshot
+import com.homevisit.location.domain.LateWarning
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
 import com.homevisit.location.domain.ProfileMonth
@@ -1350,12 +1351,28 @@ class HomeVisitRepository private constructor(
                 add(orderJson.optInt(index))
             }
         }
+        val warningsJson = route.optJSONArray("late_warnings") ?: JSONArray()
+        val lateWarnings = buildList {
+            for (index in 0 until warningsJson.length()) {
+                val warning = warningsJson.optJSONObject(index) ?: continue
+                add(
+                    LateWarning(
+                        visitId = warning.optInt("visit_id"),
+                        address = warning.optString("address"),
+                        plannedStartAt = warning.optString("planned_start_at"),
+                        etaAt = warning.optString("eta_at"),
+                        lateMinutes = warning.optInt("late_minutes"),
+                    ),
+                )
+            }
+        }
         return ServerRouteSnapshot(
             order = order,
             visitsCount = route.optInt("visits_count", 0),
             totalKm = route.optDouble("total_km", 0.0),
             totalMinutes = route.optDouble("total_minutes", 0.0),
             legs = legs,
+            lateWarnings = lateWarnings,
         )
     }
 

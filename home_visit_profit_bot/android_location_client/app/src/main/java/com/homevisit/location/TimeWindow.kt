@@ -38,6 +38,19 @@ internal fun minutesBetween(start: LocalTime, end: LocalTime): Long {
     return if (minutes >= 0) minutes else minutes + Duration.ofDays(1).toMinutes()
 }
 
+/** Минуты от полуночи (как их отдаёт барабан) → LocalTime. */
+internal fun minutesToLocalTime(minutesOfDay: Int): LocalTime =
+    LocalTime.of((minutesOfDay / 60).coerceIn(0, 23), (minutesOfDay % 60).coerceIn(0, 59))
+
+/**
+ * Продолжительность между началом и окончанием в минутах. Окончание за полночь
+ * (например, с 22:00 до 02:00) — это следующий день, а не отрицательное время.
+ */
+internal fun durationMinutes(startMinutes: Int, endMinutes: Int): Long {
+    val diff = (endMinutes - startMinutes).toLong()
+    return if (diff > 0) diff else diff + 24 * 60
+}
+
 /** «09:00» из ISO-момента — для показа в Ленте. */
 internal fun timeOfDayText(iso: String?): String? {
     if (iso.isNullOrBlank()) return null

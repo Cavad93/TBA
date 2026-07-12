@@ -259,7 +259,18 @@ data class ServerRouteSnapshot(
     /** Сохранённый на сервере порядок принятых заказов (id визитов) — по нему
      *  сортируется Лента: отражает и авто-оптимизацию, и ручную перестановку. */
     val order: List<Int> = emptyList(),
+    /** Работы на точке, к которым по текущему порядку Ленты уже не успеваем. */
+    val lateWarnings: List<LateWarning> = emptyList(),
     val fromCache: Boolean = false,
+)
+
+/** «К приёму на Ленина, 40 в 9:00 не успеваете: приедете к 10:15». */
+data class LateWarning(
+    val visitId: Int,
+    val address: String,
+    val plannedStartAt: String,
+    val etaAt: String,
+    val lateMinutes: Int,
 )
 
 data class ServerRouteLeg(
