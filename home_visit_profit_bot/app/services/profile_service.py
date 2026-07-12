@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any
 from app.database import Database
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 
 from app.database import current_user_id
@@ -62,13 +62,18 @@ class ProfileService:
         }
 
     def _days_in_service(self, created_at: Any, today: date) -> int | None:
+        """Стаж в днях. `today` игнорируем намеренно: дата регистрации хранится в UTC.
+
+        Сравнение UTC-даты регистрации с локальной датой давало ночью лишний день —
+        только что зарегистрировавшийся пользователь получал «1 день стажа».
+        """
         if not created_at:
             return None
         try:
             created = datetime.fromisoformat(str(created_at)).date()
         except ValueError:
             return None
-        return max(0, (today - created).days)
+        return max(0, (datetime.now(timezone.utc).date() - created).days)
 
     # --- месяц ------------------------------------------------------------
 

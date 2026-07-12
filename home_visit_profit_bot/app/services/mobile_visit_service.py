@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any
 from app.database import Database
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from app.models import CandidateCalculation, RouteSummary, Visit
 from app.repositories import (
@@ -13,6 +13,8 @@ from app.repositories import (
     VisitRepository,
     WorkDayRepository,
 )
+from app.services.address_resolver import expand_template
+from app.services.schedule_service import late_warnings
 from app.services.geocoding_service import (
     GeocodingError,
     detect_base_district_by_location,
@@ -56,7 +58,8 @@ class MobileVisitService:
         if day is None:
             return CandidateApiResult(ok=False, reason="no_active_day")
 
-        address = _required_str(payload, "address")
+        # «Дом» → сохранённый адрес: геокодер по названию шаблона ничего не найдёт.
+        address = expand_template(_required_str(payload, "address"), self.settings)
         income = _positive_float(payload.get("income"))
         clinic = _clinic(payload, allowed_clinics(self.settings))
         route_km = _optional_non_negative_float(payload.get("route_km"))
@@ -172,7 +175,7 @@ class MobileVisitService:
     def update_finish(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Сменить финиш активного дня среди смены и пересчитать маршрут."""
         day = self._require_active_day()
-        address = _required_str(payload, "finish_address")
+        address = expand_template(_required_str(payload, "finish_address"), self.settings)
         lat = _optional_float(payload.get("lat"))
         lon = _optional_float(payload.get("lon"))
         if lat is None or lon is None:
@@ -203,7 +206,7 @@ class MobileVisitService:
     def update_start(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Сменить старт активного дня среди смены и пересчитать маршрут."""
         day = self._require_active_day()
-        address = _required_str(payload, "start_address")
+        address = expand_template(_required_str(payload, "start_address"), self.settings)
         lat = _optional_float(payload.get("lat"))
         lon = _optional_float(payload.get("lon"))
         if lat is None or lon is None:
@@ -238,7 +241,8 @@ class MobileVisitService:
         маршрут, и дорога до него считается как до любого адреса.
         """
         day = self._require_active_day()
-        address = _required_str(payload, "address")
+        # «Дом» → сохранённый адрес: геокодер по названию шаблона ничего не найдёт.
+        address = expand_template(_required_str(payload, "address"), self.settings)
         income = _optional_non_negative_float(payload.get("income")) or 0.0
         minutes = _optional_non_negative_float(payload.get("service_minutes")) or 0.0
         clinic = _clinic(payload, allowed_clinics(self.settings))
@@ -373,6 +377,12 @@ class MobileVisitService:
         # `order` в ответе — СОХРАНЁННЫЙ порядок показа (order_number), а не «идеальный»
         # порядок оптимизатора: так клиент видит и авто-оптимизацию, и ручную перестановку.
         payload["order"] = [visit.id for visit in all_visits if visit.status == "accepted"]
+        # Успеваем ли к работе на точке: оптимизатор её не двигает, но и за часами не
+        # следит — перед приёмом в 9:00 может оказаться пара заказов, на которые уйдёт всё утро.
+        payload["late_warnings"] = [
+            warning.as_dict()
+            for warning in late_warnings(day, all_visits, _with_order(route, payload["order"]))
+        ]
         return {
             "ok": True,
             "reason": reason,
@@ -488,6 +498,12 @@ def visit_payload(visit: Visit | None) -> dict[str, Any] | None:
         "planned_start_at": visit.planned_start_at,
         "planned_end_at": visit.planned_end_at,
     }
+
+
+def _with_order(route: RouteSummary, order: list[int]) -> RouteSummary:
+    """Маршрут с СОХРАНЁННЫМ порядком показа: опоздания считаем по тому порядку, который
+    пользователь видит в Ленте, а не по «идеальному» порядку оптимизатора."""
+    return replace(route, order=order)
 
 
 def route_payload(route: RouteSummary) -> dict[str, Any]:

@@ -129,9 +129,12 @@ CREATE TABLE IF NOT EXISTS office_entries (
     FOREIGN KEY(work_day_id) REFERENCES work_days(id)
 );
 
+-- Кэш геокодера. Уникальность — по паре (user_id, input_text): она навешивается
+-- миграцией _migrate_address_cache_to_per_user, потому что user_id добавляется позже,
+-- при включении RLS.
 CREATE TABLE IF NOT EXISTS address_cache (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    input_text TEXT NOT NULL UNIQUE,
+    input_text TEXT NOT NULL,
     normalized_address TEXT,
     district TEXT,
     lat REAL NOT NULL,
@@ -400,6 +403,10 @@ ISOLATED_TABLES = [
     "work_day_location_state", "burnout_surveys", "driving_behavior_daily",
     "fatigue_feedback", "mobile_client_entities", "mobile_sync_events",
     "mobile_sync_conflicts",
+    # Кэш геокодера тоже персональный: ключ — сырой текст адреса, а город у каждого
+    # свой. Общий кэш отдавал бы «Ленина 40» из чужого города — и заказ считался бы
+    # по чужим координатам.
+    "address_cache",
 ]
 
 
@@ -408,6 +415,7 @@ def init_db(config: AppConfig) -> None:
         _apply_schema(db)
         _ensure_columns(db)
         _ensure_isolation(db)
+        _migrate_address_cache_to_per_user(db)
         _verify_isolation_or_die(db)
         # Настройки сидятся per-user при регистрации (seed_default_settings с app.user_id).
 
@@ -458,6 +466,29 @@ def _verify_isolation_or_die(db: Database) -> None:
             raise RlsRoleError(message)
     elif status["issues"]:
         logger.error("RLS-замечания (изоляция ослаблена): %s", "; ".join(status["issues"]))
+
+
+def _migrate_address_cache_to_per_user(db: Database) -> None:
+    """Уникальность кэша адресов: было `input_text`, стало `user_id + input_text`.
+
+    Со старым ключом первый пользователь занимал адрес, а остальным строку было не
+    вставить и не обновить: RLS не пускает к чужой записи, а уникальный индекс не
+    даёт создать свою. Ничьи (user_id IS NULL) строки старого общего кэша удаляем:
+    это производные данные, они восстановятся при первом же геокодинге, а привязать
+    их к конкретному пользователю всё равно нельзя.
+    """
+    db.execute("ALTER TABLE address_cache DROP CONSTRAINT IF EXISTS address_cache_input_text_key")
+    db.execute("DELETE FROM address_cache WHERE user_id IS NULL")
+    exists = db.execute(
+        "SELECT 1 FROM pg_constraint WHERE conname = 'address_cache_user_input_key' "
+        "AND connamespace = current_schema()::regnamespace"
+    ).fetchone()
+    if not exists:
+        db.execute(
+            "ALTER TABLE address_cache ADD CONSTRAINT address_cache_user_input_key "
+            "UNIQUE (user_id, input_text)"
+        )
+    db.commit()
 
 
 def _ensure_isolation(db: Database) -> None:

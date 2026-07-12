@@ -1384,7 +1384,7 @@ class AddressCacheRepository:
             """
             INSERT INTO address_cache(input_text, normalized_address, district, lat, lon, confidence, source, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(input_text) DO UPDATE SET
+            ON CONFLICT(user_id, input_text) DO UPDATE SET
                 normalized_address = excluded.normalized_address,
                 district = excluded.district,
                 lat = excluded.lat,

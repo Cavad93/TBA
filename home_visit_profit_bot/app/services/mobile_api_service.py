@@ -24,6 +24,7 @@ from app.services.settings_service import (
     allowed_clinics,
     allowed_telemed_clinics,
 )
+from app.services.address_resolver import resolve_address
 from app.services.day_summary_service import reconcile_end_day_data
 from app.services.stats_service import finalize_day
 
@@ -218,9 +219,25 @@ class MobileApiService:
         mapped = self._mapped(client_entity_id, "work_day")
         if mapped is not None:
             return mapped
+        # Разворачиваем шаблон («Дом») и геокодируем: без координат старта и финиша
+        # маршрут строить не от чего.
+        start = resolve_address(
+            _optional_str(payload.get("start_address")) or self.settings.get("default_start_address", "Дом") or "Дом",
+            self.connection,
+            self.settings,
+        )
+        finish = resolve_address(
+            _optional_str(payload.get("finish_address")) or self.settings.get("default_finish_address", "Дом") or "Дом",
+            self.connection,
+            self.settings,
+        )
         day = self.days.create(
-            start_address=_optional_str(payload.get("start_address")) or self.settings.get("default_start_address", "Дом") or "Дом",
-            finish_address=_optional_str(payload.get("finish_address")) or self.settings.get("default_finish_address", "Дом") or "Дом",
+            start_address=start.address,
+            finish_address=finish.address,
+            start_lat=start.lat,
+            start_lon=start.lon,
+            finish_lat=finish.lat,
+            finish_lon=finish.lon,
             avg_speed=self.settings.get_float("default_avg_speed_kmh", 30),
             service_minutes=self.settings.get_float("default_service_minutes", 20),
             route_time_factor=self.settings.get_float("default_route_time_factor", 1),

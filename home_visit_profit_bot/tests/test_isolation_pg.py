@@ -242,3 +242,49 @@ def test_delete_account_purges_all_data(fresh_db) -> None:
             assert conn.execute("SELECT count(*) AS c FROM users WHERE id = ?", (user_a,)).fetchone()["c"] == 0
     finally:
         current_user_id.set(None)
+
+
+def test_address_cache_is_per_user(fresh_db) -> None:
+    """Один и тот же адрес у разных пользователей — разные координаты.
+
+    Кэш геокодера ключуется сырым текстом («Ленина 40»), а город у каждого свой.
+    Общий кэш отдавал бы второму пользователю координаты из чужого города — и заказ
+    считался бы по чужой дороге.
+    """
+    from app.repositories import AddressCacheRepository
+
+    config, user_a, user_b = _seed_two_users(fresh_db, "cache")
+    try:
+        current_user_id.set(user_a)
+        with connect(config) as conn:
+            AddressCacheRepository(conn).put(
+                input_text="Ленина 40",
+                normalized_address="Санкт-Петербург, Ленина 40",
+                district="Приморский",
+                lat=59.95,
+                lon=30.30,
+                confidence=0.9,
+                source="nominatim",
+            )
+
+        # У B тот же ввод — своя строка, а не чужая из другого города.
+        current_user_id.set(user_b)
+        with connect(config) as conn:
+            cache = AddressCacheRepository(conn)
+            assert cache.get("Ленина 40") is None
+            cache.put(
+                input_text="Ленина 40",
+                normalized_address="Москва, Ленина 40",
+                district="Ленинский",
+                lat=55.75,
+                lon=37.62,
+                confidence=0.9,
+                source="nominatim",
+            )
+            assert float(cache.get("Ленина 40")["lat"]) == 55.75
+
+        current_user_id.set(user_a)
+        with connect(config) as conn:
+            assert float(AddressCacheRepository(conn).get("Ленина 40")["lat"]) == 59.95
+    finally:
+        current_user_id.set(None)

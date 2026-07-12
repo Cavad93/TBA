@@ -23,6 +23,7 @@ from app.repositories import (
     WorkDayLocationRepository,
     WorkDayRepository,
 )
+from app.services.address_resolver import resolve_address
 from app.services.auth_service import AuthError, AuthService
 from app.services.day_summary_service import build_end_day_preview, preview_payload
 from app.services.home_service import HomeService
@@ -296,9 +297,30 @@ def _handler_factory(config: AppConfig):
                 return
             with connect(config) as connection:
                 settings = SettingsRepository(connection)
+                # Старт и финиш разворачиваем из шаблонов и геокодируем СРАЗУ. Раньше день
+                # создавался вообще без координат (по умолчанию там строка «Дом»), и
+                # маршрут строить было не от чего — расчёт откатывался на грубую оценку.
+                start = resolve_address(
+                    str(payload.get("start_address") or settings.get("default_start_address", "Дом") or "Дом"),
+                    connection,
+                    settings,
+                    lat=payload.get("start_lat"),
+                    lon=payload.get("start_lon"),
+                )
+                finish = resolve_address(
+                    str(payload.get("finish_address") or settings.get("default_finish_address", "Дом") or "Дом"),
+                    connection,
+                    settings,
+                    lat=payload.get("finish_lat"),
+                    lon=payload.get("finish_lon"),
+                )
                 day = WorkDayRepository(connection).create(
-                    start_address=str(payload.get("start_address") or settings.get("default_start_address", "Дом") or "Дом"),
-                    finish_address=str(payload.get("finish_address") or settings.get("default_finish_address", "Дом") or "Дом"),
+                    start_address=start.address,
+                    finish_address=finish.address,
+                    start_lat=start.lat,
+                    start_lon=start.lon,
+                    finish_lat=finish.lat,
+                    finish_lon=finish.lon,
                     avg_speed=float(payload.get("avg_speed_kmh") or settings.get_float("default_avg_speed_kmh", config.defaults.avg_speed_kmh)),
                     service_minutes=float(payload.get("service_minutes") or settings.get_float("default_service_minutes", config.defaults.service_minutes)),
                     start_odometer=float(payload.get("start_odometer") or 0),
