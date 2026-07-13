@@ -178,7 +178,9 @@ def finalize_day(
     metrics["load_index"] = fatigue.score
     metrics["recovery_debt"] = fatigue.recovery_debt
     persist_day_metrics(metric_repo, baseline_repo, work_day_id=day.id, date=day.date, metrics=metrics)
-    _save_self_rating_feedback(connection, day.id, data.self_rating, fatigue.score)
+    # Самооценка — тоже данные о самочувствии: при выключенном тумблере не сохраняем.
+    if "self_rating" in metrics:
+        _save_self_rating_feedback(connection, day.id, data.self_rating, fatigue.score)
 
     stats = DailyStats(
         completed_visits_count=data.completed_visits_count,

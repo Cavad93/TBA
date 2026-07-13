@@ -100,24 +100,37 @@ def build_closed_day_metrics(
         metrics["night_minutes"] = round(night, 1)
 
     # --- восстановление ---
-    if day.sleep_hours > 0:
-        metrics["sleep_hours"] = float(day.sleep_hours)
-    if settings_repo is not None:
-        burnout = settings_repo.get_float("latest_cbi_score", 0)
-        if burnout > 0:
-            metrics["burnout_score"] = burnout
-    if data.self_rating > 0:
-        metrics["self_rating"] = float(data.self_rating)
+    #
+    # Сон, еда, кофе и самооценка — это данные о здоровье, спецкатегория по 152-ФЗ.
+    # Тумблер «Нагрузка» в настройках должен их именно НЕ СОБИРАТЬ, а не просто
+    # прятать индекс: выключенный переключатель, который всё равно всё пишет в базу, —
+    # это обман, и по закону, и по-человечески.
+    if _health_metrics_allowed(settings_repo):
+        if day.sleep_hours > 0:
+            metrics["sleep_hours"] = float(day.sleep_hours)
+        if settings_repo is not None:
+            burnout = settings_repo.get_float("latest_cbi_score", 0)
+            if burnout > 0:
+                metrics["burnout_score"] = burnout
+        if data.self_rating > 0:
+            metrics["self_rating"] = float(data.self_rating)
 
-    metrics["coffee_units"] = float(data.coffee_units or 0)
-    metrics["drinks_units"] = float(data.drinks_units or 0)
-    metrics["meal_units"] = float(data.meal_units or 0)
-    metrics["meal_skipped"] = _meal_skipped(data)
+        metrics["coffee_units"] = float(data.coffee_units or 0)
+        metrics["drinks_units"] = float(data.drinks_units or 0)
+        metrics["meal_units"] = float(data.meal_units or 0)
+        metrics["meal_skipped"] = _meal_skipped(data)
 
     if driving_repo is not None:
         metrics.update(_driving_metrics(driving_repo, day.id, km))
 
     return metrics
+
+
+def _health_metrics_allowed(settings_repo: SettingsRepository | None) -> bool:
+    if settings_repo is None:
+        return True
+    value = (settings_repo.get("fatigue_enabled", "true") or "true").strip().lower()
+    return value in {"true", "1", "yes", "да", "on"}
 
 
 def build_active_day_metrics(
