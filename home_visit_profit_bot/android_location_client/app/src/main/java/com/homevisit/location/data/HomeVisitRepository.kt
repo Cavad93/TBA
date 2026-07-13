@@ -346,7 +346,7 @@ class HomeVisitRepository private constructor(
                         startAddress = item.nullableString("start_address"),
                         finishAddress = item.nullableString("finish_address"),
                         startOdometer = item.optDouble("start_odometer", 0.0),
-                        endOdometer = item.nullableDouble("end_odometer"), true),
+                        endOdometer = item.nullableDouble("end_odometer"),
                         breakHoursBefore = item.optDouble("break_hours_before", 0.0),
                         createdAtEpochMillis = item.optLong("created_at_epoch_millis", now()),
                         updatedAtEpochMillis = item.optLong("updated_at_epoch_millis", now()),
