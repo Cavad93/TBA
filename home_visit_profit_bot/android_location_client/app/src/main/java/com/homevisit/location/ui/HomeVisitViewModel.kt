@@ -869,7 +869,7 @@ data class HomeVisitUiState(
     val endShift: EndShiftUiState = EndShiftUiState(),
     val gpsHint: GpsHintUiState = GpsHintUiState(),
     val report: ReportUiState = ReportUiState(),
-    val fatigue: WorkloadUiState = WorkloadUiState(),
+    val workload: WorkloadUiState = WorkloadUiState(),
     val sync: SyncUiState = SyncUiState(),
     val appSettings: AppSettingsUiState = AppSettingsUiState(),
     val clinics: ClinicOptions = ClinicOptions(),
