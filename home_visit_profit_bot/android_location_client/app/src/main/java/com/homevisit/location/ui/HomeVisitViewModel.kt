@@ -89,7 +89,6 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                         finishAddress = day.finishAddress.orEmpty(),
                         startOdometer = day.startOdometer,
                         endOdometer = day.endOdometer,
-                        breakUninterrupted = day.breakUninterrupted,
                         breakHoursBefore = day.breakHoursBefore,
                         activeVisit = visits
                             .filter { it.status == VisitStatus.Accepted }
@@ -210,13 +209,15 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /** Старт смены с главного экрана: без адресов, перерыв рассчитан автоматически. */
-    fun startShift(startOdometer: Double, breakUninterrupted: Boolean, breakHoursBefore: Double) {
+    /**
+     * Старт смены с главного экрана. `firstBreakHours` заполняется ТОЛЬКО на первой
+     * смене: дальше перерыв считает сервер, от времени закрытия прошлой смены.
+     */
+    fun startShift(startOdometer: Double, firstBreakHours: Double) {
         viewModelScope.launch {
             repository.startDay(
                 startOdometer = startOdometer,
-                breakUninterrupted = breakUninterrupted,
-                breakHoursBefore = breakHoursBefore,
+                breakHoursBefore = firstBreakHours,
             )
         }
     }
@@ -231,16 +232,12 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         startAddress: String,
         finishAddress: String,
         startOdometer: Double,
-        breakUninterrupted: Boolean,
-        breakHoursBefore: Double,
     ) {
         viewModelScope.launch {
             repository.startDay(
                 startAddress = startAddress,
                 finishAddress = finishAddress,
                 startOdometer = startOdometer,
-                breakUninterrupted = breakUninterrupted,
-                breakHoursBefore = breakHoursBefore,
             )
         }
     }
@@ -859,7 +856,7 @@ data class HomeVisitUiState(
     val finishAddress: String = "",
     val startOdometer: Double = 0.0,
     val endOdometer: Double? = null,
-    val breakUninterrupted: Boolean = true,
+    val
     val breakHoursBefore: Double = 0.0,
     val candidate: CandidateUiState = CandidateUiState(),
     val activeVisit: RouteVisitUi? = null,

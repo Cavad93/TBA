@@ -436,8 +436,8 @@ internal enum class ReportMode(val title: String) {
 
 internal data class WorkActions(
     val onStartDay: () -> Unit,
-    val onStartDayDetails: (String, String, Double, Boolean, Double) -> Unit,
-    val onStartShift: (Double, Boolean, Double) -> Unit,
+    val onStartDayDetails: (String, String, Double) -> Unit,
+    val onStartShift: (Double, Double) -> Unit,
     val onRefreshHome: () -> Unit,
     val onRefreshShift: (String) -> Unit,
     val onRefreshProfile: () -> Unit,
@@ -492,8 +492,8 @@ internal fun HomeVisitApp(
     onStartGps: (String, String, String) -> Unit,
     onStopGps: () -> Unit,
     onStartDay: () -> Unit,
-    onStartDayDetails: (String, String, Double, Boolean, Double) -> Unit,
-    onStartShift: (Double, Boolean, Double) -> Unit,
+    onStartDayDetails: (String, String, Double) -> Unit,
+    onStartShift: (Double, Double) -> Unit,
     onRefreshHome: (String, String) -> Unit,
     onRefreshShift: (String, String, String) -> Unit,
     onRefreshProfile: (String, String) -> Unit,

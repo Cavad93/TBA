@@ -85,11 +85,15 @@ def test_no_physiological_input_is_stored(config) -> None:
 
 
 def test_work_schedule_facts_are_stored_instead(config) -> None:
-    """Вместо физиологии — факты о режиме труда: перерыв, ночь, загруженность."""
+    """Вместо физиологии — факты о режиме труда: загруженность, время пешком.
+
+    Перерыва здесь нет: он вычисляется от закрытия ПРОШЛОЙ смены, а в тесте она первая.
+    Это и есть правильное поведение — спрашивать не у кого и считать не от чего.
+    """
     with connect(config) as connection:
         metrics, feedback_count = _close(connection, tracking="true")
 
-    assert metrics["break_hours"] == 10
+    assert "break_deficit_hours" not in metrics
     assert metrics["workload_rating"] == 8
     # Время пешком остаётся: это логистика — дорога от машины до двери.
     assert metrics["walk_minutes"] == 2.0
@@ -112,7 +116,7 @@ def test_disabled_toggle_stops_collecting_even_the_schedule(config) -> None:
     with connect(config) as connection:
         metrics, feedback_count = _close(connection, tracking="false")
 
-    for key in ("break_hours", "break_interrupted", "workload_rating", "walk_minutes"):
+    for key in ("break_hours", "break_deficit_hours", "workload_rating", "walk_minutes"):
         assert key not in metrics, f"{key} сохранился при выключенном тумблере"
 
     assert feedback_count == 0

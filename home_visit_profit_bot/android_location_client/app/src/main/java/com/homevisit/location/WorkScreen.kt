@@ -199,10 +199,7 @@ internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions)
     var startAddress by rememberSaveable { mutableStateOf("Дом") }
     var finishAddress by rememberSaveable { mutableStateOf("Дом") }
     var startOdometerText by rememberSaveable { mutableStateOf("") }
-    var breakHoursText by rememberSaveable { mutableStateOf("") }
-    var breakUninterrupted by rememberSaveable { mutableStateOf(true) }
     val startOdometer = parseNumber(startOdometerText) ?: 0.0
-    val breakHours = parseNumber(breakHoursText) ?: 0.0
 
     InputCard("Начало дня") {
         OutlinedTextField(
@@ -219,42 +216,20 @@ internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions)
             label = { Text("Финиш") },
             singleLine = true,
         )
-        // Вопросов о сне здесь нет: это прямой физиологический показатель, из которого
-        // выводится состояние здоровья, а такие данные — специальная категория (152-ФЗ).
-        // Перерыв между сменами — факт о режиме труда, и он же нам нужен для расчёта.
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            MoneyField(
-                modifier = Modifier.weight(1f),
-                value = startOdometerText,
-                onValueChange = { startOdometerText = it },
-                label = "Одометр",
-            )
-            MoneyField(
-                modifier = Modifier.weight(1f),
-                value = breakHoursText,
-                onValueChange = { breakHoursText = it },
-                label = "Перерыв, ч",
-            )
-        }
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Перерыв был непрерывным?", style = MaterialTheme.typography.bodyMedium)
-            Switch(checked = breakUninterrupted, onCheckedChange = { breakUninterrupted = it })
-        }
+        // Ни сна, ни перерыва здесь не спрашиваем. Сон — физиологический показатель
+        // (спецкатегория ПДн). Перерыв между сменами сервер вычисляет сам: он равен
+        // промежутку между закрытием прошлой смены и стартом текущей.
+        MoneyField(
+            modifier = Modifier.fillMaxWidth(),
+            value = startOdometerText,
+            onValueChange = { startOdometerText = it },
+            label = "Одометр",
+        )
         Button(
             modifier = Modifier.fillMaxWidth(),
             enabled = startAddress.isNotBlank() && finishAddress.isNotBlank(),
             onClick = {
-                workActions.onStartDayDetails(
-                    startAddress,
-                    finishAddress,
-                    startOdometer,
-                    breakUninterrupted,
-                    breakHours,
-                )
+                workActions.onStartDayDetails(startAddress, finishAddress, startOdometer)
             },
         ) {
             Text("Начать день с параметрами")

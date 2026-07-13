@@ -32,6 +32,7 @@ from app.services.auth_service import AuthError, AuthService
 from app.services.day_summary_service import build_end_day_preview, preview_payload
 from app.services.driving_service import save_segment as save_driving_segment
 from app.services.feedback_policy_service import should_ask_feedback
+from app.services.rest_service import rest_facts
 from app.services.home_service import HomeService
 from app.services.location_service import calculate_location_day_estimate, process_location_update
 from app.services.mobile_api_service import MobileApiService
@@ -340,8 +341,14 @@ def _handler_factory(config: AppConfig):
                     avg_speed=float(payload.get("avg_speed_kmh") or settings.get_float("default_avg_speed_kmh", config.defaults.avg_speed_kmh)),
                     service_minutes=float(payload.get("service_minutes") or settings.get_float("default_service_minutes", config.defaults.service_minutes)),
                     start_odometer=float(payload.get("start_odometer") or 0),
-                    break_uninterrupted=bool(payload.get("break_uninterrupted", True)),
-                    break_hours_before=float(payload.get("break_hours_before") or 0),
+                    # Перерыв считает сервер: он равен промежутку между закрытием прошлой
+                    # смены и стартом текущей. С телефона значение берётся только на
+                    # первой смене — там считать не от чего.
+                    break_hours_before=_break_hours(
+                        days,
+                        DailyStatsRepository(connection),
+                        fallback=float(payload.get("break_hours_before") or 0),
+                    ),
                     route_time_factor=float(payload.get("route_time_factor") or settings.get_float("default_route_time_factor", config.defaults.route_time_factor)),
                 )
             self._json_response({"ok": True, "day": _day_payload(day)})
@@ -800,6 +807,19 @@ def _handler_factory(config: AppConfig):
             self.wfile.write(body)
 
     return LocationApiHandler
+
+
+def _break_hours(days: Any, stats: Any, *, fallback: float = 0.0) -> float:
+    """Перерыв между сменами: вычисляем, а не спрашиваем.
+
+    Спрашивать у человека то, что система знает точно, — это лишний вопрос и повод
+    ответить не глядя. Значение с телефона берём только на первой смене: тогда считать
+    не от чего, и мы честно об этом спрашиваем, объяснив зачем.
+    """
+    facts = rest_facts(days, stats)
+    if facts.has_previous_shift:
+        return facts.break_hours
+    return max(0.0, fallback)
 
 
 def _feedback_ask(connection: Any, work_day_id: Any) -> dict[str, object]:

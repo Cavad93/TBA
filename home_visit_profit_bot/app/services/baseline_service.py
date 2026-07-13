@@ -74,7 +74,13 @@ POPULATION: dict[str, MetricSpec] = {
     # сна, кофеина и самооценки усталости удалены: из них выводилось состояние здоровья,
     # а это специальная категория персональных данных (152-ФЗ, ст. 10).
     "break_hours": MetricSpec("break_hours", "Перерыв между сменами", 14, 3, higher_is_worse=False, unit="ч"),
-    "break_interrupted": MetricSpec("break_interrupted", "Перерыв прерывался", 0, 1, unit=""),
+    # «Качество перерыва» больше не спрашивается — оно вычисляется. Норма междусменного
+    # отдыха: не менее двойной продолжительности прошлой смены. Одиннадцать часов после
+    # шестичасовой смены и после четырнадцатичасовой — совсем разные вещи.
+    "break_deficit_hours": MetricSpec("break_deficit_hours", "Нехватка отдыха", 0, 2, unit="ч"),
+    "break_night_hours": MetricSpec("break_night_hours", "Отдых ночью", 6, 2, higher_is_worse=False, unit="ч"),
+    # Еженедельный непрерывный отдых — не менее 42 часов (ТК РФ, ст. 110).
+    "days_without_rest": MetricSpec("days_without_rest", "Смен подряд без выходного", 3, 2, unit="дн"),
     "overtime_minutes": MetricSpec("overtime_minutes", "Сверхурочные", 0, 60, unit="мин"),
     "workload_survey_score": MetricSpec("workload_survey_score", "Опрос об условиях труда", 30, 15, unit=""),
     "workload_rating": MetricSpec("workload_rating", "Загруженность смены", 5, 2, unit="из 10"),

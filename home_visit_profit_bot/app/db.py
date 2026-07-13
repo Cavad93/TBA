@@ -67,7 +67,6 @@ CREATE TABLE IF NOT EXISTS work_days (
     -- Перерыв между сменами — факт о РЕЖИМЕ ТРУДА (ТК РФ), а не о состоянии человека.
     -- Вычисляется из времени закрытия прошлой смены, пользователь только подтверждает.
     break_hours_before REAL DEFAULT 0,
-    break_uninterrupted INTEGER DEFAULT 1,
     created_at TEXT NOT NULL
 );
 
@@ -200,7 +199,6 @@ CREATE TABLE IF NOT EXISTS daily_stats (
     -- Перерыв между сменами — факт о РЕЖИМЕ ТРУДА (ТК РФ), а не о состоянии человека.
     -- Вычисляется из времени закрытия прошлой смены, пользователь только подтверждает.
     break_hours_before REAL DEFAULT 0,
-    break_uninterrupted INTEGER DEFAULT 1,
     night_work_minutes REAL DEFAULT 0,
     workload_survey_score REAL DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -646,8 +644,7 @@ def _ensure_columns(db: Database) -> None:
     # добавляются миграцией, а не только через DDL.
     _ensure_column(db, "driving_behavior_segments", "walk_bouts", "INTEGER DEFAULT 0")
     _ensure_column(db, "driving_behavior_segments", "walk_seconds", "REAL DEFAULT 0")
-    _ensure_column(db, "work_days", "break_uninterrupted", "INTEGER DEFAULT 1")
-    _ensure_column(db, "daily_stats", "break_uninterrupted", "INTEGER DEFAULT 1")
+
     _ensure_column(db, "work_days", "telemed_minutes", "REAL DEFAULT 0")
     _ensure_column(db, "work_days", "office_income", "REAL DEFAULT 0")
     _ensure_column(db, "work_days", "office_minutes", "REAL DEFAULT 0")

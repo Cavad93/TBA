@@ -9,6 +9,7 @@ from app.repositories import DailyStatsRepository, SettingsRepository, WorkDayRe
 from app.services.indices_service import level_for
 from app.services.mobile_workload_service import MobileWorkloadService
 from app.services.mobile_report_service import MobileReportService
+from app.services.rest_service import rest_facts
 from app.services.overwork_pricing_service import OverworkPricing, build_pricing
 
 
@@ -154,25 +155,23 @@ class HomeService:
         return streak
 
     def _start_prompt(self, latest_closed: Any) -> dict[str, Any]:
+        """Что подставить в форму старта смены. Ничего лишнего не спрашивая.
+
+        Перерыв между сменами не вопрос, а вычисление: он равен промежутку между
+        закрытием прошлой смены и «сейчас». Достаточность перерыва тоже выводится —
+        по норме междусменного отдыха. Человеку остаётся подтвердить одометр.
+        """
         last_odometer = 0.0
-        prev_ended_at = None
-        break_hours = 0.0
         if latest_closed is not None:
             last_odometer = latest_closed.end_odometer or latest_closed.start_odometer or 0.0
-            prev_ended_at = latest_closed.ended_at
-            if prev_ended_at:
-                try:
-                    ended = datetime.fromisoformat(str(prev_ended_at))
-                    delta = datetime.now() - ended
-                    break_hours = round(max(0.0, delta.total_seconds() / 3600.0), 1)
-                except ValueError:
-                    break_hours = 0.0
-        return {
+
+        facts = rest_facts(self.days, self.stats)
+        payload = facts.payload()
+        payload.update({
             "has_last_odometer": last_odometer > 0,
             "last_odometer": round(float(last_odometer), 1),
-            "prev_ended_at": prev_ended_at,
-            "break_hours": break_hours,
-        }
+        })
+        return payload
 
     # --- рекомендации ----------------------------------------------------
 

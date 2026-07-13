@@ -15,6 +15,7 @@ from app.repositories import (
 from app.services.correlation_service import workload_learning_adjustment
 from app.services.day_metrics_service import build_active_day_metrics, load_baselines
 from app.services.indices_service import Contribution, IndexResult, load_index, overwork_extra_delta, overwork_result
+from app.services.rest_service import rest_facts
 
 
 @dataclass(frozen=True)
@@ -137,11 +138,15 @@ def estimate_active_day_workload(
     weekly_average = rolling_workload_average(stats_repo, score) if stats_repo else score
     night_work_minutes = calculate_night_work_minutes(day.started_at, total_work)
     workload_survey_score = settings_repo.get_float("workload_survey_score", 0)
+    # Дефицит междусменного отдыха вычисляется, а не спрашивается: он равен разнице
+    # между нормой (вдвое дольше прошлой смены) и фактическим перерывом.
+    break_deficit_hours = float(metrics.get("break_deficit_hours") or 0)
+
     overwork_index = calculate_overwork_index(
         stats_repo=stats_repo,
         day_score=score,
         break_hours_before=day.break_hours_before,
-        break_uninterrupted=day.break_uninterrupted,
+        break_deficit_hours=break_deficit_hours,
         night_work_minutes=night_work_minutes,
         workload_survey_score=workload_survey_score,
         extra_pressure=overwork_extra_delta(metrics, baselines),
@@ -153,7 +158,7 @@ def estimate_active_day_workload(
         explicit=overwork_contributions(
             day_score=score,
             break_hours_before=day.break_hours_before,
-            break_uninterrupted=day.break_uninterrupted,
+            break_deficit_hours=break_deficit_hours,
             night_work_minutes=night_work_minutes,
             workload_survey_score=workload_survey_score,
         ),
@@ -250,7 +255,7 @@ def calculate_overwork_index(
     stats_repo: DailyStatsRepository | None,
     day_score: float,
     break_hours_before: float,
-    break_uninterrupted: bool,
+    break_deficit_hours: float,
     night_work_minutes: float,
     workload_survey_score: float,
     extra_pressure: float = 0.0,
@@ -273,16 +278,14 @@ def calculate_overwork_index(
         if rows and "overwork_index" in rows[0].keys():
             previous = float(rows[0]["overwork_index"] or 0)
     density = max(0.0, day_score - 45) * 0.45
-    break_penalty = _break_penalty(break_hours_before)
-    interrupted_penalty = 0.0 if break_uninterrupted else 8.0
+    break_penalty = _break_penalty(break_deficit_hours)
     night_penalty = min(18.0, night_work_minutes / 60 * 4.5)
     survey_penalty = max(0.0, workload_survey_score - 50) * 0.18
-    rest_bonus = _rest_bonus(break_hours_before, break_uninterrupted)
+    rest_bonus = _rest_bonus(break_hours_before, break_deficit_hours)
     index = (
         previous * 0.65
         + density
         + break_penalty
-        + interrupted_penalty
         + night_penalty
         + survey_penalty
         - rest_bonus
@@ -295,7 +298,7 @@ def overwork_contributions(
     *,
     day_score: float,
     break_hours_before: float,
-    break_uninterrupted: bool,
+    break_deficit_hours: float,
     night_work_minutes: float,
     workload_survey_score: float,
 ) -> list[Contribution]:
@@ -308,16 +311,10 @@ def overwork_contributions(
         (
             "break_hours",
             "Перерыв между сменами",
-            _break_penalty(break_hours_before),
+            _break_penalty(break_deficit_hours),
             break_hours_before,
-            f"Перерыв между сменами {break_hours_before:.0f} ч",
-        ),
-        (
-            "break_interrupted",
-            "Перерыв прерывался",
-            0.0 if break_uninterrupted else 8.0,
-            0.0 if break_uninterrupted else 1.0,
-            "Перерыв между сменами прерывался работой",
+            f"Перерыв между сменами {break_hours_before:.0f} ч"
+            + (f", не хватает {break_deficit_hours:.0f} ч до нормы" if break_deficit_hours > 0 else ""),
         ),
         (
             "night_minutes",
@@ -342,10 +339,10 @@ def overwork_contributions(
         ),
         (
             "rest_bonus",
-            "Длинный перерыв",
-            -_rest_bonus(break_hours_before, break_uninterrupted),
+            "Полноценный отдых",
+            -_rest_bonus(break_hours_before, break_deficit_hours),
             break_hours_before,
-            "Длинный непрерывный перерыв перед сменой",
+            "Отдых с запасом сверх нормы",
         ),
     ]
     return [
@@ -499,27 +496,32 @@ def _workload_tracking_enabled(settings_repo: SettingsRepository) -> bool:
 
 
 
-def _break_penalty(break_hours_before: float) -> float:
-    if break_hours_before <= 0:
+def _break_penalty(break_deficit_hours: float) -> float:
+    """Штраф за недостаток междусменного отдыха.
+
+    Норма — не менее двойной продолжительности предыдущей смены (постановление НКТ СССР
+    № 169, применяется до сих пор: ТК РФ междусменный отдых прямо не нормирует).
+    Раньше здесь стояли абсолютные пороги (<8 ч, <10 ч, <12 ч) — но одиннадцать часов
+    после шестичасовой смены и после четырнадцатичасовой это совсем разные вещи.
+    Дефицит считает rest_service, и он же и есть то «качество перерыва», которое раньше
+    спрашивали у человека.
+    """
+    if break_deficit_hours <= 0:
         return 0.0
-    if break_hours_before < 8:
-        return 18.0
-    if break_hours_before < 10:
-        return 9.0
-    if break_hours_before < 12:
-        return 4.0
-    return 0.0
+    return min(20.0, break_deficit_hours * 2.0)
 
 
-def _rest_bonus(break_hours_before: float, break_uninterrupted: bool) -> float:
-    """Длинный непрерывный перерыв между сменами гасит накопленную переработку."""
-    if not break_uninterrupted:
+
+def _rest_bonus(break_hours_before: float, break_deficit_hours: float) -> float:
+    """Отдых с запасом сверх нормы гасит накопленную переработку."""
+    if break_deficit_hours > 0 or break_hours_before <= 0:
         return 0.0
     bonus = 0.0
-    if break_hours_before >= 16:
-        bonus += 10.0
     if break_hours_before >= 24:
-        bonus += 18.0
+        bonus += 10.0
+    # Еженедельный непрерывный отдых — не менее 42 часов (ТК РФ, ст. 110).
+    if break_hours_before >= 42:
+        bonus += 12.0
     return bonus
 
 

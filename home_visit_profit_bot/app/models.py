@@ -48,7 +48,6 @@ class WorkDay:
     odometer_km: float = 0.0
     personal_km: float = 0.0
     break_hours_before: float = 0.0
-    break_uninterrupted: bool = True
 
 
 @dataclass(frozen=True)
@@ -254,7 +253,6 @@ class DailyStats:
     heavy_visit_count: int = 0
     overwork_index: float = 0.0
     break_hours_before: float = 0.0
-    break_uninterrupted: bool = True
     night_work_minutes: float = 0.0
     workload_survey_score: float = 0.0
 

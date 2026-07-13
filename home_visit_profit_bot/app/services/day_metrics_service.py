@@ -58,6 +58,7 @@ def build_closed_day_metrics(
     net_hourly: float,
     driving_repo: DrivingBehaviorRepository | None = None,
     segments_repo: DrivingSegmentRepository | None = None,
+    rest: dict[str, float] | None = None,
     samples_repo: LocationSampleRepository | None = None,
     settings_repo: SettingsRepository | None = None,
 ) -> dict[str, float]:
@@ -113,9 +114,11 @@ def build_closed_day_metrics(
         if segments_repo is not None:
             metrics.update(day_walk_metrics(segments_repo, day.id))
 
-        if day.break_hours_before > 0:
-            metrics["break_hours"] = float(day.break_hours_before)
-        metrics["break_interrupted"] = 0.0 if day.break_uninterrupted else 1.0
+        # Режим отдыха целиком вычисляется: длина перерыва, его дефицит относительно
+        # нормы, сколько часов пришлось на ночь, сколько смен подряд без выходного.
+        # Вопрос «каким был перерыв» человеку больше не задаётся.
+        if rest is not None:
+            metrics.update(rest)
 
         if settings_repo is not None:
             survey = settings_repo.get_float("workload_survey_score", 0)

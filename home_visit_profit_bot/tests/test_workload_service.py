@@ -81,7 +81,7 @@ def test_overwork_index_uses_sleep_break_circadian_and_burnout() -> None:
         stats_repo=None,
         day_score=75,
         break_hours_before=7,
-        break_uninterrupted=False,
+        break_deficit_hours=14,
         night_work_minutes=180,
         workload_survey_score=70,
     )
@@ -89,7 +89,7 @@ def test_overwork_index_uses_sleep_break_circadian_and_burnout() -> None:
         stats_repo=None,
         day_score=40,
         break_hours_before=24,
-        break_uninterrupted=True,
+        break_deficit_hours=0,
         night_work_minutes=0,
         workload_survey_score=20,
     )

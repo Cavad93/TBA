@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SettingEntity::class,
         SyncQueueEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 @TypeConverters(HomeVisitConverters::class)
@@ -36,7 +36,7 @@ abstract class HomeVisitDatabase : RoomDatabase() {
                     HomeVisitDatabase::class.java,
                     "home_visit.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build()
                     .also { instance = it }
             }
@@ -62,6 +62,47 @@ abstract class HomeVisitDatabase : RoomDatabase() {
          * релиза» это и есть их обработка. SQLite не умеет DROP COLUMN, поэтому таблица
          * пересоздаётся.
          */
+        /**
+         * Качество перерыва больше не спрашивается — оно вычисляется на сервере из длины
+         * перерыва и продолжительности прошлой смены. Колонка с телефона убирается.
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE work_days_new (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        startEpochMillis INTEGER NOT NULL,
+                        endEpochMillis INTEGER,
+                        status TEXT NOT NULL,
+                        startAddress TEXT,
+                        finishAddress TEXT,
+                        startOdometer REAL NOT NULL,
+                        endOdometer REAL,
+                        breakHoursBefore REAL NOT NULL,
+                        createdAtEpochMillis INTEGER NOT NULL,
+                        updatedAtEpochMillis INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO work_days_new(
+                        id, startEpochMillis, endEpochMillis, status, startAddress,
+                        finishAddress, startOdometer, endOdometer, breakHoursBefore,
+                        createdAtEpochMillis, updatedAtEpochMillis
+                    )
+                    SELECT id, startEpochMillis, endEpochMillis, status, startAddress,
+                           finishAddress, startOdometer, endOdometer, breakHoursBefore,
+                           createdAtEpochMillis, updatedAtEpochMillis
+                    FROM work_days
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE work_days")
+                db.execSQL("ALTER TABLE work_days_new RENAME TO work_days")
+            }
+        }
+
         private val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(

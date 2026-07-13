@@ -111,7 +111,6 @@ class HomeVisitRepository private constructor(
         startAddress: String? = null,
         finishAddress: String? = null,
         startOdometer: Double = 0.0,
-        breakUninterrupted: Boolean = true,
         breakHoursBefore: Double = 0.0,
     ): String {
         val now = now()
@@ -130,7 +129,6 @@ class HomeVisitRepository private constructor(
                 finishAddress = finishAddress?.trim()?.ifEmpty { null },
                 startOdometer = startOdometer.coerceAtLeast(0.0),
                 endOdometer = null,
-                breakUninterrupted = breakUninterrupted,
                 breakHoursBefore = breakHoursBefore.coerceAtLeast(0.0),
                 createdAtEpochMillis = now,
                 updatedAtEpochMillis = now,
@@ -348,8 +346,7 @@ class HomeVisitRepository private constructor(
                         startAddress = item.nullableString("start_address"),
                         finishAddress = item.nullableString("finish_address"),
                         startOdometer = item.optDouble("start_odometer", 0.0),
-                        endOdometer = item.nullableDouble("end_odometer"),
-                        breakUninterrupted = item.optBoolean("break_uninterrupted", true),
+                        endOdometer = item.nullableDouble("end_odometer"), true),
                         breakHoursBefore = item.optDouble("break_hours_before", 0.0),
                         createdAtEpochMillis = item.optLong("created_at_epoch_millis", now()),
                         updatedAtEpochMillis = item.optLong("updated_at_epoch_millis", now()),
@@ -1066,7 +1063,6 @@ class HomeVisitRepository private constructor(
         .put("finish_address", day.finishAddress)
         .put("start_odometer", day.startOdometer)
         .put("end_odometer", day.endOdometer)
-        .put("break_uninterrupted", day.breakUninterrupted)
         .put("break_hours_before", day.breakHoursBefore)
         .toString()
 
@@ -1509,8 +1505,14 @@ class HomeVisitRepository private constructor(
             startPrompt = HomeStartPrompt(
                 hasLastOdometer = start.optBoolean("has_last_odometer", false),
                 lastOdometer = start.optDouble("last_odometer", 0.0),
+                hasPreviousShift = start.optBoolean("has_previous_shift", false),
                 prevEndedAt = start.optString("prev_ended_at").ifBlank { null },
+                prevShiftHours = start.optDouble("prev_shift_hours", 0.0),
                 breakHours = start.optDouble("break_hours", 0.0),
+                requiredBreakHours = start.optDouble("required_break_hours", 0.0),
+                breakDeficitHours = start.optDouble("break_deficit_hours", 0.0),
+                isShort = start.optBoolean("is_short", false),
+                explanation = start.optString("explanation"),
             ),
             recovery = parseHomeOverwork(response.optJSONObject("recovery")),
             pricing = parsePricing(response.optJSONObject("pricing")),
@@ -1731,8 +1733,7 @@ class HomeVisitRepository private constructor(
             pauseMinutes = summary.optDouble("pause_minutes", 0.0),
             heavyVisitCount = summary.optInt("heavy_visit_count", 0),
             nightWorkMinutes = summary.optDouble("night_work_minutes", 0.0),
-            workloadSurveyScore = summary.optDouble("workload_survey_score", 0.0),
-            breakUninterrupted = summary.optBoolean("break_uninterrupted", true),
+            workloadSurveyScore = summary.optDouble("workload_survey_score", 0.0), true),
             breakHoursBefore = summary.optDouble("break_hours_before", 0.0),
         )
     }

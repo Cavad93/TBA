@@ -152,7 +152,7 @@ def test_mobile_sync_saves_work_items_and_aggregates(config) -> None:
     assert day.start_address == "Дом"
     assert day.finish_address == "Финиш"
     assert day.start_odometer == 1000
-    assert day.break_uninterrupted is True
+    assert day.break_hours_before >= 0
     assert day.break_hours_before >= 0
     assert day.break_hours_before == 12
     # Работа на точке теперь тоже заказ в Ленте (kind='onsite'), а не агрегат дня:

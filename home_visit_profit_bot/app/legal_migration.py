@@ -43,6 +43,14 @@ DROPPED_COLUMNS: dict[str, tuple[str, ...]] = {
     "driving_behavior_segments": ("gait_cadence", "gait_step_cv", "gait_regularity", "gait_impact"),
 }
 
+# Колонки, которые спрашивали то, что можно вычислить. Качество перерыва выводится
+# из его длины и длительности прошлой смены (см. rest_service), а не задаётся вопросом:
+# спрашивать у человека то, что система знает, — лишний вопрос и повод ответить не глядя.
+COMPUTED_INSTEAD_OF_ASKED: dict[str, tuple[str, ...]] = {
+    "work_days": ("break_uninterrupted",),
+    "daily_stats": ("break_uninterrupted",),
+}
+
 # Переименования: то же число, но названное тем, чем оно является на самом деле.
 RENAMED_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
     "daily_stats": (
@@ -132,6 +140,12 @@ def migrate_out_of_special_categories(db: Database) -> None:
             if _has_column(db, table, column):
                 db.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
                 logger.info("Спецкатегория: удалена колонка %s.%s", table, column)
+
+    for table, columns in COMPUTED_INSTEAD_OF_ASKED.items():
+        for column in columns:
+            if _has_column(db, table, column):
+                db.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+                logger.info("Теперь вычисляется, а не спрашивается: %s.%s", table, column)
 
     for table, pairs in RENAMED_COLUMNS.items():
         for old, new in pairs:

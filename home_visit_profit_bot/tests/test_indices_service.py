@@ -100,9 +100,9 @@ def test_overwork_delta_grows_when_the_schedule_was_denser_than_usual() -> None:
     baselines = {
         "workload_rating": _baseline("workload_rating", 5, 1),
         "overtime_minutes": _baseline("overtime_minutes", 0, 30),
-        "break_interrupted": _baseline("break_interrupted", 0, 1),
+        "break_deficit_hours": _baseline("break_deficit_hours", 0, 2),
     }
-    dense = {"workload_rating": 9, "overtime_minutes": 120, "break_interrupted": 1}
+    dense = {"workload_rating": 9, "overtime_minutes": 120, "break_deficit_hours": 6}
 
     assert overwork_extra_delta(dense, baselines) > 8
 
@@ -114,7 +114,7 @@ def test_overwork_result_merges_formula_and_robust_explanations() -> None:
     explicit = overwork_contributions(
         day_score=80,
         break_hours_before=7,
-        break_uninterrupted=False,
+        break_deficit_hours=14,
         night_work_minutes=120,
         workload_survey_score=70,
     )

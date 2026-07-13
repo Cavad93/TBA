@@ -81,12 +81,23 @@ data class HomeSnapshot(
     val fromCache: Boolean = false,
 )
 
-/** Данные для запуска смены: предзаполнение одометра и авто-перерыв. */
+/**
+ * Что подставить в форму старта смены. Перерыв между сменами не спрашивается — он
+ * вычисляется на сервере: это промежуток между закрытием прошлой смены и «сейчас».
+ * Достаточность перерыва тоже выводится, по норме междусменного отдыха (не менее
+ * двойной продолжительности прошлой смены). Человеку остаётся подтвердить одометр.
+ */
 data class HomeStartPrompt(
     val hasLastOdometer: Boolean,
     val lastOdometer: Double,
+    val hasPreviousShift: Boolean,
     val prevEndedAt: String?,
+    val prevShiftHours: Double,
     val breakHours: Double,
+    val requiredBreakHours: Double,
+    val breakDeficitHours: Double,
+    val isShort: Boolean,
+    val explanation: String,
 )
 
 /** Состояние восстановления. `verdict` — go/edge/skip для окраски. */
@@ -504,7 +515,6 @@ data class WorkloadSummary(
     val nightWorkMinutes: Double,
     val workloadSurveyScore: Double,
     val breakHoursBefore: Double,
-    val breakUninterrupted: Boolean,
 )
 
 data class WorkloadFeedback(

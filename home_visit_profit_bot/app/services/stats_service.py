@@ -17,6 +17,7 @@ from app.services.cleanup_service import cleanup
 from app.services.day_metrics_service import build_closed_day_metrics, load_baselines, persist_day_metrics
 from app.services.workload_service import estimate_active_day_workload, stop_complexity_for_day
 from app.services.gps_metrics_service import collect as collect_gps_metrics
+from app.services.rest_service import rest_facts, rest_metrics
 from app.services.indices_service import economy_index
 from app.services.optimization_service import optimize_route
 from app.services.profitability_service import calculate_car_expenses
@@ -25,6 +26,18 @@ from app.services.routing_service import RoutingError
 
 MIN_ROUTE_TIME_FACTOR = 0.5
 MAX_ROUTE_TIME_FACTOR = 3.0
+
+
+def _started_at(day: WorkDay):
+    """Момент старта смены — от него отсчитывается перерыв с прошлой смены."""
+    from datetime import datetime
+
+    if not day.started_at:
+        return None
+    try:
+        return datetime.fromisoformat(str(day.started_at))
+    except ValueError:
+        return None
 
 
 def _save_workload_rating_feedback(connection, work_day_id: int, workload_rating: float, predicted_score: float) -> None:
@@ -132,6 +145,7 @@ def finalize_day(
         net_hourly=net_hourly,
         driving_repo=DrivingBehaviorRepository(connection),
         segments_repo=DrivingSegmentRepository(connection),
+        rest=rest_metrics(rest_facts(day_repo, stats_repo, started_at=_started_at(day))),
         samples_repo=LocationSampleRepository(connection),
         settings_repo=settings_repo,
     )
@@ -234,7 +248,6 @@ def finalize_day(
         heavy_visit_count=workload.heavy_visit_count,
         overwork_index=workload.overwork_index,
         break_hours_before=day.break_hours_before,
-        break_uninterrupted=day.break_uninterrupted,
         night_work_minutes=workload.night_work_minutes,
         workload_survey_score=workload.workload_survey_score,
     )

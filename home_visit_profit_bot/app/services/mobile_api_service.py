@@ -26,6 +26,7 @@ from app.services.settings_service import (
 )
 from app.services.address_resolver import resolve_address
 from app.services.day_summary_service import reconcile_end_day_data
+from app.services.rest_service import rest_facts
 from app.services.stats_service import finalize_day
 
 
@@ -74,6 +75,7 @@ class MobileApiService:
         self.connection = connection
         self.settings = SettingsRepository(connection)
         self.days = WorkDayRepository(connection)
+        self.stats = DailyStatsRepository(connection)
         self.visits = VisitRepository(connection)
         self.expenses = ExpenseRepository(connection)
         self.telemed = TelemedRepository(connection)
@@ -242,8 +244,14 @@ class MobileApiService:
             service_minutes=self.settings.get_float("default_service_minutes", 20),
             route_time_factor=self.settings.get_float("default_route_time_factor", 1),
             start_odometer=_non_negative_float(payload.get("start_odometer"), default=0.0),
-            break_uninterrupted=bool(payload.get("break_uninterrupted", True)),
-            break_hours_before=_non_negative_float(payload.get("break_hours_before"), default=0.0),
+            # Перерыв между сменами СЧИТАЕТ СЕРВЕР: он равен промежутку между закрытием
+            # прошлой смены и стартом текущей, и это известно точно. Значение с телефона
+            # принимается только на самой первой смене — считать там не от чего.
+            break_hours_before=_break_hours(
+                self.days,
+                self.stats,
+                fallback=_non_negative_float(payload.get("break_hours_before"), default=0.0),
+            ),
         )
         self._map(client_entity_id, "work_day", day.id)
         return day.id
@@ -580,3 +588,15 @@ def _clinic(payload: dict[str, Any], allowed: set[str]) -> str:
     if clinic not in allowed:
         raise ValueError(f"unsupported clinic: {clinic}")
     return clinic
+
+
+def _break_hours(days: WorkDayRepository, stats: DailyStatsRepository, *, fallback: float = 0.0) -> float:
+    """Перерыв между сменами: вычисляем, а не спрашиваем.
+
+    Он равен промежутку между закрытием прошлой смены и стартом текущей — это известно
+    точно. Значение с телефона берём только на первой смене: там считать не от чего.
+    """
+    facts = rest_facts(days, stats)
+    if facts.has_previous_shift:
+        return facts.break_hours
+    return max(0.0, fallback)

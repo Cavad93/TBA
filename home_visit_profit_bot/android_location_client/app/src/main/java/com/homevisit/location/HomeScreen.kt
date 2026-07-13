@@ -198,8 +198,8 @@ internal fun HomeScreen(
         StartShiftSheet(
             startPrompt = snapshot?.startPrompt,
             onDismiss = { showStartSheet = false },
-            onConfirm = { odometer, breakUninterrupted, breakHours ->
-                workActions.onStartShift(odometer, breakUninterrupted, breakHours)
+            onConfirm = { odometer, firstBreakHours ->
+                workActions.onStartShift(odometer, firstBreakHours)
                 showStartSheet = false
             },
         )
@@ -497,20 +497,19 @@ internal fun OnboardingStep(number: String, title: String, body: String) {
 internal fun StartShiftSheet(
     startPrompt: HomeStartPrompt?,
     onDismiss: () -> Unit,
-    onConfirm: (Double, Boolean, Double) -> Unit,
+    onConfirm: (Double, Double) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    // Перерыв между сменами приложение вычисляет само — из времени закрытия прошлой
-    // смены. Человек только подтверждает. Это факт о РЕЖИМЕ ТРУДА (ТК РФ, ст. 107–110),
-    // а не о состоянии здоровья: вопросов о сне здесь больше нет и не будет.
-    var breakUninterrupted by rememberSaveable { mutableStateOf(true) }
     var odometerText by rememberSaveable {
         mutableStateOf(
             if (startPrompt?.hasLastOdometer == true) startPrompt.lastOdometer.toInt().toString() else "",
         )
     }
-    val breakHours = startPrompt?.breakHours ?: 0.0
-    val hasPrev = startPrompt?.prevEndedAt != null
+    // Перерыв спрашиваем ТОЛЬКО на первой смене: дальше он вычисляется от времени, когда
+    // закрыли прошлую. Спрашивать у человека то, что система знает точно, — лишний вопрос
+    // и повод ответить не глядя.
+    var firstBreakText by rememberSaveable { mutableStateOf("") }
+    val hasPrev = startPrompt?.hasPreviousShift == true
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
@@ -519,46 +518,12 @@ internal fun StartShiftSheet(
         ) {
             Text("Начать смену", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
 
-            // Перерыв между сменами — посчитан, подтверждаем.
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-            ) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(
-                            Icons.Filled.Schedule,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.size(20.dp),
-                        )
-                        Text(
-                            if (hasPrev)
-                                "Перерыв между сменами — ${oneDecimal(breakHours)} ч. Посчитали по времени закрытия прошлой смены."
-                            else
-                                "Первая смена — перерыв не считаем.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        )
-                    }
-                    if (hasPrev) {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "Перерыв был непрерывным?",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            )
-                            Switch(checked = breakUninterrupted, onCheckedChange = { breakUninterrupted = it })
-                        }
-                    }
-                }
+            if (hasPrev) {
+                BreakCard(startPrompt!!)
+            } else {
+                FirstShiftBreakInput(value = firstBreakText, onValue = { firstBreakText = it })
             }
 
-            // Одометр — подтверждение вчерашнего значения или ввод при первом запуске.
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedTextField(
                     value = odometerText,
@@ -580,7 +545,9 @@ internal fun StartShiftSheet(
             Button(
                 onClick = {
                     val odometer = odometerText.toDoubleOrNull() ?: 0.0
-                    onConfirm(odometer, breakUninterrupted, breakHours)
+                    // На повторных сменах перерыв считает сервер — с телефона не шлём ничего.
+                    val firstBreak = if (hasPrev) 0.0 else (parseNumber(firstBreakText) ?: 0.0)
+                    onConfirm(odometer, firstBreak)
                 },
                 modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = RoundedCornerShape(14.dp),
@@ -591,6 +558,64 @@ internal fun StartShiftSheet(
                 Text("Поехали", style = MaterialTheme.typography.titleMedium, color = Color.White)
             }
         }
+    }
+}
+
+/** Перерыв между сменами — посчитан, а не спрошен. Показываем и объясняем. */
+@Composable
+private fun BreakCard(prompt: HomeStartPrompt) {
+    val tone = if (prompt.isShort) VerdictColors.edge else MaterialTheme.colorScheme.tertiary
+    val container =
+        if (prompt.isShort) VerdictColors.edgeContainer else MaterialTheme.colorScheme.tertiaryContainer
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = container),
+    ) {
+        Row(
+            Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(Icons.Filled.Schedule, contentDescription = null, tint = tone, modifier = Modifier.size(20.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Перерыв между сменами — ${oneDecimal(prompt.breakHours)} ч",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = tone,
+                )
+                Text(
+                    prompt.explanation,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Первая смена — считать перерыв не от чего. Спрашиваем один раз и объясняем зачем:
+ * дальше приложение будет считать его само, по времени закрытия прошлой смены.
+ */
+@Composable
+private fun FirstShiftBreakInput(value: String, onValue: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValue,
+            label = { Text("Сколько часов отдыхали перед сменой?") },
+            suffix = { Text("ч") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            "Спрашиваем только сейчас: это первая смена, и считать перерыв не от чего. " +
+                "Дальше приложение посчитает его само — по времени, когда вы закроете смену. " +
+                "Перерыв между сменами нужен, чтобы правильно учитывать режим труда и отдыха.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

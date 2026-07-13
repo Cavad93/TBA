@@ -54,7 +54,6 @@ def _work_day_from_row(row: Any | None) -> WorkDay | None:
         fuel_expenses=float(row["fuel_expenses"] or 0),
         fuel_liters=float(row["fuel_liters"] or 0),
         break_hours_before=float(row["break_hours_before"] or 0),
-        break_uninterrupted=bool(_row_value(row, "break_uninterrupted") if _row_value(row, "break_uninterrupted") is not None else 1),
     )
 
 
@@ -190,7 +189,6 @@ class WorkDayRepository:
         route_time_factor: float = 1.0,
         start_odometer: float = 0.0,
         break_hours_before: float = 0.0,
-        break_uninterrupted: bool = True,
     ) -> WorkDay:
         self.connection.execute("UPDATE work_days SET status = 'closed', ended_at = ? WHERE status = 'active'", (now_iso(),))
         new_id = self.connection.insert(
@@ -199,8 +197,8 @@ class WorkDayRepository:
                 date, status, start_address, start_lat, start_lon,
                 finish_address, finish_lat, finish_lon, started_at,
                 planned_avg_speed_kmh, planned_service_minutes, planned_route_time_factor,
-                start_odometer, break_hours_before, break_uninterrupted, created_at
-            ) VALUES (date('now'), 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                start_odometer, break_hours_before, created_at
+            ) VALUES (date('now'), 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 start_address,
@@ -215,7 +213,6 @@ class WorkDayRepository:
                 route_time_factor,
                 start_odometer,
                 break_hours_before,
-                1 if break_uninterrupted else 0,
                 now_iso(),
             ),
         )
@@ -285,6 +282,14 @@ class WorkDayRepository:
             list(values.values()) + [now_iso(), day_id],
         )
         self.connection.commit()
+
+    def recent_closed(self, limit: int = 30) -> list[Any]:
+        """Последние закрытые смены, свежие первыми — для счётчика дней без выходного."""
+        return self.connection.execute(
+            "SELECT started_at, ended_at FROM work_days WHERE status = 'closed' "
+            "AND ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
 
     def latest_closed(self) -> WorkDay | None:
         row = self.connection.execute(
@@ -1219,9 +1224,9 @@ class DailyStatsRepository:
                 other_expenses, workload_index, workload_weekly_average,
                 long_stop_count, pause_minutes,
                 heavy_visit_count, overwork_index, break_hours_before,
-                break_uninterrupted, night_work_minutes,
+                night_work_minutes,
                 workload_survey_score, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 day_id,
@@ -1274,7 +1279,6 @@ class DailyStatsRepository:
                 stats.heavy_visit_count,
                 stats.overwork_index,
                 stats.break_hours_before,
-                1 if stats.break_uninterrupted else 0,
                 stats.night_work_minutes,
                 stats.workload_survey_score,
                 now_iso(),
