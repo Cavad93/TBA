@@ -34,6 +34,19 @@ from app.services.stats_service import finalize_day
 # allowed_clinics()/allowed_telemed_clinics() (см. settings_service).
 
 EXPENSE_FIELD_BY_CATEGORY = {
+    # Расходы на машину — отдельной категорией не ради бухгалтерии, а ради расчёта:
+    # из них выводится настоящий коэффициент износа вместо угадывания по таблице.
+    "Машина": "vehicle_expenses",
+    "Vehicle": "vehicle_expenses",
+    "vehicle": "vehicle_expenses",
+    "Аренда машины": "vehicle_rent",
+    "Rent": "vehicle_rent",
+    "rent": "vehicle_rent",
+    # Халтура и разовая премия — доход, который не пришёл заказом. Учитывается
+    # тем же путём, что и расходы, но со знаком плюс к выручке дня.
+    "Неучтённый доход": "extra_income",
+    "ExtraIncome": "extra_income",
+    "extra_income": "extra_income",
     "Еда": "food_meal_expenses",
     "Meal": "food_meal_expenses",
     "meal": "food_meal_expenses",
@@ -580,6 +593,9 @@ def _end_day_data_from_payload(day: Any, payload: dict[str, Any]) -> EndDayData:
         # Еда и питьё — только рубли: количество чашек кофе это физиологический вход.
         # Загруженность смены 1–10 — оценка условий труда, а не самочувствия.
         workload_rating=_non_negative_float(payload.get("workload_rating"), default=0.0),
+        vehicle_expenses=_non_negative_float(payload.get("vehicle_expenses"), default=float(day.vehicle_expenses or 0)),
+        vehicle_rent=_non_negative_float(payload.get("vehicle_rent"), default=float(day.vehicle_rent or 0)),
+        extra_income=_non_negative_float(payload.get("extra_income"), default=float(day.extra_income or 0)),
     )
 
 

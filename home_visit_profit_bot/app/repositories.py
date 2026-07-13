@@ -1225,8 +1225,9 @@ class DailyStatsRepository:
                 long_stop_count, pause_minutes,
                 heavy_visit_count, overwork_index, break_hours_before,
                 night_work_minutes,
-                workload_survey_score, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                workload_survey_score, vehicle_expenses, vehicle_rent, extra_income,
+                salary_income, income_per_km, net_per_km, cost_per_km, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 day_id,
@@ -1281,6 +1282,13 @@ class DailyStatsRepository:
                 stats.break_hours_before,
                 stats.night_work_minutes,
                 stats.workload_survey_score,
+                stats.vehicle_expenses,
+                stats.vehicle_rent,
+                stats.extra_income,
+                stats.salary_income,
+                stats.income_per_km,
+                stats.net_per_km,
+                stats.cost_per_km,
                 now_iso(),
             ),
         )

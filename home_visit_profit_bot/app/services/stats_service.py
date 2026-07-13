@@ -17,10 +17,12 @@ from app.services.cleanup_service import cleanup
 from app.services.day_metrics_service import build_closed_day_metrics, load_baselines, persist_day_metrics
 from app.services.workload_service import estimate_active_day_workload, stop_complexity_for_day
 from app.services.gps_metrics_service import collect as collect_gps_metrics
+from app.services.income_service import income_model, salary_income_for_shift
 from app.services.rest_service import rest_facts, rest_metrics
 from app.services.indices_service import economy_index
 from app.services.optimization_service import optimize_route
-from app.services.profitability_service import calculate_car_expenses
+from app.services.profitability_service import calculate_car_expenses, vehicle_km_cost
+from app.services.vehicle_service import osrm_profile
 from app.services.routing_service import RoutingError
 
 
@@ -73,7 +75,6 @@ def finalize_day(
     stats_repo: DailyStatsRepository,
     settings_repo: SettingsRepository,
 ) -> DailyStats:
-    amortization_factor = settings_repo.get_float("amortization_factor", 0.8)
     total_work_minutes = data.total_work_minutes
     route_minutes = data.actual_route_minutes
     actual_avg_speed_kmh = data.actual_km / (route_minutes / 60) if route_minutes > 0 else 0
@@ -109,23 +110,36 @@ def finalize_day(
     )
     fuel_price_per_liter = calculate_fuel_price_per_liter(data, stats_repo, settings_repo)
     fuel_consumption_l_per_100km = calculate_fuel_consumption_l_per_100km(data, stats_repo, settings_repo)
-    fuel_cost_per_km = fuel_price_per_liter * fuel_consumption_l_per_100km / 100
     fuel_used_liters = odometer_km * fuel_consumption_l_per_100km / 100
-    fuel_expenses, amortization_expenses, car_expenses = calculate_car_expenses(
-        data.actual_km,
-        fuel_cost_per_km,
-        amortization_factor,
-    )
+
+    # Стоимость километра: измеренная по заправкам и расходам, если данных хватает,
+    # иначе — по таблице коэффициентов. Плюс учитывается, кто именно платит: при
+    # служебной машине с топливной картой расхода у человека нет вовсе.
+    cost = vehicle_km_cost(settings_repo, stats_repo, route_time_factor=route_time_factor)
+    fuel_expenses, amortization_expenses, car_expenses = calculate_car_expenses(data.actual_km, cost)
+    fuel_cost_per_km = cost.total
     food_expenses_total = data.food_expenses + data.food_meal_expenses + data.coffee_expenses + data.drinks_expenses
     total_expenses = (
         car_expenses
+        + data.vehicle_expenses      # ремонт, ТО, шины, страховка — из них считается износ
+        + data.vehicle_rent          # аренда машины: фиксированный расход за смену
         + data.parking_expenses
         + food_expenses_total
         + data.toll_expenses
         + data.other_expenses
     )
+    # Оклад — тоже выручка, просто она не приходит заказами. Без этого окладник видел
+    # бы нулевой доход и отрицательную прибыль каждый день.
+    model = income_model(settings_repo)
+    salary_income = salary_income_for_shift(model, total_work_minutes)
+    total_income += salary_income + data.extra_income
+
     net_profit = total_income - total_expenses
     net_hourly = net_profit / (total_work_minutes / 60) if total_work_minutes > 0 else 0
+    # Деньги на километр — рядом с деньгами на час. Порознь они обманчивы: у разных
+    # людей ограничивает разное. У городского курьера — время, у межгорода — километры.
+    income_per_km = total_income / data.actual_km if data.actual_km > 0 else 0
+    net_per_km = net_profit / data.actual_km if data.actual_km > 0 else 0
 
     connection = stats_repo.connection
     metric_repo = DayMetricRepository(connection)
@@ -191,6 +205,8 @@ def finalize_day(
     )
 
     economy = economy_index(metrics, baselines)
+    metrics["net_per_km"] = round(net_per_km, 2)
+    metrics["income_per_km"] = round(income_per_km, 2)
     metrics["economy_index"] = economy.score
     metrics["load_index"] = workload.score
     metrics["overwork_index"] = workload.overwork_index
@@ -250,6 +266,13 @@ def finalize_day(
         break_hours_before=day.break_hours_before,
         night_work_minutes=workload.night_work_minutes,
         workload_survey_score=workload.workload_survey_score,
+        vehicle_expenses=data.vehicle_expenses,
+        vehicle_rent=data.vehicle_rent,
+        extra_income=data.extra_income,
+        salary_income=salary_income,
+        income_per_km=income_per_km,
+        net_per_km=net_per_km,
+        cost_per_km=cost.total,
     )
     day_repo.close(
         day.id,
@@ -410,6 +433,7 @@ def calculate_planned_route_minutes(
                 completed_visits,
                 finish,
                 osrm_url=settings_repo.get("osrm_url", "https://router.project-osrm.org") or "https://router.project-osrm.org",
+                profile=osrm_profile(settings_repo),
                 timeout_seconds=settings_repo.get_float("request_timeout_seconds", 10),
                 duration_factor=1.0,
             )

@@ -20,7 +20,10 @@ from app.services.driving_service import within_day_trend
 from app.services.indices_service import economy_index, load_index, overwork_result
 from app.services.mobile_workload_service import MobileWorkloadService
 from app.services.mobile_report_service import parse_report_period
+from app.services.income_service import income_model
 from app.services.overwork_pricing_service import build_pricing
+from app.services.profitability_service import vehicle_km_cost
+from app.services.vehicle_facts_service import measure
 
 
 # Окна для стиля вождения: последние 7 дней и 28 дней перед ними (самосравнение).
@@ -59,6 +62,8 @@ class ProfileService:
             "month": self._month_block(today),
             "indices": indices,
             "pricing": self._pricing_block(indices),
+            "vehicle": self._vehicle_block(),
+            "income": income_model(self.settings).payload(),
             "wellbeing": self._wellbeing_block(),
             "driving": self._driving_block(today),
         }
@@ -113,6 +118,16 @@ class ProfileService:
             min_marginal_hourly=self.settings.get_float("min_marginal_hourly_income", min_hourly),
         )
         return pricing.payload()
+
+    # --- машина и километр ------------------------------------------------
+
+    def _vehicle_block(self) -> dict[str, Any]:
+        """Сколько стоит километр — и что из этого посчитано, а что измерено."""
+        facts = measure(self.stats)
+        cost = vehicle_km_cost(self.settings, self.stats)
+        payload = cost.payload()
+        payload["measured"] = facts.payload()
+        return payload
 
     # --- пользователь -----------------------------------------------------
 

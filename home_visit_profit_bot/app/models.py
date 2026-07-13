@@ -48,6 +48,12 @@ class WorkDay:
     odometer_km: float = 0.0
     personal_km: float = 0.0
     break_hours_before: float = 0.0
+    # Ремонт, ТО, шины, страховка — из них считается настоящий коэффициент износа.
+    vehicle_expenses: float = 0.0
+    # Аренда машины за смену: фиксированный расход, не зависящий от пробега.
+    vehicle_rent: float = 0.0
+    # Халтура, разовая премия — доход, который не пришёл заказом.
+    extra_income: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -164,6 +170,11 @@ class CandidateCalculation:
     effective_min_hourly: float = 0.0
     overwork_markup_percent: float = 0.0
     recovery_blocks_outside_zone: bool = False
+    # Деньги на километр — рядом с деньгами на час. Порознь обманчивы: короткий
+    # дорогой заказ в соседнем доме даёт огромные ₽/км и нулевые ₽/ч. Смысл в паре:
+    # у городского курьера ограничивает время, у межгорода — километры.
+    marginal_per_km: float = 0.0
+    cost_per_km: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -201,6 +212,9 @@ class EndDayData:
     # Загруженность смены 1–10 — оценка УСЛОВИЙ ТРУДА, а не самочувствия. Она же
     # обратная связь: сравнивая её с нашей, система подстраивается под человека.
     workload_rating: float = 0.0
+    vehicle_expenses: float = 0.0
+    vehicle_rent: float = 0.0
+    extra_income: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -255,6 +269,15 @@ class DailyStats:
     break_hours_before: float = 0.0
     night_work_minutes: float = 0.0
     workload_survey_score: float = 0.0
+    vehicle_expenses: float = 0.0
+    vehicle_rent: float = 0.0
+    extra_income: float = 0.0
+    salary_income: float = 0.0
+    # Деньги на километр — рядом с деньгами на час. Порознь они обманчивы: короткий
+    # дорогой заказ рядом даёт огромные ₽/км и нулевые ₽/ч.
+    income_per_km: float = 0.0
+    net_per_km: float = 0.0
+    cost_per_km: float = 0.0
 
 
 @dataclass(frozen=True)

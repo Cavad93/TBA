@@ -3,10 +3,18 @@ from __future__ import annotations
 import math
 
 from app.models import CandidateCalculation, Point, RouteSummary, Visit, WorkDay
-from app.repositories import DailyStatsRepository, LocationEventRepository, SettingsRepository, VisitRepository
+from app.repositories import (
+    DailyStatsRepository,
+    DrivingBehaviorRepository,
+    LocationEventRepository,
+    SettingsRepository,
+    VisitRepository,
+)
 from app.services.workload_service import calculate_candidate_workload
 from app.services.optimization_service import optimize_route, optimize_route_estimated, optimize_route_manual
 from app.services.overwork_pricing_service import build_pricing
+from app.services.vehicle_facts_service import measure
+from app.services.vehicle_service import KmCost, km_cost, osrm_profile
 from app.services.routing_service import RoutingError
 
 
@@ -16,10 +24,52 @@ def _safe_hourly(net_profit: float, total_minutes: float) -> float:
     return net_profit / (total_minutes / 60)
 
 
-def calculate_car_expenses(car_km: float, fuel_cost_per_km: float, amortization_factor: float) -> tuple[float, float, float]:
-    fuel_expenses = car_km * fuel_cost_per_km
-    amortization_expenses = fuel_expenses * amortization_factor
-    return fuel_expenses, amortization_expenses, fuel_expenses + amortization_expenses
+def calculate_car_expenses(car_km: float, cost: KmCost) -> tuple[float, float, float]:
+    """Расходы на машину за пробег: топливо, обслуживание и износ, всё вместе.
+
+    Стоимость километра считает vehicle_service — там же решается, что берётся из
+    таблицы, что измерено по заправкам и расходам, и что оплачивает компания, а не вы.
+    """
+    fuel_expenses = car_km * cost.fuel_per_km
+    maintenance_expenses = car_km * cost.maintenance_per_km
+    return fuel_expenses, maintenance_expenses, fuel_expenses + maintenance_expenses
+
+
+def vehicle_km_cost(
+    settings_repo: SettingsRepository,
+    stats_repo: DailyStatsRepository | None = None,
+    *,
+    route_time_factor: float = 1.0,
+) -> KmCost:
+    """Сколько стоит километр именно у этого человека.
+
+    Измеренное важнее посчитанного: если по заправкам и расходам на машину уже видно
+    настоящий рубль за километр — берём его, а таблицу коэффициентов оставляем для
+    холодного старта.
+    """
+    facts = measure(stats_repo) if stats_repo is not None else None
+    driving = _aggressive_score(stats_repo)
+    return km_cost(
+        settings_repo,
+        measured_fuel_per_km=facts.fuel_per_km if facts else None,
+        measured_maintenance_per_km=facts.maintenance_per_km if facts else None,
+        aggressive_score=driving,
+        route_time_factor=route_time_factor,
+    )
+
+
+def _aggressive_score(stats_repo: DailyStatsRepository | None) -> float:
+    """Резкая езда жжёт больше топлива — это механика, а не вывод о человеке."""
+    if stats_repo is None:
+        return 0.0
+    from datetime import date, timedelta
+
+    today = date.today()
+    recent = DrivingBehaviorRepository(stats_repo.connection).aggregate_between(
+        (today - timedelta(days=28)).isoformat(),
+        (today + timedelta(days=1)).isoformat(),
+    )
+    return float(recent.get("avg_aggressive_score") or 0)
 
 
 def fuel_cost_per_km(settings_repo: SettingsRepository) -> float:
@@ -49,15 +99,12 @@ def calculate_day_income(day: WorkDay, visits: list[Visit]) -> float:
     )
 
 
-def calculate_known_expenses(
-    day: WorkDay,
-    car_km: float,
-    fuel_cost_per_km: float,
-    amortization_factor: float,
-) -> float:
-    _, _, car_expenses = calculate_car_expenses(car_km, fuel_cost_per_km, amortization_factor)
+def calculate_known_expenses(day: WorkDay, car_km: float, cost: KmCost) -> float:
+    _, _, car_expenses = calculate_car_expenses(car_km, cost)
     return (
         car_expenses
+        + day.vehicle_expenses
+        + day.vehicle_rent
         + day.parking_expenses
         + day.food_expenses
         + day.food_meal_expenses
@@ -72,15 +119,15 @@ def calculate_day_profitability(
     day: WorkDay,
     visits: list[Visit],
     settings_repo: SettingsRepository,
+    stats_repo: DailyStatsRepository | None = None,
     *,
     strict_routing: bool = False,
 ) -> tuple[float, float, float, float, RouteSummary]:
-    cost_per_km = fuel_cost_per_km(settings_repo)
-    amortization_factor = settings_repo.get_float("amortization_factor", 0.8)
+    cost = vehicle_km_cost(settings_repo, stats_repo, route_time_factor=day.planned_route_time_factor)
     service_minutes = day.planned_service_minutes
     route = calculate_route_summary(day, visits, settings_repo, strict_routing=strict_routing)
     total_income = calculate_day_income(day, visits)
-    total_expenses = calculate_known_expenses(day, route.total_km, cost_per_km, amortization_factor)
+    total_expenses = calculate_known_expenses(day, route.total_km, cost)
     net_profit = total_income - total_expenses
     total_minutes = route.total_minutes + route.visits_count * service_minutes + day.telemed_minutes + day.office_minutes
     return net_profit, total_minutes, route.total_km, route.total_minutes, route
@@ -130,6 +177,9 @@ def calculate_remaining_route_summary(
                 future,
                 finish_point,
                 osrm_url=settings_repo.get("osrm_url", "https://router.project-osrm.org") or "https://router.project-osrm.org",
+                # Профиль по типу транспорта: раньше был всегда автомобильный, и курьер
+                # на велосипеде получал маршрут для машины — неверные километры и время.
+                profile=osrm_profile(settings_repo),
                 timeout_seconds=settings_repo.get_float("request_timeout_seconds", 10),
                 duration_factor=day.planned_route_time_factor,
             )
@@ -162,8 +212,7 @@ def calculate_candidate_impact(
     *,
     strict_routing: bool = False,
 ) -> CandidateCalculation:
-    cost_per_km = fuel_cost_per_km(settings_repo)
-    amortization_factor = settings_repo.get_float("amortization_factor", 0.8)
+    cost = vehicle_km_cost(settings_repo, stats_repo, route_time_factor=day.planned_route_time_factor)
     min_hourly = settings_repo.get_float("min_hourly_income", 600)
     min_marginal_hourly = settings_repo.get_float("min_marginal_hourly_income", min_hourly)
     outside_min_hourly = settings_repo.get_float("outside_zone_min_hourly_income", min_hourly)
@@ -172,10 +221,10 @@ def calculate_candidate_impact(
     existing_visits = visit_repo.list_for_day(day.id, ("accepted", "completed"))
 
     before_net_profit, before_minutes, _, _, before_route = calculate_day_profitability(
-        day, existing_visits, settings_repo, strict_routing=strict_routing
+        day, existing_visits, settings_repo, stats_repo, strict_routing=strict_routing
     )
     after_net_profit, after_minutes, _, _, after_route = calculate_day_profitability(
-        day, existing_visits + [candidate], settings_repo, strict_routing=strict_routing
+        day, existing_visits + [candidate], settings_repo, stats_repo, strict_routing=strict_routing
     )
 
     before_hourly = _safe_hourly(before_net_profit, before_minutes)
@@ -185,9 +234,12 @@ def calculate_candidate_impact(
     paid_extra_km = max(0.0, extra_km)
     paid_extra_drive_minutes = max(0.0, extra_drive_minutes)
     extra_total_minutes = paid_extra_drive_minutes + service_minutes
-    _, _, extra_car_cost = calculate_car_expenses(paid_extra_km, cost_per_km, amortization_factor)
+    _, _, extra_car_cost = calculate_car_expenses(paid_extra_km, cost)
     marginal_profit = candidate.income - extra_car_cost
     marginal_hourly = _safe_hourly(marginal_profit, extra_total_minutes)
+    # Маржинальные ₽/км: сколько заказ приносит на каждый километр, который вы
+    # проедете ради него. У межгорода это и есть главное число.
+    marginal_per_km = marginal_profit / paid_extra_km if paid_extra_km > 0 else 0.0
 
     # Состояние считаем ДО решения: оно поднимает пороги, а не приписывается к готовому
     # вердикту. Иначе «можно брать» и «сегодня твой минимум выше» противоречили бы друг
@@ -238,8 +290,7 @@ def calculate_candidate_impact(
         extra_total_minutes=extra_total_minutes,
         extra_car_cost=extra_car_cost,
         before_hourly=before_hourly,
-        fuel_cost_per_km=cost_per_km,
-        amortization_factor=amortization_factor,
+        cost=cost,
         min_hourly=min_hourly,
         min_marginal_hourly=min_marginal_hourly,
         outside_min_hourly=outside_min_hourly,
@@ -407,15 +458,14 @@ def calculate_required_tariff(
     extra_total_minutes: float,
     extra_car_cost: float,
     before_hourly: float,
-    fuel_cost_per_km: float,
-    amortization_factor: float,
+    cost: KmCost,
     min_hourly: float,
     min_marginal_hourly: float | None = None,
     outside_min_hourly: float | None = None,
     outside_min_extra: float = 0.0,
 ) -> dict[str, float]:
     income_without_candidate = calculate_day_income(day, existing_visits)
-    known_expenses = calculate_known_expenses(day, after_km, fuel_cost_per_km, amortization_factor)
+    known_expenses = calculate_known_expenses(day, after_km, cost)
     min_marginal_hourly = min_hourly if min_marginal_hourly is None else min_marginal_hourly
     outside_min_hourly = min_hourly if outside_min_hourly is None else outside_min_hourly
 

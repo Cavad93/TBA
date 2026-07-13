@@ -642,6 +642,23 @@ def _ensure_columns(db: Database) -> None:
     _ensure_column(db, "visits", "planned_end_at", "TEXT")
     # Походка по отрезкам пути: таблица уже создана на боевом сервере, поэтому колонки
     # добавляются миграцией, а не только через DDL.
+    # Расходы на машину (ремонт, ТО, шины, страховка) — из них считается настоящий
+    # коэффициент износа, вместо угадывания по таблице.
+    _ensure_column(db, "work_days", "vehicle_expenses", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "vehicle_expenses", "REAL DEFAULT 0")
+    # Неучтённый доход: халтура, разовая премия — то, что не пришло заказом.
+    _ensure_column(db, "work_days", "extra_income", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "extra_income", "REAL DEFAULT 0")
+    # Аренда машины за смену — фиксированный расход, не зависящий от пробега.
+    _ensure_column(db, "work_days", "vehicle_rent", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "vehicle_rent", "REAL DEFAULT 0")
+    # Доля оклада, заработанная за смену: у окладника выручка есть, просто она не
+    # приходит заказами.
+    _ensure_column(db, "daily_stats", "salary_income", "REAL DEFAULT 0")
+    # Деньги на километр — рядом с деньгами на час.
+    _ensure_column(db, "daily_stats", "income_per_km", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "net_per_km", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "cost_per_km", "REAL DEFAULT 0")
     _ensure_column(db, "driving_behavior_segments", "walk_bouts", "INTEGER DEFAULT 0")
     _ensure_column(db, "driving_behavior_segments", "walk_seconds", "REAL DEFAULT 0")
 

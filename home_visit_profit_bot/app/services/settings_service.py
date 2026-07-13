@@ -15,6 +15,8 @@ from typing import Any
 
 from app.repositories import SettingsRepository
 from app.services.base_zones_service import parse_base_zones, serialize_base_zones
+from app.services.income_service import INCOME_MODELS
+from app.services.vehicle_service import COST_MODES, PAYERS, SERVICE_TIERS, TRANSPORT_TYPES, WEAR_CLASSES
 
 
 # Имена клиник не захардкожены: список полностью задаётся настройками
@@ -30,10 +32,12 @@ class SettingField:
     key: str
     section: str
     label: str
-    type: str  # "number" | "text" | "bool" | "list" | "zones"
+    type: str  # "number" | "text" | "bool" | "list" | "zones" | "choice"
     default: Any
     min: float | None = None
     max: float | None = None
+    # Для типа "choice": варианты как список пар (значение, что видит человек).
+    options: tuple[tuple[str, str], ...] = ()
     # Одно короткое предложение: что это и зачем. Показывается под названием поля.
     hint: str = ""
     # Текстовое поле, которое можно осознанно оставить пустым (старт и финиш до того,
@@ -43,7 +47,8 @@ class SettingField:
 
 SECTION_TITLES: dict[str, str] = {
     "economics": "Деньги",
-    "car": "Машина",
+    "car": "Машина и стоимость километра",
+    "income": "Доход",
     "addresses": "Старт и финиш",
     "clinics": "Компании",
     "districts": "Зоны обслуживания",
@@ -85,18 +90,78 @@ SETTINGS_CATALOG: list[SettingField] = [
         "frequent_income", "economics", "Частый тариф, ₽", "number", 0.0, min=0,
         hint="Ваша обычная цена заказа — подставляется в «Оценку», чтобы не вводить её каждый раз.",
     ),
-    # Машина. «Топливо за км» не спрашиваем: оно выводится из цены литра и расхода.
+    # Машина. Стоимость километра — это не только бензин: машина ещё изнашивается,
+    # требует шин, масла и ремонта. Коэффициент нужен ровно для этого — оценить
+    # РЕАЛЬНУЮ рентабельность заказа. Модель приблизительная, и как только человек
+    # начнёт вносить расходы на машину, приложение посчитает его настоящий ₽/км.
+    SettingField(
+        "transport_type", "car", "Транспорт", "choice", "car",
+        options=tuple((key, str(spec["title"])) for key, spec in TRANSPORT_TYPES.items()),
+        hint="От него зависит и износ, и то, как строится маршрут: велосипедисту не нужен маршрут по шоссе.",
+    ),
+    SettingField(
+        "cost_mode", "car", "Режим расчёта километра", "choice", "auto",
+        options=tuple(COST_MODES.items()),
+        hint="Автоматический считает сам по машине, сезону и стилю езды. Ручной — вы задаёте коэффициент. Точный — сразу ₽/км.",
+    ),
+    SettingField(
+        "vehicle_wear_class", "car", "Состояние машины", "choice", "usual",
+        options=tuple((key, str(spec["title"])) for key, spec in WEAR_CLASSES.items()),
+        hint="Чем старше машина и больше пробег, тем дороже обходится километр сверх бензина.",
+    ),
+    SettingField(
+        "service_tier", "car", "Обслуживание", "choice", "medium",
+        options=tuple((key, str(spec["title"])) for key, spec in SERVICE_TIERS.items()),
+        hint="Дилер дороже гаража — это заметно в стоимости километра.",
+    ),
+    SettingField(
+        "wear_coefficient", "car", "Коэффициент износа", "number", 0.8, min=0.1, max=3.0,
+        hint="Только для ручного режима: во сколько раз обслуживание и износ дороже топлива.",
+    ),
+    SettingField(
+        "exact_cost_per_km", "car", "Точная стоимость км, ₽", "number", 0.0, min=0,
+        hint="Только для режима «Точная стоимость»: если вы уже знаете свой рубль за километр.",
+    ),
     SettingField(
         "fuel_price_per_liter", "car", "Цена литра, ₽", "number", 70.0, min=0,
-        hint="Сколько стоит литр топлива — из неё считается стоимость километра.",
+        hint="Пока нет ваших заправок — берём отсюда. Как только заправки появятся, посчитаем по ним.",
     ),
     SettingField(
         "fuel_consumption_l_per_100km", "car", "Расход, л/100 км", "number", 10.0, min=0,
-        hint="Реальный расход вашей машины — вместе с ценой литра даёт стоимость километра.",
+        hint="Паспортный расход занижен: реальный посчитаем по вашим заправкам и одометру.",
     ),
     SettingField(
-        "amortization_factor", "car", "Износ машины (× от топлива)", "number", 0.8, min=0,
-        hint="Во сколько раз износ, шины и обслуживание дороже топлива: 0,8 — плюс 80% к расходам на бензин.",
+        "fuel_paid_by", "car", "Топливо оплачивает", "choice", "me",
+        options=tuple(PAYERS.items()),
+        hint="Если у вас топливная карта компании — расхода на бензин у вас нет вовсе.",
+    ),
+    SettingField(
+        "maintenance_paid_by", "car", "Обслуживание оплачивает", "choice", "me",
+        options=tuple(PAYERS.items()),
+        hint="У служебной машины ремонт и шины — не ваша забота, и в расчёт они не идут.",
+    ),
+    SettingField(
+        "daily_vehicle_rent", "car", "Аренда машины за смену, ₽", "number", 0.0, min=0,
+        hint="Если арендуете машину в парке: это фиксированный расход, он не зависит от пробега.",
+    ),
+    # Доход. От модели зависит сам смысл вопроса «стоит ли ехать»: у окладника лишний
+    # заказ не приносит денег — он только тратит его топливо и его время.
+    SettingField(
+        "income_model", "income", "Как вам платят", "choice", "per_order",
+        options=tuple(INCOME_MODELS.items()),
+        hint="При окладе лишний заказ не приносит денег — и приложение считает иначе.",
+    ),
+    SettingField(
+        "monthly_salary", "income", "Оклад в месяц, ₽", "number", 0.0, min=0,
+        hint="Раз в месяц приложение спросит, не изменился ли он — одной кнопкой.",
+    ),
+    SettingField(
+        "monthly_bonus", "income", "Ожидаемая премия в месяц, ₽", "number", 0.0, min=0,
+        hint="Если премии не будет — оставьте ноль.",
+    ),
+    SettingField(
+        "planned_month_hours", "income", "Плановых часов в месяце", "number", 164.0, min=1,
+        hint="Из оклада и часов выводится ваша ставка за час — с ней и сравниваются заказы.",
     ),
     # Адреса. Значения по умолчанию пустые: «Дом» раньше был зашитой заглушкой — словом,
     # за которым не стояло адреса, и старт смены молча оставался без координат.
@@ -245,6 +310,12 @@ def _coerce(field: SettingField, value: Any) -> str:
     if field.type == "zones":
         # Нормализуем через парсер: кривой JSON не должен попасть в хранилище.
         return serialize_base_zones(parse_base_zones(value))
+    if field.type == "choice":
+        text = str(value).strip()
+        allowed = {key for key, _ in field.options}
+        if text not in allowed:
+            raise ValueError(f"{field.key}: допустимые значения — {', '.join(sorted(allowed))}")
+        return text
     text = str(value).strip()
     if not text and not field.allow_empty:
         raise ValueError(f"{field.key}: значение не может быть пустым")
@@ -276,6 +347,7 @@ class SettingsService:
                     "min": field.min,
                     "max": field.max,
                     "hint": field.hint,
+                    "options": [{"value": key, "title": title} for key, title in field.options],
                 }
             )
         return {

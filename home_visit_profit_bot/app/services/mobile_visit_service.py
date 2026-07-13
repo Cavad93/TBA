@@ -449,6 +449,8 @@ def calculation_payload(calculation: CandidateCalculation) -> dict[str, Any]:
         "extra_car_cost": calculation.extra_car_cost,
         "marginal_profit": calculation.marginal_profit,
         "marginal_hourly": calculation.marginal_hourly,
+        "marginal_per_km": calculation.marginal_per_km,
+        "cost_per_km": calculation.cost_per_km,
         "required_candidate_income": calculation.required_candidate_income,
         "required_extra_payment": calculation.required_extra_payment,
         "required_extra_for_min_hourly": calculation.required_extra_for_min_hourly,

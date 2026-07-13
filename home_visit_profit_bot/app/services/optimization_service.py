@@ -22,6 +22,7 @@ def optimize_route(
     finish: Point,
     *,
     osrm_url: str,
+    profile: str = "driving",
     timeout_seconds: float = 10,
     duration_factor: float = 1.0,
 ) -> RouteSummary:
@@ -34,6 +35,7 @@ def optimize_route(
         matrix = get_distance_matrix(
             [start, finish],
             osrm_url=osrm_url,
+            profile=profile,
             timeout_seconds=timeout_seconds,
             duration_factor=duration_factor,
         )

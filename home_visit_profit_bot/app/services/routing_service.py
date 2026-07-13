@@ -34,12 +34,13 @@ def get_route(
     to_point: Point,
     *,
     osrm_url: str,
+    profile: str = "driving",
     timeout_seconds: float = 10,
     duration_factor: float = 1.0,
 ) -> tuple[float, float]:
     coordinates = f"{from_point.lon},{from_point.lat};{to_point.lon},{to_point.lat}"
     params = urlencode({"overview": "false"})
-    url = f"{osrm_url.rstrip('/')}/route/v1/driving/{coordinates}?{params}"
+    url = f"{osrm_url.rstrip('/')}/route/v1/{profile}/{coordinates}?{params}"
     payload = _get_json(url, timeout_seconds)
     if payload.get("code") != "Ok" or not payload.get("routes"):
         raise RoutingError(payload.get("message") or "OSRM не вернул маршрут")
@@ -51,6 +52,7 @@ def get_distance_matrix(
     points: list[Point],
     *,
     osrm_url: str,
+    profile: str = "driving",
     timeout_seconds: float = 10,
     duration_factor: float = 1.0,
 ) -> DistanceMatrix:
@@ -58,7 +60,7 @@ def get_distance_matrix(
         return DistanceMatrix(distances_km=[[0.0]], durations_minutes=[[0.0]])
     coordinates = ";".join(f"{point.lon},{point.lat}" for point in points)
     params = urlencode({"annotations": "duration,distance"})
-    url = f"{osrm_url.rstrip('/')}/table/v1/driving/{coordinates}?{params}"
+    url = f"{osrm_url.rstrip('/')}/table/v1/{profile}/{coordinates}?{params}"
     payload = _get_json(url, timeout_seconds)
     if payload.get("code") != "Ok":
         raise RoutingError(payload.get("message") or "OSRM не вернул матрицу расстояний")

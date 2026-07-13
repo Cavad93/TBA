@@ -2,17 +2,22 @@ from __future__ import annotations
 
 from app.models import Visit, WorkDay
 from app.services.profitability_service import calculate_day_profitability, calculate_required_tariff, make_decision
+from app.services.vehicle_service import km_cost
 
 
 class FakeSettings:
-    def __init__(self, values: dict[str, float] | None = None):
+    def __init__(self, values: dict[str, float | str] | None = None):
         self.values = values or {}
 
-    def get_float(self, key: str, default: float) -> float:
-        return self.values.get(key, default)
-
     def get(self, key: str, default: str | None = None) -> str | None:
-        return default
+        value = self.values.get(key, default)
+        return str(value) if value is not None else None
+
+    def get_float(self, key: str, default: float) -> float:
+        try:
+            return float(self.values.get(key, default))
+        except (TypeError, ValueError):
+            return default
 
 
 def test_outside_base_can_be_accepted_when_hourly_does_not_drop() -> None:
@@ -104,7 +109,7 @@ def test_telemed_minutes_are_included_in_hourly_denominator() -> None:
     assert total_minutes == 3
 
 
-def test_car_expenses_include_fuel_and_amortization() -> None:
+def test_car_expenses_include_fuel_and_maintenance() -> None:
     day = WorkDay(
         id=1,
         date="2026-07-07",
@@ -155,7 +160,10 @@ def test_car_expenses_include_fuel_and_amortization() -> None:
             {
                 "fuel_price_per_liter": 50,
                 "fuel_consumption_l_per_100km": 20,
-                "amortization_factor": 0.8,
+                # Ручной режим: коэффициент задан человеком, надбавки за условия не
+                # применяются — он сам решил, во сколько ему обходится обслуживание.
+                "cost_mode": "manual",
+                "wear_coefficient": 0.8,
             }
         ),
     )
@@ -230,8 +238,8 @@ def test_outside_base_requires_extra_to_keep_current_hourly() -> None:
         extra_total_minutes=60,
         extra_car_cost=100,
         before_hourly=1500,
-        fuel_cost_per_km=10,
-        amortization_factor=0,
+        # Точная стоимость километра: 10 ₽/км, без надбавок и коэффициентов.
+        cost=km_cost(FakeSettings({"cost_mode": "exact", "exact_cost_per_km": 10})),
         min_hourly=600,
         min_marginal_hourly=600,
         outside_min_hourly=900,
