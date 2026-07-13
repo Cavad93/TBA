@@ -19,7 +19,7 @@ from app.repositories import (
 )
 from app.services.clinic_report_service import ClinicBreakdown, build_active_clinic_breakdown, build_period_clinic_breakdown
 from app.services.profitability_service import fuel_cost_per_km as settings_fuel_cost_per_km
-from app.services.fatigue_service import estimate_active_day_fatigue
+from app.services.workload_service import estimate_active_day_workload
 
 
 @dataclass(frozen=True)
@@ -80,7 +80,7 @@ class MobileReportService:
             + day.office_minutes
         )
         net_profit = gross_income - total_expenses
-        fatigue = estimate_active_day_fatigue(
+        fatigue = estimate_active_day_workload(
             day=day,
             visits=active_visits,
             settings_repo=self.settings,
@@ -131,9 +131,9 @@ class MobileReportService:
                     "toll_expenses": day.toll_expenses,
                     "toll_compensation": day.toll_compensation,
                     "other_expenses": day.other_expenses,
-                    "avg_fatigue_score": fatigue.score,
-                    "avg_fatigue_weekly_average": fatigue.weekly_average,
-                    "avg_recovery_debt": fatigue.recovery_debt,
+                    "avg_workload_index": fatigue.score,
+                    "avg_workload_weekly_average": fatigue.weekly_average,
+                    "avg_overwork_index": fatigue.overwork_index,
                 }
             ),
             "clinic_breakdown": _clinic_breakdown_payload(clinic_breakdown),
@@ -251,14 +251,12 @@ def _summary_payload(values: dict[str, Any]) -> dict[str, Any]:
         "toll_expenses": _float(values, "toll_expenses"),
         "toll_compensation": _float(values, "toll_compensation"),
         "other_expenses": _float(values, "other_expenses"),
-        "fatigue_score": _float(values, "avg_fatigue_score"),
-        "fatigue_weekly_average": _float(values, "avg_fatigue_weekly_average"),
-        "recovery_debt": _float(values, "avg_recovery_debt"),
-        "sleep_hours": _float(values, "avg_sleep_hours"),
-        "sleep_quality": _float(values, "avg_sleep_quality"),
+        "workload_index": _float(values, "avg_workload_index"),
+        "workload_weekly_average": _float(values, "avg_workload_weekly_average"),
+        "overwork_index": _float(values, "avg_overwork_index"),
         "break_hours_before": _float(values, "avg_break_hours_before"),
-        "circadian_risk_minutes": _float(values, "circadian_risk_minutes"),
-        "burnout_score": _float(values, "avg_burnout_score"),
+        "night_work_minutes": _float(values, "night_work_minutes"),
+        "workload_survey_score": _float(values, "avg_workload_survey_score"),
     }
 
 

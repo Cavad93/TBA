@@ -13,7 +13,7 @@ from dataclasses import dataclass
 # на сервере, доезжала до телефона и нигде не показывалась. Держать оба механизма
 # нельзя — они складываются, и заказ дорожает дважды.
 
-RECOVERY_MARKUP_STEPS: list[tuple[float, float]] = [
+OVERWORK_MARKUP_STEPS: list[tuple[float, float]] = [
     (40, 0.00),   # норма и лёгкая нагрузка — обычный режим
     (60, 0.10),   # усталость накапливается — повышаем минимальную ставку
     (80, 0.25),   # высокий долг — дешёвые и дальние заказы не проходят
@@ -26,7 +26,7 @@ OUTSIDE_ZONE_BLOCK_DEBT = 61.0
 
 
 @dataclass(frozen=True)
-class RecoveryPricing:
+class OverworkPricing:
     """Во что состояние обходится заказу — в тех же рублях за час."""
 
     debt: float
@@ -56,11 +56,11 @@ class RecoveryPricing:
         }
 
 
-def recovery_markup(debt: float) -> float:
-    for threshold, markup in RECOVERY_MARKUP_STEPS:
+def overwork_markup(debt: float) -> float:
+    for threshold, markup in OVERWORK_MARKUP_STEPS:
         if debt <= threshold:
             return markup
-    return RECOVERY_MARKUP_STEPS[-1][1]
+    return OVERWORK_MARKUP_STEPS[-1][1]
 
 
 def build_pricing(
@@ -69,11 +69,11 @@ def build_pricing(
     min_hourly: float,
     outside_min_hourly: float,
     min_marginal_hourly: float,
-) -> RecoveryPricing:
-    markup = recovery_markup(debt)
+) -> OverworkPricing:
+    markup = overwork_markup(debt)
     factor = 1 + markup
     blocks = debt >= OUTSIDE_ZONE_BLOCK_DEBT
-    return RecoveryPricing(
+    return OverworkPricing(
         debt=debt,
         markup=markup,
         base_min_hourly=min_hourly,

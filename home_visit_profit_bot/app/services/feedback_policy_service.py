@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.repositories import DayMetricRepository, FatigueFeedbackRepository, UserBaselineRepository
+from app.repositories import DayMetricRepository, WorkloadFeedbackRepository, UserBaselineRepository
 from app.services.baseline_service import effective_baseline, robust_z
 from app.services.day_metrics_service import load_baselines
 
@@ -24,7 +24,7 @@ ROUTINE_INTERVAL_DAYS = 7
 ANOMALY_Z = 2.0
 
 # Метрики, по которым ищем аномалию: то, что человек сам почувствовал бы.
-ANOMALY_METRICS = ("load_index", "recovery_debt", "driving_change", "work_minutes")
+ANOMALY_METRICS = ("load_index", "overwork_index", "driving_change", "work_minutes")
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,7 @@ class FeedbackAsk:
 
 def should_ask_feedback(
     *,
-    feedback_repo: FatigueFeedbackRepository,
+    feedback_repo: WorkloadFeedbackRepository,
     metric_repo: DayMetricRepository,
     baseline_repo: UserBaselineRepository,
     work_day_id: int,

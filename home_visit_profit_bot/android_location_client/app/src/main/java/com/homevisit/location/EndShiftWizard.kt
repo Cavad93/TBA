@@ -98,24 +98,22 @@ private fun LoadingStep() {
 private enum class WizardStep {
     Intro,
     Expenses,
-    Units,
     Fuel,
     Odometer,
     Driving,
     WorkTime,
     ServiceTime,
-    SelfRating,
+    WorkloadRating,
 }
 
 private val QUESTION_STEPS = listOf(
     WizardStep.Expenses,
-    WizardStep.Units,
     WizardStep.Fuel,
     WizardStep.Odometer,
     WizardStep.Driving,
     WizardStep.WorkTime,
     WizardStep.ServiceTime,
-    WizardStep.SelfRating,
+    WizardStep.WorkloadRating,
 )
 
 @Composable
@@ -143,11 +141,7 @@ private fun WizardContent(
     var drivingHours by rememberSaveable { mutableStateOf(preview?.drivingMinutes.hoursText()) }
     var workHours by rememberSaveable { mutableStateOf(preview?.totalWorkMinutes.hoursText()) }
     var serviceMinutes by rememberSaveable { mutableStateOf(preview?.avgServiceMinutes.numberText()) }
-
-    var coffeeUnits by rememberSaveable { mutableStateOf("") }
-    var drinksUnits by rememberSaveable { mutableStateOf("") }
-    var mealUnits by rememberSaveable { mutableStateOf("") }
-    var selfRating by rememberSaveable { mutableStateOf(0) }
+    var workloadRating by rememberSaveable { mutableStateOf(0) }
 
     fun details(): EndDayDetails = buildEndDayDetails(
         preview = preview,
@@ -163,15 +157,12 @@ private fun WizardContent(
         drivingHours = drivingHours,
         workHours = workHours,
         serviceMinutes = serviceMinutes,
-        coffeeUnits = coffeeUnits,
-        drinksUnits = drinksUnits,
-        mealUnits = mealUnits,
-        selfRating = selfRating,
+        workloadRating = workloadRating,
     )
 
     fun next() {
         val index = QUESTION_STEPS.indexOf(step)
-        if (step == WizardStep.SelfRating || index == QUESTION_STEPS.lastIndex) {
+        if (step == WizardStep.WorkloadRating || index == QUESTION_STEPS.lastIndex) {
             onFinish(details())
         } else {
             step = QUESTION_STEPS[index + 1]
@@ -201,19 +192,6 @@ private fun WizardContent(
             MoneyField(toll, { toll = it }, "Платная дорога, ₽")
             MoneyField(parking, { parking = it }, "Парковка, ₽")
             MoneyField(other, { other = it }, "Прочее, ₽")
-            StepButtons(onNext = { next() }, onSkip = { next() })
-        }
-
-        WizardStep.Units -> {
-            Text(
-                "Сколько штук — не рублей. На восстановление влияет количество кофеина, " +
-                    "а не сумма чека: 300 ₽ — это одна чашка в аэропорту или три в ларьке.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            MoneyField(coffeeUnits, { coffeeUnits = it }, "Кофе и энергетики, шт")
-            MoneyField(drinksUnits, { drinksUnits = it }, "Вода, бутылок")
-            MoneyField(mealUnits, { mealUnits = it }, "Полноценных приёмов пищи, шт")
             StepButtons(onNext = { next() }, onSkip = { next() })
         }
 
@@ -288,9 +266,9 @@ private fun WizardContent(
             onNext = { next() },
         )
 
-        WizardStep.SelfRating -> SelfRatingStep(
-            value = selfRating,
-            onValue = { selfRating = it },
+        WizardStep.WorkloadRating -> WorkloadRatingStep(
+            value = workloadRating,
+            onValue = { workloadRating = it },
             onNext = { next() },
         )
     }
@@ -452,14 +430,14 @@ private fun Warning(text: String) {
  * пользователь отвечает на понятный вопрос, а система получает нужный ей сигнал.
  */
 @Composable
-private fun SelfRatingStep(value: Int, onValue: (Int) -> Unit, onNext: () -> Unit) {
+private fun WorkloadRatingStep(value: Int, onValue: (Int) -> Unit, onNext: () -> Unit) {
     Text(
-        "Насколько вымотала смена?",
+        "Насколько загруженной была смена?",
         style = MaterialTheme.typography.titleMedium,
     )
     Text(
-        "1 — как будто и не работал, 10 — сил не осталось совсем. " +
-            "По этому ответу приложение подстраивается под тебя.",
+        "1 — спокойный день, 10 — плотнее некуда. Это оценка условий труда: " +
+            "по ней приложение подстраивает расчёт под ваш обычный график.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

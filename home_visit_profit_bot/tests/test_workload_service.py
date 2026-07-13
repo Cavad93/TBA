@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from app.db import connect, init_db
 from app.models import DailyStats, WorkDay
 from app.repositories import DailyStatsRepository, LocationEventRepository, SettingsRepository, VisitRepository, WorkDayRepository
-from app.services.fatigue_service import calculate_circadian_risk_minutes, calculate_recovery_debt, estimate_active_day_fatigue
+from app.services.workload_service import calculate_night_work_minutes, calculate_overwork_index, estimate_active_day_workload
 
 
 class FakeSettings:
@@ -30,7 +30,7 @@ def test_long_gps_stops_treat_first_two_as_pause_and_third_as_heavy(config) -> N
         events = LocationEventRepository(connection)
         settings = SettingsRepository(connection)
         stats = DailyStatsRepository(connection)
-        day = days.create("home", "home", 30, 20, sleep_hours=7, sleep_quality=4, break_hours_before=14)
+        day = days.create("home", "home", 30, 20, break_hours_before=14)
         start = datetime(2026, 7, 8, 10, 0, 0)
         created = []
         for index, minutes in enumerate((50, 55, 45), start=1):
@@ -52,7 +52,7 @@ def test_long_gps_stops_treat_first_two_as_pause_and_third_as_heavy(config) -> N
                 accuracy_m=10,
             )
 
-        estimate = estimate_active_day_fatigue(
+        estimate = estimate_active_day_workload(
             day=day,
             visits=visits.list_for_day(day.id, ("accepted",)),
             settings_repo=settings,
@@ -64,8 +64,8 @@ def test_long_gps_stops_treat_first_two_as_pause_and_third_as_heavy(config) -> N
         assert estimate.pause_minutes == 25
         assert estimate.heavy_visit_count == 1
 
-        events.set_fatigue_label(created[0], "conflict")
-        estimate = estimate_active_day_fatigue(
+        events.set_stop_label(created[0], "conflict")
+        estimate = estimate_active_day_workload(
             day=day,
             visits=visits.list_for_day(day.id, ("accepted",)),
             settings_repo=settings,
@@ -76,24 +76,22 @@ def test_long_gps_stops_treat_first_two_as_pause_and_third_as_heavy(config) -> N
     assert estimate.stop_loads[0].level == "conflict"
 
 
-def test_recovery_debt_uses_sleep_break_circadian_and_burnout() -> None:
-    high = calculate_recovery_debt(
+def test_overwork_index_uses_sleep_break_circadian_and_burnout() -> None:
+    high = calculate_overwork_index(
         stats_repo=None,
         day_score=75,
-        sleep_hours=4.5,
-        sleep_quality=2,
         break_hours_before=7,
-        circadian_risk_minutes=180,
-        burnout_score=70,
+        break_uninterrupted=False,
+        night_work_minutes=180,
+        workload_survey_score=70,
     )
-    low = calculate_recovery_debt(
+    low = calculate_overwork_index(
         stats_repo=None,
         day_score=40,
-        sleep_hours=8,
-        sleep_quality=5,
         break_hours_before=24,
-        circadian_risk_minutes=0,
-        burnout_score=20,
+        break_uninterrupted=True,
+        night_work_minutes=0,
+        workload_survey_score=20,
     )
 
     assert high > 45
@@ -101,8 +99,8 @@ def test_recovery_debt_uses_sleep_break_circadian_and_burnout() -> None:
 
 
 def test_circadian_risk_counts_afternoon_and_night_windows() -> None:
-    afternoon = calculate_circadian_risk_minutes("2026-07-08T13:00:00", 300)
-    night = calculate_circadian_risk_minutes("2026-07-08T01:00:00", 360)
+    afternoon = calculate_night_work_minutes("2026-07-08T13:00:00", 300)
+    night = calculate_night_work_minutes("2026-07-08T01:00:00", 360)
 
     assert afternoon == 99
     assert night == 282
@@ -134,17 +132,17 @@ def test_fatigue_can_be_disabled() -> None:
         other_expenses=0,
     )
 
-    estimate = estimate_active_day_fatigue(
+    estimate = estimate_active_day_workload(
         day=day,
         visits=[],
-        settings_repo=FakeSettings({"fatigue_enabled": "false"}),
+        settings_repo=FakeSettings({"workload_tracking_enabled": "false"}),
     )
 
     assert estimate.level == ""
     assert estimate.score == 0
 
 
-def test_daily_stats_persists_fatigue_fields(config) -> None:
+def test_daily_stats_persists_workload_fields(config) -> None:
     with connect(config) as connection:
         days = WorkDayRepository(connection)
         repo = DailyStatsRepository(connection)
@@ -163,23 +161,21 @@ def test_daily_stats_persists_fatigue_fields(config) -> None:
                 actual_km=10,
                 actual_avg_speed_kmh=30,
                 actual_service_minutes_per_visit=40,
-                fatigue_score=66,
-                fatigue_weekly_average=55,
-                fatigue_long_stop_count=2,
-                fatigue_pause_minutes=15,
-                fatigue_heavy_visit_count=1,
-                recovery_debt=44,
-                sleep_hours=6,
-                sleep_quality=3,
+                workload_index=66,
+                workload_weekly_average=55,
+                long_stop_count=2,
+                pause_minutes=15,
+                heavy_visit_count=1,
+                overwork_index=44,
                 break_hours_before=11,
-                circadian_risk_minutes=30,
-                burnout_score=50,
+                night_work_minutes=30,
+                workload_survey_score=50,
             ),
         )
         row = repo.last(1)[0]
 
-    assert row["fatigue_score"] == 66
-    assert row["recovery_debt"] == 44
-    assert row["sleep_hours"] == 6
+    assert row["workload_index"] == 66
+    assert row["overwork_index"] == 44
+    assert row["break_hours_before"] == 11
 
 

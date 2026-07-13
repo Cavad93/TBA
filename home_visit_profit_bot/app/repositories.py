@@ -53,9 +53,8 @@ def _work_day_from_row(row: Any | None) -> WorkDay | None:
         toll_compensation=float(row["toll_compensation"] or 0),
         fuel_expenses=float(row["fuel_expenses"] or 0),
         fuel_liters=float(row["fuel_liters"] or 0),
-        sleep_hours=float(row["sleep_hours"] or 0),
-        sleep_quality=float(row["sleep_quality"] or 0),
         break_hours_before=float(row["break_hours_before"] or 0),
+        break_uninterrupted=bool(_row_value(row, "break_uninterrupted") if _row_value(row, "break_uninterrupted") is not None else 1),
     )
 
 
@@ -190,9 +189,8 @@ class WorkDayRepository:
         finish_lon: float | None = None,
         route_time_factor: float = 1.0,
         start_odometer: float = 0.0,
-        sleep_hours: float = 0.0,
-        sleep_quality: float = 0.0,
         break_hours_before: float = 0.0,
+        break_uninterrupted: bool = True,
     ) -> WorkDay:
         self.connection.execute("UPDATE work_days SET status = 'closed', ended_at = ? WHERE status = 'active'", (now_iso(),))
         new_id = self.connection.insert(
@@ -201,8 +199,8 @@ class WorkDayRepository:
                 date, status, start_address, start_lat, start_lon,
                 finish_address, finish_lat, finish_lon, started_at,
                 planned_avg_speed_kmh, planned_service_minutes, planned_route_time_factor,
-                start_odometer, sleep_hours, sleep_quality, break_hours_before, created_at
-            ) VALUES (date('now'), 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                start_odometer, break_hours_before, break_uninterrupted, created_at
+            ) VALUES (date('now'), 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 start_address,
@@ -216,9 +214,8 @@ class WorkDayRepository:
                 service_minutes,
                 route_time_factor,
                 start_odometer,
-                sleep_hours,
-                sleep_quality,
                 break_hours_before,
+                1 if break_uninterrupted else 0,
                 now_iso(),
             ),
         )
@@ -671,9 +668,9 @@ class LocationEventRepository:
         ).fetchone()
         return max(0.0, float(row["minutes"] or 0)) if row else 0.0
 
-    def set_fatigue_label(self, visit_id: int, label: str) -> None:
+    def set_stop_label(self, visit_id: int, label: str) -> None:
         self.connection.execute(
-            "UPDATE visit_location_events SET fatigue_label = ?, updated_at = ? WHERE visit_id = ?",
+            "UPDATE visit_location_events SET stop_label = ?, updated_at = ? WHERE visit_id = ?",
             (label, now_iso(), visit_id),
         )
         self.connection.commit()
@@ -1013,14 +1010,14 @@ class OfficeRepository:
         ).fetchall()
 
 
-class BurnoutSurveyRepository:
+class WorkloadSurveyRepository:
     def __init__(self, connection: Database):
         self.connection = connection
 
     def add(self, score: float, answers_json: str) -> None:
         self.connection.execute(
             """
-            INSERT INTO burnout_surveys(date, score, answers_json, created_at)
+            INSERT INTO workload_surveys(date, score, answers_json, created_at)
             VALUES (date('now'), ?, ?, ?)
             """,
             (score, answers_json, now_iso()),
@@ -1029,7 +1026,7 @@ class BurnoutSurveyRepository:
 
     def latest(self) -> Any | None:
         return self.connection.execute(
-            "SELECT * FROM burnout_surveys ORDER BY created_at DESC, id DESC LIMIT 1"
+            "SELECT * FROM workload_surveys ORDER BY created_at DESC, id DESC LIMIT 1"
         ).fetchone()
 
 
@@ -1141,18 +1138,18 @@ class DrivingBehaviorRepository:
                 driving_behavior_daily.jerk_score,
                 driving_behavior_daily.speed_variability_score,
                 driving_behavior_daily.aggressive_score,
-                feedback.user_score AS user_fatigue_score
+                feedback.user_score AS user_workload_index
             FROM daily_stats
             LEFT JOIN driving_behavior_daily
               ON driving_behavior_daily.work_day_id = daily_stats.work_day_id
             LEFT JOIN (
-                SELECT fatigue_feedback.work_day_id, fatigue_feedback.user_score
-                FROM fatigue_feedback
+                SELECT workload_feedback.work_day_id, workload_feedback.user_score
+                FROM workload_feedback
                 JOIN (
                     SELECT work_day_id, MAX(id) AS max_id
-                    FROM fatigue_feedback
+                    FROM workload_feedback
                     GROUP BY work_day_id
-                ) latest_feedback ON latest_feedback.max_id = fatigue_feedback.id
+                ) latest_feedback ON latest_feedback.max_id = workload_feedback.id
             ) AS feedback
               ON feedback.work_day_id = daily_stats.work_day_id
             ORDER BY daily_stats.date DESC, daily_stats.id DESC
@@ -1162,14 +1159,14 @@ class DrivingBehaviorRepository:
         ).fetchall()
 
 
-class FatigueFeedbackRepository:
+class WorkloadFeedbackRepository:
     def __init__(self, connection: Database):
         self.connection = connection
 
     def add(self, work_day_id: int, predicted_score: float, user_score: float, feedback_type: str) -> None:
         self.connection.execute(
             """
-            INSERT INTO fatigue_feedback(work_day_id, predicted_score, user_score, feedback_type, error, created_at)
+            INSERT INTO workload_feedback(work_day_id, predicted_score, user_score, feedback_type, error, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
@@ -1185,13 +1182,13 @@ class FatigueFeedbackRepository:
 
     def latest_for_day(self, work_day_id: int) -> Any | None:
         return self.connection.execute(
-            "SELECT * FROM fatigue_feedback WHERE work_day_id = ? ORDER BY id DESC LIMIT 1",
+            "SELECT * FROM workload_feedback WHERE work_day_id = ? ORDER BY id DESC LIMIT 1",
             (work_day_id,),
         ).fetchone()
 
     def recent(self, limit: int = 28) -> list[Any]:
         return self.connection.execute(
-            "SELECT * FROM fatigue_feedback ORDER BY id DESC LIMIT ?",
+            "SELECT * FROM workload_feedback ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
 
@@ -1219,12 +1216,12 @@ class DailyStatsRepository:
                 amortization_expenses, parking_expenses,
                 food_expenses, food_meal_expenses, coffee_expenses,
                 drinks_expenses, toll_expenses, toll_compensation,
-                other_expenses, fatigue_score, fatigue_weekly_average,
-                fatigue_long_stop_count, fatigue_pause_minutes,
-                fatigue_heavy_visit_count, recovery_debt, sleep_hours,
-                sleep_quality, break_hours_before, circadian_risk_minutes,
-                burnout_score, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                other_expenses, workload_index, workload_weekly_average,
+                long_stop_count, pause_minutes,
+                heavy_visit_count, overwork_index, break_hours_before,
+                break_uninterrupted, night_work_minutes,
+                workload_survey_score, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 day_id,
@@ -1270,17 +1267,16 @@ class DailyStatsRepository:
                 stats.toll_expenses,
                 stats.toll_compensation,
                 stats.other_expenses,
-                stats.fatigue_score,
-                stats.fatigue_weekly_average,
-                stats.fatigue_long_stop_count,
-                stats.fatigue_pause_minutes,
-                stats.fatigue_heavy_visit_count,
-                stats.recovery_debt,
-                stats.sleep_hours,
-                stats.sleep_quality,
+                stats.workload_index,
+                stats.workload_weekly_average,
+                stats.long_stop_count,
+                stats.pause_minutes,
+                stats.heavy_visit_count,
+                stats.overwork_index,
                 stats.break_hours_before,
-                stats.circadian_risk_minutes,
-                stats.burnout_score,
+                1 if stats.break_uninterrupted else 0,
+                stats.night_work_minutes,
+                stats.workload_survey_score,
                 now_iso(),
             ),
         )
@@ -1333,17 +1329,15 @@ class DailyStatsRepository:
                 COALESCE(SUM(toll_expenses), 0) AS toll_expenses,
                 COALESCE(SUM(toll_compensation), 0) AS toll_compensation,
                 COALESCE(SUM(other_expenses), 0) AS other_expenses,
-                COALESCE(AVG(NULLIF(fatigue_score, 0)), 0) AS avg_fatigue_score,
-                COALESCE(AVG(NULLIF(fatigue_weekly_average, 0)), 0) AS avg_fatigue_weekly_average,
-                COALESCE(SUM(fatigue_long_stop_count), 0) AS fatigue_long_stop_count,
-                COALESCE(SUM(fatigue_pause_minutes), 0) AS fatigue_pause_minutes,
-                COALESCE(SUM(fatigue_heavy_visit_count), 0) AS fatigue_heavy_visit_count,
-                COALESCE(AVG(NULLIF(recovery_debt, 0)), 0) AS avg_recovery_debt,
-                COALESCE(AVG(NULLIF(sleep_hours, 0)), 0) AS avg_sleep_hours,
-                COALESCE(AVG(NULLIF(sleep_quality, 0)), 0) AS avg_sleep_quality,
+                COALESCE(AVG(NULLIF(workload_index, 0)), 0) AS avg_workload_index,
+                COALESCE(AVG(NULLIF(workload_weekly_average, 0)), 0) AS avg_workload_weekly_average,
+                COALESCE(SUM(long_stop_count), 0) AS long_stop_count,
+                COALESCE(SUM(pause_minutes), 0) AS pause_minutes,
+                COALESCE(SUM(heavy_visit_count), 0) AS heavy_visit_count,
+                COALESCE(AVG(NULLIF(overwork_index, 0)), 0) AS avg_overwork_index,
                 COALESCE(AVG(NULLIF(break_hours_before, 0)), 0) AS avg_break_hours_before,
-                COALESCE(SUM(circadian_risk_minutes), 0) AS circadian_risk_minutes,
-                COALESCE(AVG(NULLIF(burnout_score, 0)), 0) AS avg_burnout_score,
+                COALESCE(SUM(night_work_minutes), 0) AS night_work_minutes,
+                COALESCE(AVG(NULLIF(workload_survey_score, 0)), 0) AS avg_workload_survey_score,
                 COALESCE(AVG(NULLIF(actual_avg_speed_kmh, 0)), 0) AS avg_speed_kmh,
                 COALESCE(AVG(NULLIF(actual_service_minutes_per_visit, 0)), 0) AS avg_service_minutes_per_visit,
                 COALESCE(AVG(NULLIF(actual_route_time_factor, 0)), 0) AS avg_route_time_factor,
@@ -1542,12 +1536,8 @@ class DrivingSegmentRepository:
         jerk_score: float = 0.0,
         speed_variability_score: float = 0.0,
         aggressive_score: float = 0.0,
-        gait_bouts: int = 0,
-        gait_walk_seconds: float = 0.0,
-        gait_cadence: float = 0.0,
-        gait_step_cv: float = 0.0,
-        gait_regularity: float = 0.0,
-        gait_impact: float = 0.0,
+        walk_bouts: int = 0,
+        walk_seconds: float = 0.0,
     ) -> None:
         updated_at = now_iso()
         self.connection.execute(
@@ -1557,9 +1547,8 @@ class DrivingSegmentRepository:
                 samples_count, sensor_minutes, harsh_acceleration_count, harsh_braking_count,
                 hard_cornering_count, lane_change_proxy_count, stop_go_count,
                 jerk_score, speed_variability_score, aggressive_score,
-                gait_bouts, gait_walk_seconds, gait_cadence, gait_step_cv,
-                gait_regularity, gait_impact, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                walk_bouts, walk_seconds, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(work_day_id, segment_index) DO UPDATE SET
                 ended_at = excluded.ended_at,
                 km = excluded.km,
@@ -1573,12 +1562,8 @@ class DrivingSegmentRepository:
                 jerk_score = excluded.jerk_score,
                 speed_variability_score = excluded.speed_variability_score,
                 aggressive_score = excluded.aggressive_score,
-                gait_bouts = excluded.gait_bouts,
-                gait_walk_seconds = excluded.gait_walk_seconds,
-                gait_cadence = excluded.gait_cadence,
-                gait_step_cv = excluded.gait_step_cv,
-                gait_regularity = excluded.gait_regularity,
-                gait_impact = excluded.gait_impact,
+                walk_bouts = excluded.walk_bouts,
+                walk_seconds = excluded.walk_seconds,
                 updated_at = excluded.updated_at
             """,
             (
@@ -1586,8 +1571,7 @@ class DrivingSegmentRepository:
                 samples_count, sensor_minutes, harsh_acceleration_count, harsh_braking_count,
                 hard_cornering_count, lane_change_proxy_count, stop_go_count,
                 jerk_score, speed_variability_score, aggressive_score,
-                gait_bouts, gait_walk_seconds, gait_cadence, gait_step_cv,
-                gait_regularity, gait_impact, updated_at, updated_at,
+                walk_bouts, walk_seconds, updated_at, updated_at,
             ),
         )
         self.connection.commit()

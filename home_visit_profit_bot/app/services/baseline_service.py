@@ -68,26 +68,16 @@ POPULATION: dict[str, MetricSpec] = {
     "late_finish_minutes": MetricSpec("late_finish_minutes", "Позднее завершение", 0, 45, unit="мин"),
     "stop_complexity": MetricSpec("stop_complexity", "Тяжесть остановок", 40, 20, unit=""),
     "route_time_factor": MetricSpec("route_time_factor", "Дорога дольше плана", 1.15, 0.2, unit="×"),
-    # --- восстановление (больше — хуже, кроме сна и воды) ---
-    "sleep_hours": MetricSpec("sleep_hours", "Сон", 7, 1, higher_is_worse=False, unit="ч"),
-    "burnout_score": MetricSpec("burnout_score", "Самочувствие по опросу", 30, 15, unit=""),
-    "driving_change": MetricSpec("driving_change", "Изменение характера вождения", 50, 15, unit=""),
-    "coffee_units": MetricSpec("coffee_units", "Кофе и энергетики", 2, 1, unit="шт"),
-    "drinks_units": MetricSpec("drinks_units", "Вода", 2, 1, higher_is_worse=False, unit="шт"),
-    "meal_units": MetricSpec("meal_units", "Еда вне дома", 1, 1, unit="шт"),
-    "meal_skipped": MetricSpec("meal_skipped", "Пропуск нормальной еды", 0, 1, unit=""),
-    "self_rating": MetricSpec("self_rating", "Самооценка усталости", 5, 2, unit="из 10"),
-    # --- походка (по акселерометру, только во время ходьбы) ---
-    # Уставший человек идёт медленнее, но главное — неровнее: разброс времени между
-    # шагами растёт. Это устойчивый маркер, в отличие от вариативности скорости
-    # вождения, где даже знак связи спорен.
-    "walk_cadence": MetricSpec("walk_cadence", "Темп ходьбы", 110, 8, higher_is_worse=False, unit="шаг/мин"),
-    "walk_step_cv": MetricSpec("walk_step_cv", "Разброс шага", 4.0, 1.5, unit="%"),
-    "walk_regularity": MetricSpec("walk_regularity", "Ровность шага", 0.75, 0.08, higher_is_worse=False, unit=""),
-    # Жёсткость приземления: знак связи с усталостью неочевиден (устал — можно и
-    # «шаркать», и «печатать» шаг). Веса в индексе намеренно НЕ даём — направление
-    # выяснит обучение на обратной связи, как с вариативностью скорости.
-    "walk_impact": MetricSpec("walk_impact", "Жёсткость шага", 2.5, 0.8, unit="м/с²"),
+    # --- режим труда (не состояние человека) ---
+    # Перерыв между сменами вычисляется из времени закрытия прошлой смены — это факт
+    # о графике (ТК РФ, ст. 107–110), а не физиологический показатель. Прежние метрики
+    # сна, кофеина и самооценки усталости удалены: из них выводилось состояние здоровья,
+    # а это специальная категория персональных данных (152-ФЗ, ст. 10).
+    "break_hours": MetricSpec("break_hours", "Перерыв между сменами", 14, 3, higher_is_worse=False, unit="ч"),
+    "break_interrupted": MetricSpec("break_interrupted", "Перерыв прерывался", 0, 1, unit=""),
+    "overtime_minutes": MetricSpec("overtime_minutes", "Сверхурочные", 0, 60, unit="мин"),
+    "workload_survey_score": MetricSpec("workload_survey_score", "Опрос об условиях труда", 30, 15, unit=""),
+    "workload_rating": MetricSpec("workload_rating", "Загруженность смены", 5, 2, unit="из 10"),
     # --- вождение (больше — хуже) ---
     # Ориентиры телематики: у аккуратного водителя единицы резких манёвров на 100 км,
     # у агрессивного — десятки. Разброс между людьми огромный, поэтому личная норма

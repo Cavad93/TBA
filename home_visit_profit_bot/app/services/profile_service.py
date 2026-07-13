@@ -17,11 +17,10 @@ from app.repositories import (
 )
 from app.services.day_metrics_service import load_baselines
 from app.services.driving_service import within_day_trend
-from app.services.gait_service import within_day_trend as gait_within_day_trend
-from app.services.indices_service import economy_index, load_index, recovery_result
-from app.services.mobile_fatigue_service import MobileFatigueService
+from app.services.indices_service import economy_index, load_index, overwork_result
+from app.services.mobile_workload_service import MobileWorkloadService
 from app.services.mobile_report_service import parse_report_period
-from app.services.recovery_pricing_service import build_pricing
+from app.services.overwork_pricing_service import build_pricing
 
 
 # Окна для стиля вождения: последние 7 дней и 28 дней перед ними (самосравнение).
@@ -48,7 +47,7 @@ class ProfileService:
         self.metrics = DayMetricRepository(connection)
         self.baselines = UserBaselineRepository(connection)
         self.settings = SettingsRepository(connection)
-        self.fatigue = MobileFatigueService(connection)
+        self.fatigue = MobileWorkloadService(connection)
 
     def snapshot(self, nickname: str | None = None) -> dict[str, Any]:
         today = date.today()
@@ -62,7 +61,6 @@ class ProfileService:
             "pricing": self._pricing_block(indices),
             "wellbeing": self._wellbeing_block(),
             "driving": self._driving_block(today),
-            "gait": self._gait_block(),
         }
 
     # --- три индекса ------------------------------------------------------
@@ -87,8 +85,8 @@ class ProfileService:
 
         economy = economy_index(metrics, baselines)
         load = load_index(metrics, baselines)
-        debt = float(metrics.get("recovery_debt") or 0)
-        recovery = recovery_result(debt, metrics, baselines)
+        debt = float(metrics.get("overwork_index") or 0)
+        recovery = overwork_result(debt, metrics, baselines)
 
         return {
             # Пока смен мало, личной нормы нет, и любой индекс — цифра из воздуха.
@@ -99,17 +97,17 @@ class ProfileService:
             "date": latest.date,
             "economy": economy.payload(),
             "load": load.payload(),
-            "recovery": recovery.payload(),
+            "overwork": overwork.payload(),
         }
 
     def _pricing_block(self, indices: dict[str, Any]) -> dict[str, Any] | None:
         """Что состояние значит для денег сегодня — ради этого всё и считалось."""
-        recovery = indices.get("recovery")
-        if not recovery:
+        overwork = indices.get("overwork")
+        if not overwork:
             return None
         min_hourly = self.settings.get_float("min_hourly_income", 600)
         pricing = build_pricing(
-            debt=float(recovery.get("score") or 0),
+            debt=float(overwork.get("score") or 0),
             min_hourly=min_hourly,
             outside_min_hourly=self.settings.get_float("outside_zone_min_hourly_income", min_hourly),
             min_marginal_hourly=self.settings.get_float("min_marginal_hourly_income", min_hourly),
@@ -181,12 +179,12 @@ class ProfileService:
                 "note": "Пока мало данных — показатели появятся после первых смен.",
             }
 
-        recovery_debt = float(summary.get("recovery_debt") or 0)
+        overwork_index = float(summary.get("overwork_index") or 0)
         weekly = float(summary.get("weekly_average") or 0)
         score = float(summary.get("score") or 0)
-        burnout = float(summary.get("burnout_score") or 0)
+        burnout = float(summary.get("workload_survey_score") or 0)
 
-        recovery_percent = _clamp_round(100 - recovery_debt)
+        recovery_percent = _clamp_round(100 - overwork_index)
         load_percent = _clamp_round(weekly if weekly > 0 else score)
         reserve_percent = _clamp_round(100 - burnout)
 
@@ -250,31 +248,6 @@ class ProfileService:
         if latest is None:
             return None
         return within_day_trend(self.segments, latest.id)
-
-    # --- походка ----------------------------------------------------------
-
-    def _gait_block(self) -> dict[str, Any] | None:
-        """Походка по последней смене: темп, разброс шага, ровность — и тренд внутри дня.
-
-        Для усталости это более прямой сигнал, чем стиль вождения: там между телом и
-        датчиком стоит машина, здесь — ничего.
-        """
-        latest = self.days.latest_closed() or self.days.active()
-        if latest is None:
-            return None
-
-        metrics = self.metrics.for_day(latest.id)
-        cadence = float(metrics.get("walk_cadence") or 0)
-        if cadence <= 0:
-            return None
-
-        return {
-            "cadence": cadence,
-            "step_cv": float(metrics.get("walk_step_cv") or 0),
-            "regularity": float(metrics.get("walk_regularity") or 0),
-            "walk_minutes": float(metrics.get("walk_minutes") or 0),
-            "within_day": gait_within_day_trend(self.segments, latest.id),
-        }
 
 
 # --- вспомогательные функции --------------------------------------------

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.services.baseline_service import Baseline
-from app.services.indices_service import economy_index, level_for, load_index, recovery_debt_delta, recovery_result
+from app.services.indices_service import economy_index, level_for, load_index, overwork_extra_delta, overwork_result
 
 
 def _baseline(metric: str, median: float, scale: float, days: int = 28) -> Baseline:
@@ -9,11 +9,11 @@ def _baseline(metric: str, median: float, scale: float, days: int = 28) -> Basel
 
 
 def test_level_matrix_matches_the_agreed_bands() -> None:
-    assert level_for(10)[0] == "Норма"
-    assert level_for(30)[0] == "Лёгкая нагрузка"
-    assert level_for(50)[0] == "Усталость накапливается"
-    assert level_for(65)[0] == "Высокий долг восстановления"
-    assert level_for(95)[0] == "Критический перегруз"
+    assert level_for(10)[0] == "График в норме"
+    assert level_for(30)[0] == "Лёгкая переработка"
+    assert level_for(50)[0] == "Переработка накапливается"
+    assert level_for(65)[0] == "Значительная переработка"
+    assert level_for(95)[0] == "Критическая переработка"
 
 
 def test_load_index_is_fifty_on_a_typical_day() -> None:
@@ -85,41 +85,43 @@ def test_missing_metrics_do_not_drag_the_index_to_zero() -> None:
     assert full.score == 50.0
 
 
-def test_recovery_delta_is_zero_on_an_ordinary_day() -> None:
+def test_overwork_delta_is_zero_on_an_ordinary_day() -> None:
     baselines = {
-        "coffee_units": _baseline("coffee_units", 2, 1),
-        "self_rating": _baseline("self_rating", 5, 2),
+        "workload_rating": _baseline("workload_rating", 5, 2),
+        "overtime_minutes": _baseline("overtime_minutes", 0, 60),
     }
 
-    assert recovery_debt_delta({"coffee_units": 2, "self_rating": 5}, baselines) == 0.0
+    assert overwork_extra_delta({"workload_rating": 5, "overtime_minutes": 0}, baselines) == 0.0
 
 
-def test_recovery_delta_grows_when_the_day_was_harder_than_usual() -> None:
+
+def test_overwork_delta_grows_when_the_schedule_was_denser_than_usual() -> None:
+    """Все слагаемые — факты о режиме труда, а не о состоянии человека."""
     baselines = {
-        "coffee_units": _baseline("coffee_units", 2, 1),
-        "self_rating": _baseline("self_rating", 5, 1),
-        "meal_skipped": _baseline("meal_skipped", 0, 1),
+        "workload_rating": _baseline("workload_rating", 5, 1),
+        "overtime_minutes": _baseline("overtime_minutes", 0, 30),
+        "break_interrupted": _baseline("break_interrupted", 0, 1),
     }
-    hard = {"coffee_units": 5, "self_rating": 9, "meal_skipped": 1}
+    dense = {"workload_rating": 9, "overtime_minutes": 120, "break_interrupted": 1}
 
-    assert recovery_debt_delta(hard, baselines) > 8
+    assert overwork_extra_delta(dense, baselines) > 8
 
 
-def test_recovery_result_merges_formula_and_robust_explanations() -> None:
-    from app.services.fatigue_service import recovery_debt_contributions
 
-    explicit = recovery_debt_contributions(
+def test_overwork_result_merges_formula_and_robust_explanations() -> None:
+    from app.services.workload_service import overwork_contributions
+
+    explicit = overwork_contributions(
         day_score=80,
-        sleep_hours=4.5,
-        sleep_quality=2,
         break_hours_before=7,
-        circadian_risk_minutes=120,
-        burnout_score=70,
+        break_uninterrupted=False,
+        night_work_minutes=120,
+        workload_survey_score=70,
     )
-    result = recovery_result(72.0, {"coffee_units": 6}, {"coffee_units": _baseline("coffee_units", 2, 1)}, explicit=explicit)
+    result = overwork_result(72.0, {"coffee_units": 6}, {"coffee_units": _baseline("coffee_units", 2, 1)}, explicit=explicit)
 
     assert result.score == 72.0
-    assert result.level == "Высокий долг восстановления"
+    assert result.level == "Значительная переработка"
     assert result.tone == "skip"
     # Объяснения смешаны: и формульные (сон), и робастные (кофе) конкурируют по весу.
     metrics = {item.metric for item in result.contributions}

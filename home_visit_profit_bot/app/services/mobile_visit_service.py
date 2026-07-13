@@ -305,7 +305,7 @@ class MobileVisitService:
                 "visit_id": visit_id,
                 "label": label,
             }
-        events.set_fatigue_label(visit_id, label)
+        events.set_stop_label(visit_id, label)
         return {
             "ok": True,
             "reason": "stop_label_saved",
@@ -352,7 +352,7 @@ class MobileVisitService:
                 "accuracy_m": float(event["last_accuracy_m"] or 0),
                 "first_seen_at": event["first_seen_at"],
                 "last_seen_at": event["last_seen_at"],
-                "fatigue_label": event["fatigue_label"],
+                "stop_label": event["stop_label"],
             },
         }
 
@@ -457,19 +457,19 @@ def calculation_payload(calculation: CandidateCalculation) -> dict[str, Any]:
         "required_extra_for_outside_zone": calculation.required_extra_for_outside_zone,
         "target_day_hourly": calculation.target_day_hourly,
         "target_marginal_hourly": calculation.target_marginal_hourly,
-        "fatigue_score_before": calculation.fatigue_score_before,
-        "fatigue_score_after": calculation.fatigue_score_after,
-        "fatigue_weekly_average": calculation.fatigue_weekly_average,
-        "fatigue_level": calculation.fatigue_level,
-        "fatigue_reason": calculation.fatigue_reason,
-        "recovery_debt_before": calculation.recovery_debt_before,
-        "recovery_debt_after": calculation.recovery_debt_after,
-        "circadian_risk_minutes": calculation.circadian_risk_minutes,
-        "burnout_score": calculation.burnout_score,
+        "workload_index_before": calculation.workload_index_before,
+        "workload_index_after": calculation.workload_index_after,
+        "workload_weekly_average": calculation.workload_weekly_average,
+        "workload_level": calculation.workload_level,
+        "pricing_reason": calculation.pricing_reason,
+        "overwork_index_before": calculation.overwork_index_before,
+        "overwork_index_after": calculation.overwork_index_after,
+        "night_work_minutes": calculation.night_work_minutes,
+        "workload_survey_score": calculation.workload_survey_score,
         # Состояние меняет экономику ровно здесь: обычный минимум против сегодняшнего.
         "base_min_hourly": calculation.base_min_hourly,
         "effective_min_hourly": calculation.effective_min_hourly,
-        "recovery_markup_percent": calculation.recovery_markup_percent,
+        "overwork_markup_percent": calculation.overwork_markup_percent,
         "recovery_blocks_outside_zone": calculation.recovery_blocks_outside_zone,
     }
 

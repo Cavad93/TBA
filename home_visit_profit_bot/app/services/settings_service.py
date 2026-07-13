@@ -161,7 +161,7 @@ SETTINGS_CATALOG: list[SettingField] = [
     ),
     # Нагрузка
     SettingField(
-        "fatigue_enabled", "fatigue", "Считать нагрузку", "bool", True,
+        "workload_tracking_enabled", "fatigue", "Считать нагрузку", "bool", True,
         hint=(
             "Приложение следит за переработкой и запасом сил и поднимает минимальный тариф, "
             "когда вы не восстановились. Для этого оно собирает сон, еду, самооценку и "
@@ -170,7 +170,7 @@ SETTINGS_CATALOG: list[SettingField] = [
         ),
     ),
     SettingField(
-        "fatigue_learning_enabled", "fatigue", "Подстраивать под вас", "bool", True,
+        "workload_learning_enabled", "fatigue", "Подстраивать под вас", "bool", True,
         hint="Оценка нагрузки уточняется по вашим же ответам о самочувствии.",
     ),
 ]

@@ -6,6 +6,7 @@ import re
 
 from app.config import AppConfig
 from app.database import Database, connect
+from app.legal_migration import migrate_out_of_special_categories
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +64,10 @@ CREATE TABLE IF NOT EXISTS work_days (
     toll_compensation REAL DEFAULT 0,
     clinic_compensation REAL DEFAULT 0,
     other_expenses REAL DEFAULT 0,
-    sleep_hours REAL DEFAULT 0,
-    sleep_quality REAL DEFAULT 0,
+    -- Перерыв между сменами — факт о РЕЖИМЕ ТРУДА (ТК РФ), а не о состоянии человека.
+    -- Вычисляется из времени закрытия прошлой смены, пользователь только подтверждает.
     break_hours_before REAL DEFAULT 0,
+    break_uninterrupted INTEGER DEFAULT 1,
     created_at TEXT NOT NULL
 );
 
@@ -189,17 +191,18 @@ CREATE TABLE IF NOT EXISTS daily_stats (
     toll_expenses REAL DEFAULT 0,
     toll_compensation REAL DEFAULT 0,
     other_expenses REAL DEFAULT 0,
-    fatigue_score REAL DEFAULT 0,
-    fatigue_weekly_average REAL DEFAULT 0,
-    fatigue_long_stop_count INTEGER DEFAULT 0,
-    fatigue_pause_minutes REAL DEFAULT 0,
-    fatigue_heavy_visit_count INTEGER DEFAULT 0,
-    recovery_debt REAL DEFAULT 0,
-    sleep_hours REAL DEFAULT 0,
-    sleep_quality REAL DEFAULT 0,
+    workload_index REAL DEFAULT 0,
+    workload_weekly_average REAL DEFAULT 0,
+    long_stop_count INTEGER DEFAULT 0,
+    pause_minutes REAL DEFAULT 0,
+    heavy_visit_count INTEGER DEFAULT 0,
+    overwork_index REAL DEFAULT 0,
+    -- Перерыв между сменами — факт о РЕЖИМЕ ТРУДА (ТК РФ), а не о состоянии человека.
+    -- Вычисляется из времени закрытия прошлой смены, пользователь только подтверждает.
     break_hours_before REAL DEFAULT 0,
-    circadian_risk_minutes REAL DEFAULT 0,
-    burnout_score REAL DEFAULT 0,
+    break_uninterrupted INTEGER DEFAULT 1,
+    night_work_minutes REAL DEFAULT 0,
+    workload_survey_score REAL DEFAULT 0,
     created_at TEXT NOT NULL,
     FOREIGN KEY(work_day_id) REFERENCES work_days(id)
 );
@@ -214,7 +217,7 @@ CREATE TABLE IF NOT EXISTS visit_location_events (
     is_inside INTEGER DEFAULT 1,
     last_distance_m REAL DEFAULT 0,
     last_accuracy_m REAL DEFAULT 0,
-    fatigue_label TEXT,
+    stop_label TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(visit_id),
@@ -250,7 +253,7 @@ CREATE TABLE IF NOT EXISTS work_day_location_state (
     FOREIGN KEY(work_day_id) REFERENCES work_days(id)
 );
 
-CREATE TABLE IF NOT EXISTS burnout_surveys (
+CREATE TABLE IF NOT EXISTS workload_surveys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date TEXT NOT NULL,
     score REAL NOT NULL,
@@ -277,7 +280,7 @@ CREATE TABLE IF NOT EXISTS driving_behavior_daily (
     FOREIGN KEY(work_day_id) REFERENCES work_days(id)
 );
 
-CREATE TABLE IF NOT EXISTS fatigue_feedback (
+CREATE TABLE IF NOT EXISTS workload_feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     work_day_id INTEGER NOT NULL,
     predicted_score REAL NOT NULL,
@@ -309,14 +312,12 @@ CREATE TABLE IF NOT EXISTS driving_behavior_segments (
     jerk_score REAL DEFAULT 0,
     speed_variability_score REAL DEFAULT 0,
     aggressive_score REAL DEFAULT 0,
-    -- Походка на этом отрезке: агрегаты, посчитанные на телефоне. Сам сигнал сюда
-    -- не попадает и не должен: по паттерну походки человека можно опознать.
-    gait_bouts INTEGER DEFAULT 0,
-    gait_walk_seconds REAL DEFAULT 0,
-    gait_cadence REAL DEFAULT 0,
-    gait_step_cv REAL DEFAULT 0,
-    gait_regularity REAL DEFAULT 0,
-    gait_impact REAL DEFAULT 0,
+    -- Время в пути пешком на этом отрезке. Это логистика: сколько занимает дорога от
+    -- машины до двери — влияет на плановую длительность визита. Манера ходьбы (темп,
+    -- разброс шага) НЕ измеряется: у неё нет операционного смысла, кроме вывода о
+    -- физиологическом состоянии, а это спецкатегория по 152-ФЗ.
+    walk_bouts INTEGER DEFAULT 0,
+    walk_seconds REAL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(work_day_id, segment_index),
@@ -461,9 +462,9 @@ ISOLATED_TABLES = [
     "settings",
     "work_days", "visits", "expenses", "telemed_entries", "office_entries",
     "daily_stats", "visit_location_events", "location_samples",
-    "work_day_location_state", "burnout_surveys", "driving_behavior_daily",
+    "work_day_location_state", "workload_surveys", "driving_behavior_daily",
     "driving_behavior_segments", "day_metrics", "user_baselines",
-    "fatigue_feedback", "mobile_client_entities", "mobile_sync_events",
+    "workload_feedback", "mobile_client_entities", "mobile_sync_events",
     "mobile_sync_conflicts",
     # Кэш геокодера тоже персональный: ключ — сырой текст адреса, а город у каждого
     # свой. Общий кэш отдавал бы «Ленина 40» из чужого города — и заказ считался бы
@@ -476,6 +477,7 @@ def init_db(config: AppConfig) -> None:
     with connect(config) as db:
         _apply_schema(db)
         _ensure_columns(db)
+        migrate_out_of_special_categories(db)
         _ensure_isolation(db)
         _migrate_address_cache_to_per_user(db)
         _ensure_baselines_per_user(db)
@@ -642,12 +644,10 @@ def _ensure_columns(db: Database) -> None:
     _ensure_column(db, "visits", "planned_end_at", "TEXT")
     # Походка по отрезкам пути: таблица уже создана на боевом сервере, поэтому колонки
     # добавляются миграцией, а не только через DDL.
-    _ensure_column(db, "driving_behavior_segments", "gait_bouts", "INTEGER DEFAULT 0")
-    _ensure_column(db, "driving_behavior_segments", "gait_walk_seconds", "REAL DEFAULT 0")
-    _ensure_column(db, "driving_behavior_segments", "gait_cadence", "REAL DEFAULT 0")
-    _ensure_column(db, "driving_behavior_segments", "gait_step_cv", "REAL DEFAULT 0")
-    _ensure_column(db, "driving_behavior_segments", "gait_regularity", "REAL DEFAULT 0")
-    _ensure_column(db, "driving_behavior_segments", "gait_impact", "REAL DEFAULT 0")
+    _ensure_column(db, "driving_behavior_segments", "walk_bouts", "INTEGER DEFAULT 0")
+    _ensure_column(db, "driving_behavior_segments", "walk_seconds", "REAL DEFAULT 0")
+    _ensure_column(db, "work_days", "break_uninterrupted", "INTEGER DEFAULT 1")
+    _ensure_column(db, "daily_stats", "break_uninterrupted", "INTEGER DEFAULT 1")
     _ensure_column(db, "work_days", "telemed_minutes", "REAL DEFAULT 0")
     _ensure_column(db, "work_days", "office_income", "REAL DEFAULT 0")
     _ensure_column(db, "work_days", "office_minutes", "REAL DEFAULT 0")
@@ -665,8 +665,7 @@ def _ensure_columns(db: Database) -> None:
     _ensure_column(db, "work_days", "parking_compensation", "REAL DEFAULT 0")
     _ensure_column(db, "work_days", "toll_expenses", "REAL DEFAULT 0")
     _ensure_column(db, "work_days", "toll_compensation", "REAL DEFAULT 0")
-    _ensure_column(db, "work_days", "sleep_hours", "REAL DEFAULT 0")
-    _ensure_column(db, "work_days", "sleep_quality", "REAL DEFAULT 0")
+
     _ensure_column(db, "work_days", "break_hours_before", "REAL DEFAULT 0")
     _ensure_column(db, "daily_stats", "planned_route_minutes", "REAL DEFAULT 0")
     _ensure_column(db, "daily_stats", "actual_route_time_factor", "REAL DEFAULT 1.0")
@@ -698,18 +697,17 @@ def _ensure_columns(db: Database) -> None:
     _ensure_column(db, "daily_stats", "toll_expenses", "REAL DEFAULT 0")
     _ensure_column(db, "daily_stats", "toll_compensation", "REAL DEFAULT 0")
     _ensure_column(db, "daily_stats", "other_expenses", "REAL DEFAULT 0")
-    _ensure_column(db, "daily_stats", "fatigue_score", "REAL DEFAULT 0")
-    _ensure_column(db, "daily_stats", "fatigue_weekly_average", "REAL DEFAULT 0")
-    _ensure_column(db, "daily_stats", "fatigue_long_stop_count", "INTEGER DEFAULT 0")
-    _ensure_column(db, "daily_stats", "fatigue_pause_minutes", "REAL DEFAULT 0")
-    _ensure_column(db, "daily_stats", "fatigue_heavy_visit_count", "INTEGER DEFAULT 0")
-    _ensure_column(db, "daily_stats", "recovery_debt", "REAL DEFAULT 0")
-    _ensure_column(db, "daily_stats", "sleep_hours", "REAL DEFAULT 0")
-    _ensure_column(db, "daily_stats", "sleep_quality", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "workload_index", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "workload_weekly_average", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "long_stop_count", "INTEGER DEFAULT 0")
+    _ensure_column(db, "daily_stats", "pause_minutes", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "heavy_visit_count", "INTEGER DEFAULT 0")
+    _ensure_column(db, "daily_stats", "overwork_index", "REAL DEFAULT 0")
+
     _ensure_column(db, "daily_stats", "break_hours_before", "REAL DEFAULT 0")
-    _ensure_column(db, "daily_stats", "circadian_risk_minutes", "REAL DEFAULT 0")
-    _ensure_column(db, "daily_stats", "burnout_score", "REAL DEFAULT 0")
-    _ensure_column(db, "visit_location_events", "fatigue_label", "TEXT")
+    _ensure_column(db, "daily_stats", "night_work_minutes", "REAL DEFAULT 0")
+    _ensure_column(db, "daily_stats", "workload_survey_score", "REAL DEFAULT 0")
+    _ensure_column(db, "visit_location_events", "stop_label", "TEXT")
 
 
 def _ensure_column(db: Database, table: str, column: str, definition: str) -> None:
@@ -732,11 +730,11 @@ def seed_default_settings(db: Database, config: AppConfig) -> None:
         "min_marginal_hourly_income": str(config.finance.min_hourly_income),
         "outside_zone_min_hourly_income": str(config.finance.min_hourly_income),
         "outside_zone_min_extra_payment": "0",
-        "fatigue_enabled": "true",
-        "latest_cbi_score": "0",
-        "latest_cbi_date": "",
-        "fatigue_learning_enabled": "true",
-        "fatigue_learning_weights_json": "{}",
+        "workload_tracking_enabled": "true",
+        "workload_survey_score": "0",
+        "workload_survey_date": "",
+        "workload_learning_enabled": "true",
+        "workload_learning_weights_json": "{}",
         "base_districts": ", ".join(config.geo.base_districts),
         # Зоны обслуживания: область → город → районы. Пусто — пользователь задаёт сам.
         "base_zones": "[]",

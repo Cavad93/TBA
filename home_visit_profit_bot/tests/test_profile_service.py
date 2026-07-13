@@ -35,7 +35,7 @@ def test_profile_with_active_day_reports_wellbeing_and_driving(config) -> None:
 
     with connect(config) as connection:
         days = WorkDayRepository(connection)
-        day = days.create("Дом", "Дом", 30, 20, start_odometer=100000, sleep_hours=8, sleep_quality=4)
+        day = days.create("Дом", "Дом", 30, 20, start_odometer=100000)
         DrivingBehaviorRepository(connection).upsert(
             work_day_id=day.id,
             date=day.date,

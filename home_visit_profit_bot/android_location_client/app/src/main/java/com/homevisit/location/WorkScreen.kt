@@ -130,13 +130,13 @@ import com.homevisit.location.domain.SettingField
 import com.homevisit.location.domain.SettingType
 import com.homevisit.location.domain.SettingsSection
 import com.homevisit.location.domain.EndDayDetails
-import com.homevisit.location.domain.FatigueCorrelationCell
-import com.homevisit.location.domain.FatigueCorrelationReport
-import com.homevisit.location.domain.FatigueSnapshot
-import com.homevisit.location.domain.FatigueTrendPoint
-import com.homevisit.location.domain.FatigueTrendReport
+import com.homevisit.location.domain.WorkloadCorrelationCell
+import com.homevisit.location.domain.WorkloadCorrelationReport
+import com.homevisit.location.domain.WorkloadSnapshot
+import com.homevisit.location.domain.WorkloadTrendPoint
+import com.homevisit.location.domain.WorkloadTrendReport
 import com.homevisit.location.domain.HomeRecommendation
-import com.homevisit.location.domain.HomeRecovery
+import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
@@ -153,7 +153,7 @@ import com.homevisit.location.domain.WorkDayStatus
 import com.homevisit.location.sync.SyncScheduler
 import com.homevisit.location.ui.AppSettingsUiState
 import com.homevisit.location.ui.CandidateUiState
-import com.homevisit.location.ui.FatigueUiState
+import com.homevisit.location.ui.WorkloadUiState
 import com.homevisit.location.ui.GpsEstimateUiState
 import com.homevisit.location.ui.GpsHintUiState
 import com.homevisit.location.ui.HomeUiState
@@ -180,7 +180,7 @@ internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions)
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "Сон: ${oneDecimal(uiState.sleepHours)} ч, качество ${oneDecimal(uiState.sleepQuality)}/5. Одометр старт: ${oneDecimal(uiState.startOdometer)} км.",
+                "Перерыв между сменами: ${oneDecimal(uiState.breakHoursBefore)} ч. Одометр старт: ${oneDecimal(uiState.startOdometer)} км.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -199,12 +199,9 @@ internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions)
     var startAddress by rememberSaveable { mutableStateOf("Дом") }
     var finishAddress by rememberSaveable { mutableStateOf("Дом") }
     var startOdometerText by rememberSaveable { mutableStateOf("") }
-    var sleepHoursText by rememberSaveable { mutableStateOf("") }
-    var sleepQualityText by rememberSaveable { mutableStateOf("") }
     var breakHoursText by rememberSaveable { mutableStateOf("") }
+    var breakUninterrupted by rememberSaveable { mutableStateOf(true) }
     val startOdometer = parseNumber(startOdometerText) ?: 0.0
-    val sleepHours = parseNumber(sleepHoursText) ?: 0.0
-    val sleepQuality = parseNumber(sleepQualityText) ?: 0.0
     val breakHours = parseNumber(breakHoursText) ?: 0.0
 
     InputCard("Начало дня") {
@@ -222,6 +219,9 @@ internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions)
             label = { Text("Финиш") },
             singleLine = true,
         )
+        // Вопросов о сне здесь нет: это прямой физиологический показатель, из которого
+        // выводится состояние здоровья, а такие данные — специальная категория (152-ФЗ).
+        // Перерыв между сменами — факт о режиме труда, и он же нам нужен для расчёта.
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MoneyField(
                 modifier = Modifier.weight(1f),
@@ -231,24 +231,18 @@ internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions)
             )
             MoneyField(
                 modifier = Modifier.weight(1f),
-                value = sleepHoursText,
-                onValueChange = { sleepHoursText = it },
-                label = "Сон, ч",
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            MoneyField(
-                modifier = Modifier.weight(1f),
-                value = sleepQualityText,
-                onValueChange = { sleepQualityText = it },
-                label = "Сон 0-5",
-            )
-            MoneyField(
-                modifier = Modifier.weight(1f),
                 value = breakHoursText,
                 onValueChange = { breakHoursText = it },
                 label = "Перерыв, ч",
             )
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Перерыв был непрерывным?", style = MaterialTheme.typography.bodyMedium)
+            Switch(checked = breakUninterrupted, onCheckedChange = { breakUninterrupted = it })
         }
         Button(
             modifier = Modifier.fillMaxWidth(),
@@ -258,8 +252,7 @@ internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions)
                     startAddress,
                     finishAddress,
                     startOdometer,
-                    sleepHours,
-                    sleepQuality,
+                    breakUninterrupted,
                     breakHours,
                 )
             },
@@ -284,14 +277,14 @@ internal fun EndDayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActio
     var tollExpensesText by rememberSaveable { mutableStateOf("") }
     var tollCompensationText by rememberSaveable { mutableStateOf("") }
     var otherExpensesText by rememberSaveable { mutableStateOf("") }
-    var fatigueText by rememberSaveable { mutableStateOf("") }
+    var workloadRatingText by rememberSaveable { mutableStateOf("") }
 
     val actualKm = parseNumber(actualKmText)
     val workHours = parseNumber(workHoursText)
     val routeHours = parseNumber(routeHoursText)
     val completedVisits = parseNumber(completedVisitsText)?.toInt()
     val endOdometer = parseNumber(endOdometerText)
-    val userFatigue = parseNumber(fatigueText)?.coerceIn(0.0, 100.0)
+    val userWorkload = parseNumber(workloadRatingText)?.coerceIn(0.0, 100.0)
 
     InputCard("Полное завершение дня") {
         Text(
@@ -343,7 +336,7 @@ internal fun EndDayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActio
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MoneyField(modifier = Modifier.weight(1f), value = otherExpensesText, onValueChange = { otherExpensesText = it }, label = "Прочее")
-            MoneyField(modifier = Modifier.weight(1f), value = fatigueText, onValueChange = { fatigueText = it }, label = "Нагрузка 0-100")
+            MoneyField(modifier = Modifier.weight(1f), value = workloadRatingText, onValueChange = { workloadRatingText = it }, label = "Загруженность 0-100")
         }
         Button(
             modifier = Modifier.fillMaxWidth(),
@@ -365,7 +358,7 @@ internal fun EndDayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActio
                         tollExpenses = parseNumber(tollExpensesText) ?: 0.0,
                         tollCompensation = parseNumber(tollCompensationText) ?: 0.0,
                         otherExpenses = parseNumber(otherExpensesText) ?: 0.0,
-                        userFatigueScore = userFatigue,
+                        userWorkloadIndex = userWorkload,
                     ),
                 )
             },
@@ -878,8 +871,8 @@ internal fun TelemedInputCard(clinics: List<String>, onSubmit: (Double, Double, 
  */
 @Composable
 private fun RaisedTariffRow(estimate: CandidateEstimate) {
-    val tone = if (estimate.recoveryBlocksOutsideZone) VerdictColors.skip else VerdictColors.edge
-    val container = if (estimate.recoveryBlocksOutsideZone) VerdictColors.skipContainer else VerdictColors.edgeContainer
+    val tone = if (estimate.overworkBlocksOutsideZone) VerdictColors.skip else VerdictColors.edge
+    val container = if (estimate.overworkBlocksOutsideZone) VerdictColors.skipContainer else VerdictColors.edgeContainer
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -898,7 +891,7 @@ private fun RaisedTariffRow(estimate: CandidateEstimate) {
             )
             Text(
                 "${money(estimate.baseMinHourly)} → ${money(estimate.effectiveMinHourly)} " +
-                    "(+${estimate.recoveryMarkupPercent}%) — по долгу восстановления",
+                    "(+${estimate.overworkMarkupPercent}%) — по долгу восстановления",
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = JetBrainsMono,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

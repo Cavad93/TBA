@@ -61,10 +61,10 @@ public class LocationUploadService extends Service implements LocationListener, 
     private long lastSpeedTimeMs = 0L;
     // Номер отрезка пути = сколько адресов уже закрыто. Присылает сервер.
     private int segmentIndex = 0;
-    private final GaitAnalyzer gait = new GaitAnalyzer();
-    // Частота акселерометра поднимается до 50 Гц только на время ходьбы: шаг —
-    // это 1,7–2 Гц, и на экономных 5 Гц интервалы между шагами не измерить.
-    private boolean sensorHighRate = false;
+    // Время в пути пешком — логистика. Манера ходьбы не измеряется: у неё нет
+    // операционного смысла, кроме вывода о состоянии, а это спецкатегория ПДн.
+    // Поэтому и частота датчика остаётся экономной — 50 Гц больше не нужны.
+    private final WalkDetector walk = new WalkDetector();
     private int samplesCount = 0;
     private double sensorSeconds = 0;
     private int harshAccelerationCount = 0;
@@ -152,27 +152,6 @@ public class LocationUploadService extends Service implements LocationListener, 
         }
     }
 
-    /**
-     * Частота акселерометра: экономные 5 Гц по умолчанию, 50 Гц на время ходьбы.
-     *
-     * Шаг человека — 1,7–2 Гц. На 5 Гц на шаг приходится 2,5 отсчёта: этого хватает,
-     * чтобы понять «идёт», и не хватает, чтобы измерить интервалы между шагами — а
-     * именно их разброс и есть главный признак усталости. Держать 50 Гц весь день ради
-     * сорока минут ходьбы незачем, поэтому поднимаем только когда шаги заподозрены.
-     */
-    private void applySensorRate(boolean wantHigh) {
-        if (wantHigh == sensorHighRate || sensorManager == null || accelerometer == null) {
-            return;
-        }
-        sensorHighRate = wantHigh;
-        sensorManager.unregisterListener(this, accelerometer);
-        sensorManager.registerListener(
-                this,
-                accelerometer,
-                wantHigh ? SensorManager.SENSOR_DELAY_GAME : SensorManager.SENSOR_DELAY_NORMAL
-        );
-    }
-
     private void stopSensorUpdates() {
         if (sensorManager != null) {
             sensorManager.unregisterListener(this);
@@ -222,8 +201,7 @@ public class LocationUploadService extends Service implements LocationListener, 
                 harshAccelerationCount += 1;
                 lastHarshAccelMs = nowMs;
             }
-            gait.onSample(linear, event.timestamp / 1_000_000_000.0, lastSpeedKmh < 0 ? 0 : lastSpeedKmh);
-            applySensorRate(gait.wantsHighRate());
+            walk.onSample(linear, event.timestamp / 1_000_000_000.0, lastSpeedKmh < 0 ? 0 : lastSpeedKmh);
         } else if (event.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
             float angular = (float) Math.sqrt(
                     event.values[0] * event.values[0]
@@ -356,16 +334,12 @@ public class LocationUploadService extends Service implements LocationListener, 
             payload.put("speed_variability_score", calculateSpeedVariabilityScore());
             payload.put("aggressive_score", calculateAggressiveScore());
 
-            // Походка. Наружу уходят ТОЛЬКО агрегаты за отрезок: сам сигнал —
-            // биометрия, по нему человека можно опознать, и он телефон не покидает.
-            GaitAnalyzer.Summary walk = gait.snapshot();
+            // Время в пути пешком на отрезке — сколько занимает дорога от машины до
+            // двери. Никаких характеристик самой походки: они бы описывали состояние
+            // человека, а это специальная категория персональных данных.
             if (!walk.isEmpty()) {
-                payload.put("gait_bouts", walk.bouts);
-                payload.put("gait_walk_seconds", walk.walkSeconds);
-                payload.put("gait_cadence", walk.cadence);
-                payload.put("gait_step_cv", walk.stepCv);
-                payload.put("gait_regularity", walk.regularity);
-                payload.put("gait_impact", walk.impact);
+                payload.put("walk_bouts", walk.bouts());
+                payload.put("walk_seconds", walk.walkSeconds());
             }
 
             byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
@@ -417,7 +391,7 @@ public class LocationUploadService extends Service implements LocationListener, 
     /** Закрыт очередной адрес — начинаем новый отрезок пути с чистыми счётчиками. */
     private void startSegment(int index) {
         segmentIndex = index;
-        gait.resetSegment();
+        walk.resetSegment();
         samplesCount = 0;
         sensorSeconds = 0;
         harshAccelerationCount = 0;

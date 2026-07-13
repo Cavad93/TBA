@@ -12,7 +12,7 @@ from app.repositories import (
     UserBaselineRepository,
 )
 from app.services.baseline_service import Baseline, build_baseline
-from app.services.gait_service import day_gait_metrics
+from app.services.walk_service import day_walk_metrics
 
 # Смена, в которой человек не потратился на еду, — повод присмотреться:
 # больше шести часов работы без нормальной еды организм не прощает.
@@ -102,31 +102,27 @@ def build_closed_day_metrics(
         night = samples_repo.night_minutes(day.id)
         metrics["night_minutes"] = round(night, 1)
 
-    # --- восстановление ---
+    # --- режим труда ---
     #
-    # Сон, еда, кофе и самооценка — это данные о здоровье, спецкатегория по 152-ФЗ.
-    # Тумблер «Нагрузка» в настройках должен их именно НЕ СОБИРАТЬ, а не просто
-    # прятать индекс: выключенный переключатель, который всё равно всё пишет в базу, —
-    # это обман, и по закону, и по-человечески.
-    if _health_metrics_allowed(settings_repo):
-        # Походка — тоже спецкатегория, и даже строже: по её паттерну человека можно
-        # опознать. Собирается только с явного согласия, вместе с остальным состоянием.
+    # Здесь только факты о ГРАФИКЕ: перерыв между сменами, ночные часы, ответы об
+    # условиях труда, оценка загруженности смены. Прежние метрики — сон, кофеин,
+    # пропуск еды, самооценка усталости, манера ходьбы — удалены: из них выводилось
+    # состояние здоровья, а это специальная категория персональных данных
+    # (152-ФЗ, ст. 10). Тумблер по-прежнему может выключить и этот сбор.
+    if _workload_metrics_allowed(settings_repo):
         if segments_repo is not None:
-            metrics.update(day_gait_metrics(segments_repo, day.id))
+            metrics.update(day_walk_metrics(segments_repo, day.id))
 
-        if day.sleep_hours > 0:
-            metrics["sleep_hours"] = float(day.sleep_hours)
+        if day.break_hours_before > 0:
+            metrics["break_hours"] = float(day.break_hours_before)
+        metrics["break_interrupted"] = 0.0 if day.break_uninterrupted else 1.0
+
         if settings_repo is not None:
-            burnout = settings_repo.get_float("latest_cbi_score", 0)
-            if burnout > 0:
-                metrics["burnout_score"] = burnout
-        if data.self_rating > 0:
-            metrics["self_rating"] = float(data.self_rating)
-
-        metrics["coffee_units"] = float(data.coffee_units or 0)
-        metrics["drinks_units"] = float(data.drinks_units or 0)
-        metrics["meal_units"] = float(data.meal_units or 0)
-        metrics["meal_skipped"] = _meal_skipped(data)
+            survey = settings_repo.get_float("workload_survey_score", 0)
+            if survey > 0:
+                metrics["workload_survey_score"] = survey
+        if data.workload_rating > 0:
+            metrics["workload_rating"] = float(data.workload_rating)
 
     if driving_repo is not None:
         metrics.update(_driving_metrics(driving_repo, day.id, km))
@@ -134,10 +130,10 @@ def build_closed_day_metrics(
     return metrics
 
 
-def _health_metrics_allowed(settings_repo: SettingsRepository | None) -> bool:
+def _workload_metrics_allowed(settings_repo: SettingsRepository | None) -> bool:
     if settings_repo is None:
         return True
-    value = (settings_repo.get("fatigue_enabled", "true") or "true").strip().lower()
+    value = (settings_repo.get("workload_tracking_enabled", "true") or "true").strip().lower()
     return value in {"true", "1", "yes", "да", "on"}
 
 
@@ -177,12 +173,12 @@ def build_active_day_metrics(
         if walk > 0:
             metrics["walk_minutes"] = round(walk, 1)
 
-    if day.sleep_hours > 0:
-        metrics["sleep_hours"] = float(day.sleep_hours)
+    if day.break_hours_before > 0:
+        metrics["break_hours"] = float(day.break_hours_before)
     if settings_repo is not None:
-        burnout = settings_repo.get_float("latest_cbi_score", 0)
+        burnout = settings_repo.get_float("workload_survey_score", 0)
         if burnout > 0:
-            metrics["burnout_score"] = burnout
+            metrics["workload_survey_score"] = burnout
 
     return metrics
 
@@ -199,17 +195,11 @@ def _driving_metrics(driving_repo: DrivingBehaviorRepository, work_day_id: int, 
         metrics["hard_cornering_per_100km"] = round(row.hard_cornering_count * per_100, 1)
     if row.speed_variability_score > 0:
         metrics["speed_variability"] = round(row.speed_variability_score, 1)
-    if row.aggressive_score > 0:
-        # Метрика личная по определению: сравнивается не с «хорошим водителем»,
-        # а с тем, как этот человек ездит в обычный день.
-        metrics["driving_change"] = round(row.aggressive_score, 1)
+    # «Изменение характера вождения» как признак состояния больше не считается:
+    # показывать телематику можно, а выводить из неё утомляемость водителя — нет.
+    # Счётчики резких манёвров остаются: это стиль вождения, обычные данные.
     return metrics
 
-
-def _meal_skipped(data: EndDayData) -> float:
-    long_shift = float(data.total_work_minutes or 0) >= LONG_SHIFT_MINUTES
-    ate = float(data.meal_units or 0) > 0 or float(data.food_meal_expenses or 0) > 0
-    return 1.0 if long_shift and not ate else 0.0
 
 
 def _late_finish_minutes(day: WorkDay) -> float:

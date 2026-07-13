@@ -63,6 +63,7 @@ import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
@@ -127,13 +128,13 @@ import com.homevisit.location.domain.SettingType
 import com.homevisit.location.domain.SettingsSection
 import com.homevisit.location.domain.EndDayDetails
 import com.homevisit.location.domain.ExpenseCategory
-import com.homevisit.location.domain.FatigueCorrelationCell
-import com.homevisit.location.domain.FatigueCorrelationReport
-import com.homevisit.location.domain.FatigueSnapshot
-import com.homevisit.location.domain.FatigueTrendPoint
-import com.homevisit.location.domain.FatigueTrendReport
+import com.homevisit.location.domain.WorkloadCorrelationCell
+import com.homevisit.location.domain.WorkloadCorrelationReport
+import com.homevisit.location.domain.WorkloadSnapshot
+import com.homevisit.location.domain.WorkloadTrendPoint
+import com.homevisit.location.domain.WorkloadTrendReport
 import com.homevisit.location.domain.HomeRecommendation
-import com.homevisit.location.domain.HomeRecovery
+import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
@@ -150,7 +151,7 @@ import com.homevisit.location.domain.WorkDayStatus
 import com.homevisit.location.sync.SyncScheduler
 import com.homevisit.location.ui.AppSettingsUiState
 import com.homevisit.location.ui.CandidateUiState
-import com.homevisit.location.ui.FatigueUiState
+import com.homevisit.location.ui.WorkloadUiState
 import com.homevisit.location.ui.GpsEstimateUiState
 import com.homevisit.location.ui.GpsHintUiState
 import com.homevisit.location.ui.HomeUiState
@@ -286,7 +287,8 @@ internal fun recTone(tone: String): HomeVerdictStyle = when (tone) {
 
 internal fun recIcon(kind: String) = when (kind) {
     "recovery" -> Icons.Filled.Bolt
-    "fatigue" -> Icons.Filled.Bedtime
+    "pricing" -> Icons.Filled.Bolt
+    "workload" -> Icons.Filled.Schedule
     "streak" -> Icons.Filled.CheckCircle
     "planning" -> Icons.Filled.WbSunny
     else -> Icons.AutoMirrored.Filled.TrendingUp

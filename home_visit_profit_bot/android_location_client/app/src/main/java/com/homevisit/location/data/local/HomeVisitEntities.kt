@@ -18,8 +18,10 @@ data class WorkDayEntity(
     val finishAddress: String?,
     val startOdometer: Double,
     val endOdometer: Double?,
-    val sleepHours: Double,
-    val sleepQuality: Double,
+    // Сон убран: прямой физиологический показатель, из которого выводится состояние
+    // здоровья, — специальная категория ПДн (152-ФЗ). Перерыв между сменами вычисляется
+    // и является фактом о режиме труда.
+    val breakUninterrupted: Boolean,
     val breakHoursBefore: Double,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,

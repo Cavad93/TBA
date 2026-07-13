@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.db import connect
 from app.repositories import (
     DayMetricRepository,
-    FatigueFeedbackRepository,
+    WorkloadFeedbackRepository,
     UserBaselineRepository,
     WorkDayRepository,
 )
@@ -12,7 +12,7 @@ from app.services.feedback_policy_service import LEARNING_FEEDBACK_COUNT, should
 
 def _ask(connection, work_day_id: int, days_since_last: int | None = None):
     return should_ask_feedback(
-        feedback_repo=FatigueFeedbackRepository(connection),
+        feedback_repo=WorkloadFeedbackRepository(connection),
         metric_repo=DayMetricRepository(connection),
         baseline_repo=UserBaselineRepository(connection),
         work_day_id=work_day_id,
@@ -35,7 +35,7 @@ def test_goes_quiet_once_it_has_learned_enough(config) -> None:
     """Спрашивать каждый день вечно — верный способ получить ответы не глядя."""
     with connect(config) as connection:
         days = WorkDayRepository(connection)
-        feedback = FatigueFeedbackRepository(connection)
+        feedback = WorkloadFeedbackRepository(connection)
         day = days.create("start", "finish", 30, 20)
 
         for _ in range(LEARNING_FEEDBACK_COUNT):
@@ -49,7 +49,7 @@ def test_goes_quiet_once_it_has_learned_enough(config) -> None:
 def test_asks_again_on_an_anomalous_day(config) -> None:
     with connect(config) as connection:
         days = WorkDayRepository(connection)
-        feedback = FatigueFeedbackRepository(connection)
+        feedback = WorkloadFeedbackRepository(connection)
         metrics = DayMetricRepository(connection)
         baselines = UserBaselineRepository(connection)
 
@@ -71,7 +71,7 @@ def test_asks_again_on_an_anomalous_day(config) -> None:
 def test_asks_again_after_a_week_of_silence(config) -> None:
     with connect(config) as connection:
         days = WorkDayRepository(connection)
-        feedback = FatigueFeedbackRepository(connection)
+        feedback = WorkloadFeedbackRepository(connection)
         day = days.create("start", "finish", 30, 20)
 
         for _ in range(LEARNING_FEEDBACK_COUNT):
@@ -87,7 +87,7 @@ def test_thin_baseline_does_not_trigger_a_false_anomaly(config) -> None:
     """Норма из трёх смен — совпадение, а не норма: аномалию по ней объявлять нельзя."""
     with connect(config) as connection:
         days = WorkDayRepository(connection)
-        feedback = FatigueFeedbackRepository(connection)
+        feedback = WorkloadFeedbackRepository(connection)
         metrics = DayMetricRepository(connection)
         baselines = UserBaselineRepository(connection)
 

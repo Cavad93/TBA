@@ -44,7 +44,7 @@ def test_read_returns_defaults_on_empty_db(config) -> None:
 
     assert result["ok"] is True
     assert _field(result, "min_hourly_income")["value"] == 600
-    assert _field(result, "fatigue_enabled")["value"] is True
+    assert _field(result, "workload_tracking_enabled")["value"] is True
     # clinics/telemed_clinics сеедятся init_db из config.geo
     assert _field(result, "clinics")["value"] == SEEDED_CLINICS
     # Зоны обслуживания пользователь задаёт сам — никаких зашитых районов.
@@ -68,7 +68,7 @@ def test_update_writes_all_types_and_reads_back(config) -> None:
             {
                 "min_hourly_income": 750,
                 "fuel_price_per_liter": 62.5,
-                "fatigue_enabled": False,
+                "workload_tracking_enabled": False,
                 "default_start_address": "  Мой дом  ",
                 "base_zones": [
                     {"region": "Ленинградская область", "city": "Санкт-Петербург", "districts": ["Приморский"]},
@@ -81,14 +81,14 @@ def test_update_writes_all_types_and_reads_back(config) -> None:
     assert set(result["updated"]) == {
         "min_hourly_income",
         "fuel_price_per_liter",
-        "fatigue_enabled",
+        "workload_tracking_enabled",
         "default_start_address",
         "base_zones",
         "clinics",
     }
     assert _field(result, "min_hourly_income")["value"] == 750
     assert _field(result, "fuel_price_per_liter")["value"] == 62.5
-    assert _field(result, "fatigue_enabled")["value"] is False
+    assert _field(result, "workload_tracking_enabled")["value"] is False
     assert _field(result, "default_start_address")["value"] == "Мой дом"
     assert _field(result, "clinics")["value"] == ["ПСК", "ДНД", "Династия"]
 

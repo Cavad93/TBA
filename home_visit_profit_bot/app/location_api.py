@@ -18,7 +18,7 @@ from app.repositories import (
     DayMetricRepository,
     DrivingBehaviorRepository,
     DrivingSegmentRepository,
-    FatigueFeedbackRepository,
+    WorkloadFeedbackRepository,
     LocationEventRepository,
     LocationSampleRepository,
     SettingsRepository,
@@ -35,7 +35,7 @@ from app.services.feedback_policy_service import should_ask_feedback
 from app.services.home_service import HomeService
 from app.services.location_service import calculate_location_day_estimate, process_location_update
 from app.services.mobile_api_service import MobileApiService
-from app.services.mobile_fatigue_service import MobileFatigueService
+from app.services.mobile_workload_service import MobileWorkloadService
 from app.services.mobile_report_service import MobileReportService
 from app.services.mobile_visit_service import MobileVisitService, candidate_result_payload
 from app.services.profile_service import ProfileService
@@ -102,17 +102,17 @@ def _handler_factory(config: AppConfig):
             if path == "/api/reports/stats":
                 self._handle_report_stats()
                 return
-            if path == "/api/fatigue/summary":
-                self._handle_fatigue_summary()
+            if path == "/api/workload/summary":
+                self._handle_workload_summary()
                 return
-            if path == "/api/fatigue/corr":
-                self._handle_fatigue_correlation()
+            if path == "/api/workload/corr":
+                self._handle_workload_correlation()
                 return
-            if path == "/api/fatigue/trend":
-                self._handle_fatigue_trend()
+            if path == "/api/workload/trend":
+                self._handle_workload_trend()
                 return
-            if path == "/api/fatigue/cbi":
-                self._handle_fatigue_cbi_form()
+            if path == "/api/workload/survey":
+                self._handle_workload_survey_form()
                 return
             if path == "/api/settings":
                 self._handle_settings_read()
@@ -191,11 +191,11 @@ def _handler_factory(config: AppConfig):
             if path == "/api/route/reorder":
                 self._handle_route_reorder()
                 return
-            if path == "/api/fatigue/feedback":
-                self._handle_fatigue_feedback()
+            if path == "/api/workload/feedback":
+                self._handle_workload_feedback()
                 return
-            if path == "/api/fatigue/cbi":
-                self._handle_fatigue_cbi_save()
+            if path == "/api/workload/survey":
+                self._handle_workload_survey_save()
                 return
             if path == "/api/settings":
                 self._handle_settings_update()
@@ -340,8 +340,7 @@ def _handler_factory(config: AppConfig):
                     avg_speed=float(payload.get("avg_speed_kmh") or settings.get_float("default_avg_speed_kmh", config.defaults.avg_speed_kmh)),
                     service_minutes=float(payload.get("service_minutes") or settings.get_float("default_service_minutes", config.defaults.service_minutes)),
                     start_odometer=float(payload.get("start_odometer") or 0),
-                    sleep_hours=float(payload.get("sleep_hours") or 0),
-                    sleep_quality=float(payload.get("sleep_quality") or 0),
+                    break_uninterrupted=bool(payload.get("break_uninterrupted", True)),
                     break_hours_before=float(payload.get("break_hours_before") or 0),
                     route_time_factor=float(payload.get("route_time_factor") or settings.get_float("default_route_time_factor", config.defaults.route_time_factor)),
                 )
@@ -617,16 +616,16 @@ def _handler_factory(config: AppConfig):
                 return
             self._json_response(payload)
 
-        def _handle_fatigue_summary(self) -> None:
+        def _handle_workload_summary(self) -> None:
             if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             with connect(config) as connection:
-                payload = MobileFatigueService(connection).summary()
+                payload = MobileWorkloadService(connection).summary()
                 payload["ask_feedback"] = _feedback_ask(connection, payload.get("work_day_id"))
             self._json_response(payload)
 
-        def _handle_fatigue_correlation(self) -> None:
+        def _handle_workload_correlation(self) -> None:
             if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
@@ -634,13 +633,13 @@ def _handler_factory(config: AppConfig):
             try:
                 days = int((query.get("days") or ["28"])[0])
                 with connect(config) as connection:
-                    payload = MobileFatigueService(connection).correlation(days)
+                    payload = MobileWorkloadService(connection).correlation(days)
             except (TypeError, ValueError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
             self._json_response(payload)
 
-        def _handle_fatigue_trend(self) -> None:
+        def _handle_workload_trend(self) -> None:
             if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
@@ -648,34 +647,34 @@ def _handler_factory(config: AppConfig):
             try:
                 days = int((query.get("days") or ["30"])[0])
                 with connect(config) as connection:
-                    payload = MobileFatigueService(connection).trend(days)
+                    payload = MobileWorkloadService(connection).trend(days)
             except (TypeError, ValueError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
             self._json_response(payload)
 
-        def _handle_fatigue_cbi_form(self) -> None:
+        def _handle_workload_survey_form(self) -> None:
             if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             with connect(config) as connection:
-                payload = MobileFatigueService(connection).cbi_form()
+                payload = MobileWorkloadService(connection).survey_form()
             self._json_response(payload)
 
-        def _handle_fatigue_feedback(self) -> None:
+        def _handle_workload_feedback(self) -> None:
             if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
                 payload = self._read_json()
                 with connect(config) as connection:
-                    result = MobileFatigueService(connection).save_feedback(payload)
+                    result = MobileWorkloadService(connection).save_feedback(payload)
             except (TypeError, ValueError, json.JSONDecodeError, KeyError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
             self._json_response(result)
 
-        def _handle_fatigue_cbi_save(self) -> None:
+        def _handle_workload_survey_save(self) -> None:
             if not _authorize_request(self, config):
                 self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
@@ -683,7 +682,7 @@ def _handler_factory(config: AppConfig):
                 payload = self._read_json()
                 answers = list(payload.get("answers") or [])
                 with connect(config) as connection:
-                    result = MobileFatigueService(connection).save_cbi(answers)
+                    result = MobileWorkloadService(connection).save_survey(answers)
             except (TypeError, ValueError, json.JSONDecodeError) as error:
                 self._json_response({"error": "bad_request", "detail": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
@@ -813,7 +812,7 @@ def _feedback_ask(connection: Any, work_day_id: Any) -> dict[str, object]:
     if not work_day_id:
         return {"should_ask": False, "reason": "Смены нет.", "feedback_count": 0}
     ask = should_ask_feedback(
-        feedback_repo=FatigueFeedbackRepository(connection),
+        feedback_repo=WorkloadFeedbackRepository(connection),
         metric_repo=DayMetricRepository(connection),
         baseline_repo=UserBaselineRepository(connection),
         work_day_id=int(work_day_id),
@@ -824,7 +823,7 @@ def _feedback_ask(connection: Any, work_day_id: Any) -> dict[str, object]:
 
 def _days_since_last_feedback(connection: Any) -> int | None:
     row = connection.execute(
-        "SELECT created_at FROM fatigue_feedback ORDER BY id DESC LIMIT 1"
+        "SELECT created_at FROM workload_feedback ORDER BY id DESC LIMIT 1"
     ).fetchone()
     if not row or not row["created_at"]:
         return None

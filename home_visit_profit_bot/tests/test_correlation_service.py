@@ -5,7 +5,7 @@ from app.models import DailyStats
 from app.repositories import (
     DailyStatsRepository,
     DrivingBehaviorRepository,
-    FatigueFeedbackRepository,
+    WorkloadFeedbackRepository,
     SettingsRepository,
     WorkDayRepository,
 )
@@ -14,7 +14,7 @@ from app.services.correlation_service import (
     MAX_TOTAL_WEIGHT,
     apply_feedback_learning,
     build_correlation_report,
-    fatigue_learning_adjustment,
+    workload_learning_adjustment,
 )
 
 
@@ -24,7 +24,7 @@ def test_correlation_report_detects_driving_signal(config) -> None:
         stats = DailyStatsRepository(connection)
         driving = DrivingBehaviorRepository(connection)
         for index, score in enumerate((25, 45, 65, 85), start=1):
-            day = days.create("home", "home", 30, 20, sleep_hours=7, sleep_quality=4, break_hours_before=14)
+            day = days.create("home", "home", 30, 20, break_hours_before=14)
             stats.create(
                 day.id,
                 DailyStats(
@@ -39,13 +39,12 @@ def test_correlation_report_detects_driving_signal(config) -> None:
                     actual_km=100,
                     actual_avg_speed_kmh=50,
                     actual_service_minutes_per_visit=45,
-                    fatigue_score=score,
-                    recovery_debt=score / 2,
+                    workload_index=score,
+                    overwork_index=score / 2,
                     food_meal_expenses=index * 100,
                     coffee_expenses=index * 50,
                     drinks_expenses=index * 20,
-                    food_expenses=index * 170,
-                    sleep_hours=8 - index * 0.5,
+                    food_expenses=index * 170 - index * 0.5,
                 ),
             )
             driving.upsert(
@@ -65,7 +64,7 @@ def test_correlation_report_detects_driving_signal(config) -> None:
 
         report = build_correlation_report(driving, 28)
 
-    cell = next(cell for cell in report.cells if cell.target == "fatigue_score" and cell.feature == "aggressive_score")
+    cell = next(cell for cell in report.cells if cell.target == "workload_index" and cell.feature == "aggressive_score")
     assert cell.n == 4
     assert cell.pearson is not None
     assert cell.pearson > 0.95
@@ -77,10 +76,10 @@ def test_learning_weights_are_clamped_and_adjustment_is_limited(config) -> None:
         stats = DailyStatsRepository(connection)
         driving = DrivingBehaviorRepository(connection)
         settings = SettingsRepository(connection)
-        feedback = FatigueFeedbackRepository(connection)
+        feedback = WorkloadFeedbackRepository(connection)
         day_ids = []
         for _ in range(5):
-            day = days.create("home", "home", 30, 20, sleep_hours=5, sleep_quality=2, break_hours_before=8)
+            day = days.create("home", "home", 30, 20, break_hours_before=8)
             day_ids.append(day.id)
             stats.create(
                 day.id,
@@ -96,10 +95,9 @@ def test_learning_weights_are_clamped_and_adjustment_is_limited(config) -> None:
                     actual_km=80,
                     actual_avg_speed_kmh=30,
                     actual_service_minutes_per_visit=35,
-                    fatigue_score=45,
+                    workload_index=45,
                     food_expenses=1200,
                     coffee_expenses=500,
-                    sleep_hours=5,
                 ),
             )
             driving.upsert(
@@ -129,7 +127,7 @@ def test_learning_weights_are_clamped_and_adjustment_is_limited(config) -> None:
             feedback_repo=feedback,
             stats_row=stats.get_by_day(latest_day_id),
         )
-        adjustment = fatigue_learning_adjustment(
+        adjustment = workload_learning_adjustment(
             work_day_id=latest_day_id,
             settings_repo=settings,
             driving_repo=driving,

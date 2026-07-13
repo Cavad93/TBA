@@ -47,9 +47,8 @@ class WorkDay:
     fuel_liters: float = 0.0
     odometer_km: float = 0.0
     personal_km: float = 0.0
-    sleep_hours: float = 0.0
-    sleep_quality: float = 0.0
     break_hours_before: float = 0.0
+    break_uninterrupted: bool = True
 
 
 @dataclass(frozen=True)
@@ -149,22 +148,22 @@ class CandidateCalculation:
     required_extra_for_outside_zone: float = 0.0
     target_day_hourly: float = 0.0
     target_marginal_hourly: float = 0.0
-    fatigue_score_before: float = 0.0
-    fatigue_score_after: float = 0.0
-    fatigue_weekly_average: float = 0.0
-    fatigue_level: str = ""
-    fatigue_reason: str = ""
-    recovery_debt_before: float = 0.0
-    recovery_debt_after: float = 0.0
-    circadian_risk_minutes: float = 0.0
-    burnout_score: float = 0.0
+    workload_index_before: float = 0.0
+    workload_index_after: float = 0.0
+    workload_weekly_average: float = 0.0
+    workload_level: str = ""
+    pricing_reason: str = ""
+    overwork_index_before: float = 0.0
+    overwork_index_after: float = 0.0
+    night_work_minutes: float = 0.0
+    workload_survey_score: float = 0.0
     # Состояние поднимает МИНИМАЛЬНЫЙ ТАРИФ, а не добавляет отдельную надбавку.
     # Прежнее поле fatigue_extra_payment считалось на сервере, доезжало до телефона и
     # нигде не показывалось; складывать его с поднятым порогом значило бы взять
     # наценку дважды.
     base_min_hourly: float = 0.0
     effective_min_hourly: float = 0.0
-    recovery_markup_percent: float = 0.0
+    overwork_markup_percent: float = 0.0
     recovery_blocks_outside_zone: bool = False
 
 
@@ -195,14 +194,14 @@ class EndDayData:
     parking_compensation: float = 0.0
     toll_expenses: float = 0.0
     toll_compensation: float = 0.0
-    # Штуки, а не рубли: 300 ₽ — это одна чашка в аэропорту или три в ларьке,
-    # а на восстановление влияет именно количество кофеина, а не сумма чека.
-    coffee_units: float = 0.0
-    drinks_units: float = 0.0
-    meal_units: float = 0.0
-    # Самооценка усталости 1–10. Она же — обратная связь: сравнивая её с нашей
-    # оценкой, система учится на конкретном человеке.
-    self_rating: float = 0.0
+    # Еда и питьё учитываются ТОЛЬКО как расходы в рублях. Количество чашек кофе —
+    # это физиологический вход, из которого выводится состояние человека, а значит
+    # специальная категория персональных данных (152-ФЗ, ст. 10). Точность оценки от
+    # этого падает, зато обработка остаётся в рамках обычных данных.
+    #
+    # Загруженность смены 1–10 — оценка УСЛОВИЙ ТРУДА, а не самочувствия. Она же
+    # обратная связь: сравнивая её с нашей, система подстраивается под человека.
+    workload_rating: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -248,17 +247,16 @@ class DailyStats:
     toll_expenses: float = 0.0
     toll_compensation: float = 0.0
     other_expenses: float = 0.0
-    fatigue_score: float = 0.0
-    fatigue_weekly_average: float = 0.0
-    fatigue_long_stop_count: int = 0
-    fatigue_pause_minutes: float = 0.0
-    fatigue_heavy_visit_count: int = 0
-    recovery_debt: float = 0.0
-    sleep_hours: float = 0.0
-    sleep_quality: float = 0.0
+    workload_index: float = 0.0
+    workload_weekly_average: float = 0.0
+    long_stop_count: int = 0
+    pause_minutes: float = 0.0
+    heavy_visit_count: int = 0
+    overwork_index: float = 0.0
     break_hours_before: float = 0.0
-    circadian_risk_minutes: float = 0.0
-    burnout_score: float = 0.0
+    break_uninterrupted: bool = True
+    night_work_minutes: float = 0.0
+    workload_survey_score: float = 0.0
 
 
 @dataclass(frozen=True)

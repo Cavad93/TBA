@@ -15,7 +15,7 @@ from app.repositories import (
 )
 from app.services.cleanup_service import cleanup
 from app.services.day_metrics_service import build_closed_day_metrics, load_baselines, persist_day_metrics
-from app.services.fatigue_service import estimate_active_day_fatigue, stop_complexity_for_day
+from app.services.workload_service import estimate_active_day_workload, stop_complexity_for_day
 from app.services.gps_metrics_service import collect as collect_gps_metrics
 from app.services.indices_service import economy_index
 from app.services.optimization_service import optimize_route
@@ -27,7 +27,7 @@ MIN_ROUTE_TIME_FACTOR = 0.5
 MAX_ROUTE_TIME_FACTOR = 3.0
 
 
-def _save_self_rating_feedback(connection, work_day_id: int, self_rating: float, predicted_score: float) -> None:
+def _save_workload_rating_feedback(connection, work_day_id: int, workload_rating: float, predicted_score: float) -> None:
     """Самооценка 1–10 — это и есть обратная связь, просто заданная по-человечески.
 
     Спрашивать «согласен ли ты с оценкой 63 из 100» неестественно; спрашивать «на
@@ -35,20 +35,20 @@ def _save_self_rating_feedback(connection, work_day_id: int, self_rating: float,
     кладём туда же, откуда учится модель: пользователь отвечает на понятный вопрос,
     а система получает ровно тот сигнал, который ей нужен.
     """
-    if self_rating <= 0:
+    if workload_rating <= 0:
         return
-    from app.repositories import FatigueFeedbackRepository
+    from app.repositories import WorkloadFeedbackRepository
     from app.services.correlation_service import apply_feedback_learning
 
     # apply_feedback_learning сама записывает отклик — отдельный add() дал бы дубль.
     apply_feedback_learning(
         work_day_id=work_day_id,
         predicted_score=predicted_score,
-        user_score=max(0.0, min(100.0, self_rating * 10)),
-        feedback_type="self_rating",
+        user_score=max(0.0, min(100.0, workload_rating * 10)),
+        feedback_type="workload_rating",
         settings_repo=SettingsRepository(connection),
         driving_repo=DrivingBehaviorRepository(connection),
-        feedback_repo=FatigueFeedbackRepository(connection),
+        feedback_repo=WorkloadFeedbackRepository(connection),
     )
 
 
@@ -155,7 +155,7 @@ def finalize_day(
     if gps.route_error_km > 0:
         metrics["route_error_km"] = gps.route_error_km
 
-    fatigue = estimate_active_day_fatigue(
+    workload = estimate_active_day_workload(
         day=day,
         visits=completed_visits,
         settings_repo=settings_repo,
@@ -165,24 +165,25 @@ def finalize_day(
         route_minutes=route_minutes,
         metrics=metrics,
         learning_stats_row={
+            # Обучение смотрит только на режим труда: часы, адреса, километры, ночь,
+            # перерыв между сменами. Кофеин и сон из него убраны — из них выводилось
+            # состояние здоровья.
             "actual_km": data.actual_km,
+            "completed_visits_count": data.completed_visits_count,
             "total_work_minutes": total_work_minutes,
-            "food_expenses": food_expenses_total,
-            "food_meal_expenses": data.food_meal_expenses,
-            "coffee_expenses": data.coffee_expenses,
-            "drinks_expenses": data.drinks_expenses,
-            "sleep_hours": day.sleep_hours,
+            "night_work_minutes": 0.0,
+            "break_hours_before": day.break_hours_before,
         },
     )
 
     economy = economy_index(metrics, baselines)
     metrics["economy_index"] = economy.score
-    metrics["load_index"] = fatigue.score
-    metrics["recovery_debt"] = fatigue.recovery_debt
+    metrics["load_index"] = workload.score
+    metrics["overwork_index"] = workload.overwork_index
     persist_day_metrics(metric_repo, baseline_repo, work_day_id=day.id, date=day.date, metrics=metrics)
     # Самооценка — тоже данные о самочувствии: при выключенном тумблере не сохраняем.
-    if "self_rating" in metrics:
-        _save_self_rating_feedback(connection, day.id, data.self_rating, fatigue.score)
+    if "workload_rating" in metrics:
+        _save_workload_rating_feedback(connection, day.id, data.workload_rating, workload.score)
 
     stats = DailyStats(
         completed_visits_count=data.completed_visits_count,
@@ -226,17 +227,16 @@ def finalize_day(
         drinks_expenses=data.drinks_expenses,
         toll_expenses=data.toll_expenses,
         other_expenses=data.other_expenses,
-        fatigue_score=fatigue.score,
-        fatigue_weekly_average=fatigue.weekly_average,
-        fatigue_long_stop_count=fatigue.long_stop_count,
-        fatigue_pause_minutes=fatigue.pause_minutes,
-        fatigue_heavy_visit_count=fatigue.heavy_visit_count,
-        recovery_debt=fatigue.recovery_debt,
-        sleep_hours=day.sleep_hours,
-        sleep_quality=day.sleep_quality,
+        workload_index=workload.score,
+        workload_weekly_average=workload.weekly_average,
+        long_stop_count=workload.long_stop_count,
+        pause_minutes=workload.pause_minutes,
+        heavy_visit_count=workload.heavy_visit_count,
+        overwork_index=workload.overwork_index,
         break_hours_before=day.break_hours_before,
-        circadian_risk_minutes=fatigue.circadian_risk_minutes,
-        burnout_score=fatigue.burnout_score,
+        break_uninterrupted=day.break_uninterrupted,
+        night_work_minutes=workload.night_work_minutes,
+        workload_survey_score=workload.workload_survey_score,
     )
     day_repo.close(
         day.id,

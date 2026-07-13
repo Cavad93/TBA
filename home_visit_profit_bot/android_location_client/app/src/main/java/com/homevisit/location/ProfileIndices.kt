@@ -63,7 +63,6 @@ import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.DirectionsWalk
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
@@ -128,13 +127,13 @@ import com.homevisit.location.domain.SettingType
 import com.homevisit.location.domain.SettingsSection
 import com.homevisit.location.domain.EndDayDetails
 import com.homevisit.location.domain.ExpenseCategory
-import com.homevisit.location.domain.FatigueCorrelationCell
-import com.homevisit.location.domain.FatigueCorrelationReport
-import com.homevisit.location.domain.FatigueSnapshot
-import com.homevisit.location.domain.FatigueTrendPoint
-import com.homevisit.location.domain.FatigueTrendReport
+import com.homevisit.location.domain.WorkloadCorrelationCell
+import com.homevisit.location.domain.WorkloadCorrelationReport
+import com.homevisit.location.domain.WorkloadSnapshot
+import com.homevisit.location.domain.WorkloadTrendPoint
+import com.homevisit.location.domain.WorkloadTrendReport
 import com.homevisit.location.domain.HomeRecommendation
-import com.homevisit.location.domain.HomeRecovery
+import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
@@ -151,7 +150,7 @@ import com.homevisit.location.domain.WorkDayStatus
 import com.homevisit.location.sync.SyncScheduler
 import com.homevisit.location.ui.AppSettingsUiState
 import com.homevisit.location.ui.CandidateUiState
-import com.homevisit.location.ui.FatigueUiState
+import com.homevisit.location.ui.WorkloadUiState
 import com.homevisit.location.ui.GpsEstimateUiState
 import com.homevisit.location.ui.GpsHintUiState
 import com.homevisit.location.ui.HomeUiState
@@ -171,8 +170,7 @@ import androidx.compose.ui.unit.sp
 import com.homevisit.location.domain.DrivingWithinDay
 import com.homevisit.location.domain.IndexCard
 import com.homevisit.location.domain.IndexReason
-import com.homevisit.location.domain.ProfileGait
-import com.homevisit.location.domain.RecoveryPricing
+import com.homevisit.location.domain.OverworkPricing
 import kotlin.math.roundToInt
 
 
@@ -207,7 +205,7 @@ internal fun IndicesNotReadyCard(needMoreShifts: Int) {
 
 /** Ради этой карточки всё и считалось: индекс, который не меняет решение, — украшение. */
 @Composable
-internal fun PricingCard(pricing: RecoveryPricing) {
+internal fun PricingCard(pricing: OverworkPricing) {
     val style = homeVerdictStyle(if (pricing.blocksOutsideZone) "skip" else "edge")
     Card(
         shape = RoundedCornerShape(20.dp),
@@ -371,54 +369,3 @@ private fun shiftWord(count: Int): String {
     }
 }
 
-/**
- * Походка — по акселерометру, только во время ходьбы.
- *
- * Для усталости это более прямой сигнал, чем стиль вождения: там между телом и датчиком
- * стоит машина, здесь — ничего. Уставший человек идёт медленнее, но главное — неровнее:
- * разброс времени между шагами растёт.
- */
-@Composable
-internal fun GaitCard(gait: ProfileGait) {
-    Card(
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Icon(
-                    Icons.Filled.DirectionsWalk,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp),
-                )
-                Column {
-                    Text("Походка", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "${gait.walkMinutes.roundToInt()} мин пешком за смену",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            MetricLine(
-                "Темп",
-                "${gait.cadence.roundToInt()} шаг/мин",
-                MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // Главный маркер: у отдохнувшего человека шаг ровный, у вымотанного «плавает».
-            MetricLine(
-                "Разброс шага",
-                "${oneDecimal(gait.stepCv)}%",
-                if (gait.stepCv > 6) VerdictColors.edge else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            MetricBar(
-                "Ровность шага",
-                "${(gait.regularity * 100).roundToInt()}%",
-                gait.regularity.toFloat(),
-                VerdictColors.go,
-            )
-        }
-    }
-}

@@ -76,8 +76,6 @@ def test_mobile_sync_saves_work_items_and_aggregates(config) -> None:
                     "start_address": "Дом",
                     "finish_address": "Финиш",
                     "start_odometer": 1000,
-                    "sleep_hours": 6.5,
-                    "sleep_quality": 4,
                     "break_hours_before": 12,
                 },
             )
@@ -154,8 +152,8 @@ def test_mobile_sync_saves_work_items_and_aggregates(config) -> None:
     assert day.start_address == "Дом"
     assert day.finish_address == "Финиш"
     assert day.start_odometer == 1000
-    assert day.sleep_hours == 6.5
-    assert day.sleep_quality == 4
+    assert day.break_uninterrupted is True
+    assert day.break_hours_before >= 0
     assert day.break_hours_before == 12
     # Работа на точке теперь тоже заказ в Ленте (kind='onsite'), а не агрегат дня:
     # выездной заказ + точка = два визита, доход точки приходит через визит,
@@ -230,7 +228,7 @@ def test_mobile_sync_closes_day_with_end_odometer(config) -> None:
     assert day.odometer_km == 88
 
 
-def test_mobile_sync_full_day_close_creates_stats_and_fatigue_feedback(config) -> None:
+def test_mobile_sync_full_day_close_creates_stats_and_workload_feedback(config) -> None:
 
     with connect(config) as connection:
         service = MobileApiService(connection)
@@ -245,8 +243,6 @@ def test_mobile_sync_full_day_close_creates_stats_and_fatigue_feedback(config) -
                     "start_address": "Дом",
                     "finish_address": "Дом",
                     "start_odometer": 1000,
-                    "sleep_hours": 6,
-                    "sleep_quality": 3,
                 },
             )
         )
@@ -292,13 +288,13 @@ def test_mobile_sync_full_day_close_creates_stats_and_fatigue_feedback(config) -
                     "toll_expenses": 200,
                     "toll_compensation": 50,
                     "other_expenses": 300,
-                    "user_fatigue_score": 72,
+                    "user_workload_index": 72,
                 },
             )
         )
         day = WorkDayRepository(connection).get(1)
         stats = connection.execute("SELECT * FROM daily_stats WHERE work_day_id = 1").fetchone()
-        feedback = connection.execute("SELECT * FROM fatigue_feedback WHERE work_day_id = 1").fetchone()
+        feedback = connection.execute("SELECT * FROM workload_feedback WHERE work_day_id = 1").fetchone()
 
     assert day.status == "closed"
     assert day.actual_km == 40

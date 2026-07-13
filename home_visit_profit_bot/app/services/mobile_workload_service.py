@@ -6,31 +6,43 @@ import json
 
 
 from app.repositories import (
-    BurnoutSurveyRepository,
+    WorkloadSurveyRepository,
     DailyStatsRepository,
     DrivingBehaviorRepository,
-    FatigueFeedbackRepository,
+    WorkloadFeedbackRepository,
     LocationEventRepository,
     SettingsRepository,
     VisitRepository,
     WorkDayRepository,
 )
 from app.services.correlation_service import CorrelationCell, apply_feedback_learning, build_correlation_report
-from app.services.fatigue_service import estimate_active_day_fatigue, fatigue_level
+from app.services.workload_service import estimate_active_day_workload, workload_level
 
 
-CBI_QUESTIONS = [
-    "Физическое истощение за последнюю неделю?",
-    "Было трудно восстановиться после рабочего дня?",
-    "Работа эмоционально выматывала?",
-    "Раздражали клиенты, компании или организация процесса?",
-    "Хотелось избегать новых заказов?",
-    "Было ощущение, что работа забирает слишком много сил?",
-    "Было ощущение, что в таком темпе сложно продолжать ещё неделю?",
+# Опрос об УСЛОВИЯХ ТРУДА, а не о самочувствии.
+#
+# Прежние вопросы («физическое истощение», «эмоционально выматывала», «трудно
+# восстановиться») спрашивали о состоянии человека — а сведения о состоянии здоровья
+# это специальная категория персональных данных (152-ФЗ, ст. 10), для которой нужно
+# отдельное письменное согласие и которая привлекает проверку.
+#
+# Новые вопросы спрашивают ровно о том же, что нам нужно для расчёта — о РЕЖИМЕ И
+# ОРГАНИЗАЦИИ ТРУДА: объём задач, сверхурочные, простои, равномерность нагрузки.
+# Перегрузка задачами и работа сверхурочно — это параметры трудового процесса
+# (ТК РФ), а не медицины.
+WORKLOAD_QUESTIONS = [
+    "Как часто за неделю вы сталкивались с избыточным объёмом задач?",
+    "Как часто приходилось работать сверхурочно?",
+    "Как часто заказы шли подряд без перерывов между ними?",
+    "Как часто нагрузка была распределена неравномерно внутри смены?",
+    "Как часто организация процесса у компаний создавала простои и задержки?",
+    "Как часто приходилось работать в ночные часы?",
+    "Как часто график не позволял планировать перерывы заранее?",
 ]
 
 
-class MobileFatigueService:
+
+class MobileWorkloadService:
     def __init__(self, connection: Database):
         self.connection = connection
         self.days = WorkDayRepository(connection)
@@ -38,14 +50,14 @@ class MobileFatigueService:
         self.settings = SettingsRepository(connection)
         self.stats = DailyStatsRepository(connection)
         self.driving = DrivingBehaviorRepository(connection)
-        self.feedback = FatigueFeedbackRepository(connection)
-        self.burnout = BurnoutSurveyRepository(connection)
+        self.feedback = WorkloadFeedbackRepository(connection)
+        self.burnout = WorkloadSurveyRepository(connection)
 
     def summary(self) -> dict[str, Any]:
         active = self.days.active()
         if active is not None:
             visits = [visit for visit in self.visits.list_for_day(active.id) if visit.status in {"accepted", "completed"}]
-            estimate = estimate_active_day_fatigue(
+            estimate = estimate_active_day_workload(
                 day=active,
                 visits=visits,
                 settings_repo=self.settings,
@@ -60,19 +72,18 @@ class MobileFatigueService:
                 "summary": {
                     "score": estimate.score,
                     "weekly_average": estimate.weekly_average,
-                    "recovery_debt": estimate.recovery_debt,
+                    "overwork_index": estimate.overwork_index,
                     "level": estimate.level,
                     "long_stop_count": estimate.long_stop_count,
                     "pause_minutes": estimate.pause_minutes,
                     "heavy_visit_count": estimate.heavy_visit_count,
-                    "circadian_risk_minutes": estimate.circadian_risk_minutes,
-                    "burnout_score": estimate.burnout_score,
-                    "sleep_hours": active.sleep_hours,
-                    "sleep_quality": active.sleep_quality,
+                    "night_work_minutes": estimate.night_work_minutes,
+                    "workload_survey_score": estimate.workload_survey_score,
                     "break_hours_before": active.break_hours_before,
+                    "break_uninterrupted": active.break_uninterrupted,
                 },
                 "latest_feedback": None,
-                "cbi": self._cbi_payload(),
+                "survey": self._survey_payload(),
             }
 
         closed = self.days.latest_closed()
@@ -84,7 +95,7 @@ class MobileFatigueService:
                 "date": None,
                 "summary": None,
                 "latest_feedback": None,
-                "cbi": self._cbi_payload(),
+                "survey": self._survey_payload(),
             }
         stats_row = self.stats.get_by_day(closed.id)
         if stats_row is None:
@@ -95,9 +106,9 @@ class MobileFatigueService:
                 "date": closed.date,
                 "summary": None,
                 "latest_feedback": self._feedback_payload(closed.id),
-                "cbi": self._cbi_payload(),
+                "survey": self._survey_payload(),
             }
-        score = float(stats_row["fatigue_score"] or 0)
+        score = float(stats_row["workload_index"] or 0)
         return {
             "ok": True,
             "source": "latest_closed",
@@ -105,20 +116,19 @@ class MobileFatigueService:
             "date": closed.date,
             "summary": {
                 "score": score,
-                "weekly_average": float(stats_row["fatigue_weekly_average"] or 0),
-                "recovery_debt": float(stats_row["recovery_debt"] or 0),
-                "level": fatigue_level(score),
-                "long_stop_count": int(stats_row["fatigue_long_stop_count"] or 0),
-                "pause_minutes": float(stats_row["fatigue_pause_minutes"] or 0),
-                "heavy_visit_count": int(stats_row["fatigue_heavy_visit_count"] or 0),
-                "circadian_risk_minutes": float(stats_row["circadian_risk_minutes"] or 0),
-                "burnout_score": float(stats_row["burnout_score"] or 0),
-                "sleep_hours": float(stats_row["sleep_hours"] or 0),
-                "sleep_quality": float(stats_row["sleep_quality"] or 0),
+                "weekly_average": float(stats_row["workload_weekly_average"] or 0),
+                "overwork_index": float(stats_row["overwork_index"] or 0),
+                "level": workload_level(score),
+                "long_stop_count": int(stats_row["long_stop_count"] or 0),
+                "pause_minutes": float(stats_row["pause_minutes"] or 0),
+                "heavy_visit_count": int(stats_row["heavy_visit_count"] or 0),
+                "night_work_minutes": float(stats_row["night_work_minutes"] or 0),
+                "workload_survey_score": float(stats_row["workload_survey_score"] or 0),
                 "break_hours_before": float(stats_row["break_hours_before"] or 0),
+                "break_uninterrupted": bool(stats_row["break_uninterrupted"]),
             },
             "latest_feedback": self._feedback_payload(closed.id),
-            "cbi": self._cbi_payload(),
+            "survey": self._survey_payload(),
         }
 
     def correlation(self, days: int) -> dict[str, Any]:
@@ -138,9 +148,9 @@ class MobileFatigueService:
         points = [
             {
                 "date": str(row["date"] or ""),
-                "score": float(row["fatigue_score"] or 0),
-                "weekly_average": float(row["fatigue_weekly_average"] or 0),
-                "recovery_debt": float(row["recovery_debt"] or 0),
+                "score": float(row["workload_index"] or 0),
+                "weekly_average": float(row["workload_weekly_average"] or 0),
+                "overwork_index": float(row["overwork_index"] or 0),
             }
             for row in reversed(rows)  # last() отдаёт по убыванию, разворачиваем в хронологию
         ]
@@ -152,7 +162,7 @@ class MobileFatigueService:
         if day is None:
             return {"ok": False, "reason": "no_closed_day"}
         stats_row = self.stats.get_by_day(day.id)
-        predicted = float(stats_row["fatigue_score"] or 0) if stats_row is not None else float(payload.get("predicted_score") or 0)
+        predicted = float(stats_row["workload_index"] or 0) if stats_row is not None else float(payload.get("predicted_score") or 0)
         action = str(payload.get("action") or "manual").strip().lower()
         if action == "agree":
             user_score = predicted
@@ -186,38 +196,38 @@ class MobileFatigueService:
             "weights": weights,
         }
 
-    def save_cbi(self, answers: list[Any]) -> dict[str, Any]:
-        if len(answers) != len(CBI_QUESTIONS):
-            raise ValueError(f"answers must contain {len(CBI_QUESTIONS)} values")
+    def save_survey(self, answers: list[Any]) -> dict[str, Any]:
+        if len(answers) != len(WORKLOAD_QUESTIONS):
+            raise ValueError(f"answers must contain {len(WORKLOAD_QUESTIONS)} values")
         values = [int(value) for value in answers]
         if any(value < 0 or value > 4 for value in values):
-            raise ValueError("CBI answers must be from 0 to 4")
+            raise ValueError("Survey answers must be from 0 to 4")
         score = round(sum(values) / (4 * len(values)) * 100, 1)
         self.burnout.add(score, json.dumps(values, ensure_ascii=False))
-        self.settings.set("latest_cbi_score", str(score))
+        self.settings.set("workload_survey_score", str(score))
         row = self.burnout.latest()
         if row is not None:
-            self.settings.set("latest_cbi_date", str(row["date"]))
+            self.settings.set("workload_survey_date", str(row["date"]))
         return {
             "ok": True,
-            "reason": "cbi_saved",
+            "reason": "survey_saved",
             "score": score,
-            "level": _burnout_level(score),
-            "cbi": self._cbi_payload(),
+            "level": _workload_survey_level(score),
+            "survey": self._survey_payload(),
         }
 
-    def cbi_form(self) -> dict[str, Any]:
-        return {"ok": True, "cbi": self._cbi_payload()}
+    def survey_form(self) -> dict[str, Any]:
+        return {"ok": True, "survey": self._survey_payload()}
 
-    def _cbi_payload(self) -> dict[str, Any]:
+    def _survey_payload(self) -> dict[str, Any]:
         latest = self.burnout.latest()
-        score = float(latest["score"] or 0) if latest is not None else self.settings.get_float("latest_cbi_score", 0)
-        date = str(latest["date"]) if latest is not None else self.settings.get("latest_cbi_date", "")
+        score = float(latest["score"] or 0) if latest is not None else self.settings.get_float("workload_survey_score", 0)
+        date = str(latest["date"]) if latest is not None else self.settings.get("workload_survey_date", "")
         return {
-            "questions": CBI_QUESTIONS,
+            "questions": WORKLOAD_QUESTIONS,
             "latest_score": score,
             "latest_date": date,
-            "level": _burnout_level(score),
+            "level": _workload_survey_level(score),
         }
 
     def _feedback_payload(self, work_day_id: int) -> dict[str, Any] | None:
@@ -253,11 +263,14 @@ def _score_float(value: Any) -> float:
     return score
 
 
-def _burnout_level(score: float) -> str:
+def _workload_survey_level(score: float) -> str:
+    """Уровень по опросу об условиях труда — о ГРАФИКЕ, а не о человеке."""
     if score >= 75:
-        return "высокий риск"
+        return "график перегружен"
     if score >= 50:
-        return "умеренный риск"
+        return "график плотный"
     if score >= 25:
-        return "лёгкий риск"
-    return "низкий риск"
+        return "график умеренный"
+    return "график в норме"
+
+

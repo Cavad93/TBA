@@ -130,13 +130,13 @@ import com.homevisit.location.domain.SettingType
 import com.homevisit.location.domain.SettingsSection
 import com.homevisit.location.domain.EndDayDetails
 import com.homevisit.location.domain.ExpenseCategory
-import com.homevisit.location.domain.FatigueCorrelationCell
-import com.homevisit.location.domain.FatigueCorrelationReport
-import com.homevisit.location.domain.FatigueSnapshot
-import com.homevisit.location.domain.FatigueTrendPoint
-import com.homevisit.location.domain.FatigueTrendReport
+import com.homevisit.location.domain.WorkloadCorrelationCell
+import com.homevisit.location.domain.WorkloadCorrelationReport
+import com.homevisit.location.domain.WorkloadSnapshot
+import com.homevisit.location.domain.WorkloadTrendPoint
+import com.homevisit.location.domain.WorkloadTrendReport
 import com.homevisit.location.domain.HomeRecommendation
-import com.homevisit.location.domain.HomeRecovery
+import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
@@ -153,7 +153,7 @@ import com.homevisit.location.domain.WorkDayStatus
 import com.homevisit.location.sync.SyncScheduler
 import com.homevisit.location.ui.AppSettingsUiState
 import com.homevisit.location.ui.CandidateUiState
-import com.homevisit.location.ui.FatigueUiState
+import com.homevisit.location.ui.WorkloadUiState
 import com.homevisit.location.ui.GpsEstimateUiState
 import com.homevisit.location.ui.GpsHintUiState
 import com.homevisit.location.ui.HomeUiState
@@ -241,11 +241,11 @@ class MainActivity : ComponentActivity() {
                     onRefreshGpsEstimate = viewModel::refreshGpsEstimate,
                     onRefreshActiveReport = viewModel::refreshActiveReport,
                     onRefreshStatsReport = viewModel::refreshStatsReport,
-                    onRefreshFatigue = viewModel::refreshFatigue,
-                    onSubmitFatigueFeedback = viewModel::submitFatigueFeedback,
-                    onRefreshFatigueCorrelation = viewModel::refreshFatigueCorrelation,
-                    onRefreshFatigueTrend = viewModel::refreshFatigueTrend,
-                    onSubmitCbi = viewModel::submitCbi,
+                    onRefreshWorkload = viewModel::refreshWorkload,
+                    onSubmitWorkloadFeedback = viewModel::submitWorkloadFeedback,
+                    onRefreshWorkloadCorrelation = viewModel::refreshWorkloadCorrelation,
+                    onRefreshWorkloadTrend = viewModel::refreshWorkloadTrend,
+                    onSubmitSurvey = viewModel::submitSurvey,
                     onExportBackup = viewModel::exportBackup,
                     onBackupExportHandled = viewModel::clearBackupExport,
                     onRefreshSyncConflicts = viewModel::refreshSyncConflicts,
@@ -436,8 +436,8 @@ internal enum class ReportMode(val title: String) {
 
 internal data class WorkActions(
     val onStartDay: () -> Unit,
-    val onStartDayDetails: (String, String, Double, Double, Double, Double) -> Unit,
-    val onStartShift: (Double, Double, Double, Double) -> Unit,
+    val onStartDayDetails: (String, String, Double, Boolean, Double) -> Unit,
+    val onStartShift: (Double, Boolean, Double) -> Unit,
     val onRefreshHome: () -> Unit,
     val onRefreshShift: (String) -> Unit,
     val onRefreshProfile: () -> Unit,
@@ -460,11 +460,11 @@ internal data class WorkActions(
     val onRefreshGpsEstimate: () -> Unit,
     val onRefreshActiveReport: (String?) -> Unit,
     val onRefreshStatsReport: (ReportPeriod, String?) -> Unit,
-    val onRefreshFatigue: () -> Unit,
-    val onSubmitFatigueFeedback: (String, Double?) -> Unit,
-    val onRefreshFatigueCorrelation: (Int) -> Unit,
-    val onRefreshFatigueTrend: (Int) -> Unit,
-    val onSubmitCbi: (List<Int>) -> Unit,
+    val onRefreshWorkload: () -> Unit,
+    val onSubmitWorkloadFeedback: (String, Double?) -> Unit,
+    val onRefreshWorkloadCorrelation: (Int) -> Unit,
+    val onRefreshWorkloadTrend: (Int) -> Unit,
+    val onSubmitSurvey: (List<Int>) -> Unit,
     val onExportBackup: () -> Unit,
     val onRefreshSyncConflicts: () -> Unit,
     val onCheckConnection: () -> Unit,
@@ -492,8 +492,8 @@ internal fun HomeVisitApp(
     onStartGps: (String, String, String) -> Unit,
     onStopGps: () -> Unit,
     onStartDay: () -> Unit,
-    onStartDayDetails: (String, String, Double, Double, Double, Double) -> Unit,
-    onStartShift: (Double, Double, Double, Double) -> Unit,
+    onStartDayDetails: (String, String, Double, Boolean, Double) -> Unit,
+    onStartShift: (Double, Boolean, Double) -> Unit,
     onRefreshHome: (String, String) -> Unit,
     onRefreshShift: (String, String, String) -> Unit,
     onRefreshProfile: (String, String) -> Unit,
@@ -516,11 +516,11 @@ internal fun HomeVisitApp(
     onRefreshGpsEstimate: (String, String) -> Unit,
     onRefreshActiveReport: (String, String, String?) -> Unit,
     onRefreshStatsReport: (String, String, ReportPeriod, String?) -> Unit,
-    onRefreshFatigue: (String, String) -> Unit,
-    onSubmitFatigueFeedback: (String, String, String, Double?) -> Unit,
-    onRefreshFatigueCorrelation: (String, String, Int) -> Unit,
-    onRefreshFatigueTrend: (String, String, Int) -> Unit,
-    onSubmitCbi: (String, String, List<Int>) -> Unit,
+    onRefreshWorkload: (String, String) -> Unit,
+    onSubmitWorkloadFeedback: (String, String, String, Double?) -> Unit,
+    onRefreshWorkloadCorrelation: (String, String, Int) -> Unit,
+    onRefreshWorkloadTrend: (String, String, Int) -> Unit,
+    onSubmitSurvey: (String, String, List<Int>) -> Unit,
     onExportBackup: () -> Unit,
     onBackupExportHandled: () -> Unit,
     onRefreshSyncConflicts: (String, String) -> Unit,
@@ -592,11 +592,11 @@ internal fun HomeVisitApp(
         onRefreshGpsEstimate = { onRefreshGpsEstimate(serverUrl, apiKey) },
         onRefreshActiveReport = { clinic -> onRefreshActiveReport(serverUrl, apiKey, clinic) },
         onRefreshStatsReport = { period, clinic -> onRefreshStatsReport(serverUrl, apiKey, period, clinic) },
-        onRefreshFatigue = { onRefreshFatigue(serverUrl, apiKey) },
-        onSubmitFatigueFeedback = { action, score -> onSubmitFatigueFeedback(serverUrl, apiKey, action, score) },
-        onRefreshFatigueCorrelation = { days -> onRefreshFatigueCorrelation(serverUrl, apiKey, days) },
-        onRefreshFatigueTrend = { days -> onRefreshFatigueTrend(serverUrl, apiKey, days) },
-        onSubmitCbi = { answers -> onSubmitCbi(serverUrl, apiKey, answers) },
+        onRefreshWorkload = { onRefreshWorkload(serverUrl, apiKey) },
+        onSubmitWorkloadFeedback = { action, score -> onSubmitWorkloadFeedback(serverUrl, apiKey, action, score) },
+        onRefreshWorkloadCorrelation = { days -> onRefreshWorkloadCorrelation(serverUrl, apiKey, days) },
+        onRefreshWorkloadTrend = { days -> onRefreshWorkloadTrend(serverUrl, apiKey, days) },
+        onSubmitSurvey = { answers -> onSubmitSurvey(serverUrl, apiKey, answers) },
         onExportBackup = onExportBackup,
         onRefreshSyncConflicts = { onRefreshSyncConflicts(serverUrl, apiKey) },
         onCheckConnection = { onCheckConnection(serverUrl, apiKey) },
@@ -632,7 +632,7 @@ internal fun HomeVisitApp(
             settingsState = settingsState,
             appSettings = uiState.appSettings,
             reportState = uiState.report,
-            fatigueState = uiState.fatigue,
+            workloadState = uiState.fatigue,
             workActions = workActions,
             onBack = { showSettings = false },
         )
@@ -767,7 +767,7 @@ internal enum class SettingsPage(val title: String) {
     App("Параметры расчёта"),
     Zones("Зоны обслуживания"),
     Reports("Подробные отчёты"),
-    Fatigue("Нагрузка и восстановление"),
+    Workload("Режим труда"),
 }
 
 /** Экран настроек как оверлей (открывается шестерёнкой), с под-навигацией и «назад». */
@@ -777,7 +777,7 @@ internal fun SettingsOverlay(
     settingsState: GpsSettingsState,
     appSettings: AppSettingsUiState,
     reportState: ReportUiState,
-    fatigueState: FatigueUiState,
+    workloadState: WorkloadUiState,
     workActions: WorkActions,
     onBack: () -> Unit,
 ) {
@@ -811,14 +811,14 @@ internal fun SettingsOverlay(
                 SettingsPage.Main -> SettingsScreen(
                     settingsState, appSettings, workActions,
                     onOpenReports = { page = SettingsPage.Reports },
-                    onOpenFatigue = { page = SettingsPage.Fatigue },
+                    onOpenWorkload = { page = SettingsPage.Workload },
                     onOpenAppSettings = { page = SettingsPage.App },
                     onOpenZones = { page = SettingsPage.Zones },
                 )
                 SettingsPage.App -> AppSettingsPage(appSettings, workActions)
                 SettingsPage.Zones -> BaseZonesPage(appSettings, workActions)
                 SettingsPage.Reports -> ReportsScreen(reportState, workActions)
-                SettingsPage.Fatigue -> FatigueScreen(fatigueState, workActions)
+                SettingsPage.Workload -> WorkloadScreen(workloadState, workActions)
             }
         }
     }

@@ -10,7 +10,7 @@ from app.repositories import (
     AddressCacheRepository,
     DailyStatsRepository,
     ExpenseRepository,
-    FatigueFeedbackRepository,
+    WorkloadFeedbackRepository,
     OfficeRepository,
     SettingsRepository,
     TelemedRepository,
@@ -242,8 +242,7 @@ class MobileApiService:
             service_minutes=self.settings.get_float("default_service_minutes", 20),
             route_time_factor=self.settings.get_float("default_route_time_factor", 1),
             start_odometer=_non_negative_float(payload.get("start_odometer"), default=0.0),
-            sleep_hours=_non_negative_float(payload.get("sleep_hours"), default=0.0),
-            sleep_quality=_non_negative_float(payload.get("sleep_quality"), default=0.0),
+            break_uninterrupted=bool(payload.get("break_uninterrupted", True)),
             break_hours_before=_non_negative_float(payload.get("break_hours_before"), default=0.0),
         )
         self._map(client_entity_id, "work_day", day.id)
@@ -263,12 +262,12 @@ class MobileApiService:
                 stats_repo=DailyStatsRepository(self.connection),
                 settings_repo=self.settings,
             )
-            user_fatigue_score = payload.get("user_fatigue_score")
-            if user_fatigue_score is not None:
-                FatigueFeedbackRepository(self.connection).add(
+            user_workload_index = payload.get("user_workload_index")
+            if user_workload_index is not None:
+                WorkloadFeedbackRepository(self.connection).add(
                     work_day_id=day.id,
-                    predicted_score=stats.fatigue_score,
-                    user_score=_score_float(user_fatigue_score),
+                    predicted_score=stats.workload_index,
+                    user_score=_score_float(user_workload_index),
                     feedback_type="mobile_end_day",
                 )
             return day_id
@@ -570,12 +569,9 @@ def _end_day_data_from_payload(day: Any, payload: dict[str, Any]) -> EndDayData:
         parking_compensation=_non_negative_float(payload.get("parking_compensation"), default=float(day.parking_compensation or 0)),
         toll_expenses=_non_negative_float(payload.get("toll_expenses"), default=float(day.toll_expenses or 0)),
         toll_compensation=_non_negative_float(payload.get("toll_compensation"), default=float(day.toll_compensation or 0)),
-        # Штуки, а не рубли: на восстановление влияет количество кофеина, а не сумма чека.
-        coffee_units=_non_negative_float(payload.get("coffee_units"), default=0.0),
-        drinks_units=_non_negative_float(payload.get("drinks_units"), default=0.0),
-        meal_units=_non_negative_float(payload.get("meal_units"), default=0.0),
-        # Самооценка 1–10 — она же обратная связь: система учится на конкретном человеке.
-        self_rating=_non_negative_float(payload.get("self_rating"), default=0.0),
+        # Еда и питьё — только рубли: количество чашек кофе это физиологический вход.
+        # Загруженность смены 1–10 — оценка условий труда, а не самочувствия.
+        workload_rating=_non_negative_float(payload.get("workload_rating"), default=0.0),
     )
 
 

@@ -12,9 +12,9 @@ from app.repositories import (
     SettingsRepository,
     UserBaselineRepository,
 )
-from app.services.correlation_service import fatigue_learning_adjustment
+from app.services.correlation_service import workload_learning_adjustment
 from app.services.day_metrics_service import build_active_day_metrics, load_baselines
-from app.services.indices_service import Contribution, IndexResult, load_index, recovery_debt_delta, recovery_result
+from app.services.indices_service import Contribution, IndexResult, load_index, overwork_extra_delta, overwork_result
 
 
 @dataclass(frozen=True)
@@ -27,24 +27,24 @@ class VisitStopLoad:
 
 
 @dataclass(frozen=True)
-class FatigueDayEstimate:
+class WorkloadDayEstimate:
     score: float
     weekly_average: float
-    recovery_debt: float
+    overwork_index: float
     level: str
     long_stop_count: int
     pause_minutes: float
     heavy_visit_count: int
-    circadian_risk_minutes: float
-    burnout_score: float
+    night_work_minutes: float
+    workload_survey_score: float
     stop_loads: list[VisitStopLoad]
     load: IndexResult | None = None
-    recovery: IndexResult | None = None
+    overwork: IndexResult | None = None
     metrics: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
-class CandidateFatigue:
+class CandidateWorkload:
     """Во что заказ обходится по состоянию — БЕЗ отдельной денежной надбавки.
 
     Раньше здесь считался `extra_payment` — «доплатить за нагрузку N ₽». Он уходил
@@ -57,14 +57,14 @@ class CandidateFatigue:
     before_score: float
     after_score: float
     weekly_average: float
-    recovery_debt_before: float
-    recovery_debt_after: float
-    circadian_risk_minutes: float
-    burnout_score: float
+    overwork_index_before: float
+    overwork_index_after: float
+    night_work_minutes: float
+    workload_survey_score: float
     level: str
 
 
-def estimate_active_day_fatigue(
+def estimate_active_day_workload(
     *,
     day: WorkDay,
     visits: list[Visit],
@@ -76,9 +76,9 @@ def estimate_active_day_fatigue(
     route_minutes: float | None = None,
     learning_stats_row: object | None = None,
     metrics: dict[str, float] | None = None,
-) -> FatigueDayEstimate:
-    if not _fatigue_enabled(settings_repo):
-        return FatigueDayEstimate(0, 0, 0, "", 0, 0, 0, 0, 0, [])
+) -> WorkloadDayEstimate:
+    if not _workload_tracking_enabled(settings_repo):
+        return WorkloadDayEstimate(0, 0, 0, "", 0, 0, 0, 0, 0, [])
     active_visits = [visit for visit in visits if visit.status in {"accepted", "completed", "candidate"}]
     completed_visits = [visit for visit in visits if visit.status == "completed"]
     route_minutes_value = (
@@ -124,7 +124,7 @@ def estimate_active_day_fatigue(
                 max(
                     0.0,
                     score
-                    + fatigue_learning_adjustment(
+                    + workload_learning_adjustment(
                         work_day_id=day.id,
                         settings_repo=settings_repo,
                         driving_repo=DrivingBehaviorRepository(stats_repo.connection),
@@ -134,51 +134,49 @@ def estimate_active_day_fatigue(
             ),
             1,
         )
-    weekly_average = rolling_fatigue_average(stats_repo, score) if stats_repo else score
-    circadian_risk_minutes = calculate_circadian_risk_minutes(day.started_at, total_work)
-    burnout_score = settings_repo.get_float("latest_cbi_score", 0)
-    recovery_debt = calculate_recovery_debt(
+    weekly_average = rolling_workload_average(stats_repo, score) if stats_repo else score
+    night_work_minutes = calculate_night_work_minutes(day.started_at, total_work)
+    workload_survey_score = settings_repo.get_float("workload_survey_score", 0)
+    overwork_index = calculate_overwork_index(
         stats_repo=stats_repo,
         day_score=score,
-        sleep_hours=day.sleep_hours,
-        sleep_quality=day.sleep_quality,
         break_hours_before=day.break_hours_before,
-        circadian_risk_minutes=circadian_risk_minutes,
-        burnout_score=burnout_score,
-        extra_pressure=recovery_debt_delta(metrics, baselines),
+        break_uninterrupted=day.break_uninterrupted,
+        night_work_minutes=night_work_minutes,
+        workload_survey_score=workload_survey_score,
+        extra_pressure=overwork_extra_delta(metrics, baselines),
     )
-    recovery = recovery_result(
-        recovery_debt,
+    overwork = overwork_result(
+        overwork_index,
         metrics,
         baselines,
-        explicit=recovery_debt_contributions(
+        explicit=overwork_contributions(
             day_score=score,
-            sleep_hours=day.sleep_hours,
-            sleep_quality=day.sleep_quality,
             break_hours_before=day.break_hours_before,
-            circadian_risk_minutes=circadian_risk_minutes,
-            burnout_score=burnout_score,
+            break_uninterrupted=day.break_uninterrupted,
+            night_work_minutes=night_work_minutes,
+            workload_survey_score=workload_survey_score,
         ),
     )
-    pressure = max(score, weekly_average, recovery_debt, burnout_score * 0.85)
-    return FatigueDayEstimate(
+    pressure = max(score, weekly_average, overwork_index, workload_survey_score * 0.85)
+    return WorkloadDayEstimate(
         score=score,
         weekly_average=weekly_average,
-        recovery_debt=recovery_debt,
-        level=fatigue_level(pressure),
+        overwork_index=overwork_index,
+        level=workload_level(pressure),
         long_stop_count=long_stop_count,
         pause_minutes=pause_minutes,
         heavy_visit_count=heavy_visit_count,
-        circadian_risk_minutes=circadian_risk_minutes,
-        burnout_score=burnout_score,
+        night_work_minutes=night_work_minutes,
+        workload_survey_score=workload_survey_score,
         stop_loads=stop_loads,
         load=load,
-        recovery=recovery,
+        overwork=overwork,
         metrics=metrics,
     )
 
 
-def calculate_candidate_fatigue(
+def calculate_candidate_workload(
     *,
     day: WorkDay,
     existing_visits: list[Visit],
@@ -188,10 +186,10 @@ def calculate_candidate_fatigue(
     settings_repo: SettingsRepository,
     stats_repo: DailyStatsRepository | None = None,
     location_events: LocationEventRepository | None = None,
-) -> CandidateFatigue:
-    if not _fatigue_enabled(settings_repo):
-        return CandidateFatigue(0, 0, 0, 0, 0, 0, 0, "")
-    before = estimate_active_day_fatigue(
+) -> CandidateWorkload:
+    if not _workload_tracking_enabled(settings_repo):
+        return CandidateWorkload(0, 0, 0, 0, 0, 0, 0, "")
+    before = estimate_active_day_workload(
         day=day,
         visits=existing_visits,
         settings_repo=settings_repo,
@@ -199,7 +197,7 @@ def calculate_candidate_fatigue(
         location_events=location_events,
         route=before_route,
     )
-    after = estimate_active_day_fatigue(
+    after = estimate_active_day_workload(
         day=day,
         visits=existing_visits + [candidate],
         settings_repo=settings_repo,
@@ -207,17 +205,17 @@ def calculate_candidate_fatigue(
         location_events=location_events,
         route=after_route,
     )
-    weekly_average = rolling_fatigue_average(stats_repo, after.score) if stats_repo else after.score
-    pressure = max(after.score, weekly_average, after.recovery_debt, after.burnout_score * 0.85)
-    return CandidateFatigue(
+    weekly_average = rolling_workload_average(stats_repo, after.score) if stats_repo else after.score
+    pressure = max(after.score, weekly_average, after.overwork_index, after.workload_survey_score * 0.85)
+    return CandidateWorkload(
         before_score=before.score,
         after_score=after.score,
         weekly_average=weekly_average,
-        recovery_debt_before=before.recovery_debt,
-        recovery_debt_after=after.recovery_debt,
-        circadian_risk_minutes=after.circadian_risk_minutes,
-        burnout_score=after.burnout_score,
-        level=fatigue_level(pressure),
+        overwork_index_before=before.overwork_index,
+        overwork_index_after=after.overwork_index,
+        night_work_minutes=after.night_work_minutes,
+        workload_survey_score=after.workload_survey_score,
+        level=workload_level(pressure),
     )
 
 
@@ -235,120 +233,119 @@ def stop_complexity_for_day(
     return _stop_complexity_score(stop_loads, completed_visits, day.planned_service_minutes)
 
 
-def rolling_fatigue_average(stats_repo: DailyStatsRepository | None, current_score: float, days: int = 7) -> float:
+def rolling_workload_average(stats_repo: DailyStatsRepository | None, current_score: float, days: int = 7) -> float:
     values = [current_score]
     if stats_repo is not None:
         for row in stats_repo.last(days - 1):
-            if "fatigue_score" not in row.keys():
+            if "workload_index" not in row.keys():
                 continue
-            value = float(row["fatigue_score"] or 0)
+            value = float(row["workload_index"] or 0)
             if value > 0:
                 values.append(value)
     return round(sum(values) / len(values), 1) if values else 0.0
 
 
-def calculate_recovery_debt(
+def calculate_overwork_index(
     *,
     stats_repo: DailyStatsRepository | None,
     day_score: float,
-    sleep_hours: float,
-    sleep_quality: float,
     break_hours_before: float,
-    circadian_risk_minutes: float,
-    burnout_score: float,
+    break_uninterrupted: bool,
+    night_work_minutes: float,
+    workload_survey_score: float,
     extra_pressure: float = 0.0,
 ) -> float:
-    """Долг восстановления: вчерашний долг с затуханием плюс сегодняшняя цена дня.
+    """Накопленная переработка: вчерашний остаток с затуханием плюс плотность сегодня.
 
-    Долг накопительный, а не моментальный: один тяжёлый день человека не ломает,
-    ломает неделя тяжёлых дней без отдыха. Поэтому вчерашний остаток переносится с
-    затуханием, а сегодня может как добавить, так и вычесть — день, когда выспался и
-    отработал легче обычного, гасит долг.
+    Величина накопительная: одна плотная смена графика не ломает, ломает неделя плотных
+    смен без нормального перерыва. Поэтому вчерашний остаток переносится с затуханием,
+    а сегодня может как добавить, так и вычесть — смена с длинным перерывом перед ней и
+    лёгкой загрузкой переработку гасит.
 
-    `extra_pressure` — поправка от факторов, которых эта формула не видит (кофе,
-    пропуск еды, самооценка, изменение стиля вождения). Она считается отдельно, по
-    отклонению от личной нормы, и приходит из indices_service.
+    Все слагаемые — факты о РЕЖИМЕ ТРУДА: длина перерыва между сменами (ТК РФ, ст. 107–110),
+    ночные часы, плотность смены, ответы об условиях труда. Прежние слагаемые про сон и
+    его качество удалены: это прямые физиологические показатели, из которых выводится
+    состояние здоровья, — специальная категория персональных данных (152-ФЗ, ст. 10).
     """
     previous = 0.0
     if stats_repo is not None:
         rows = stats_repo.last(1)
-        if rows and "recovery_debt" in rows[0].keys():
-            previous = float(rows[0]["recovery_debt"] or 0)
-    overload = max(0.0, day_score - 45) * 0.45
-    sleep_penalty = _sleep_debt_penalty(sleep_hours, sleep_quality)
+        if rows and "overwork_index" in rows[0].keys():
+            previous = float(rows[0]["overwork_index"] or 0)
+    density = max(0.0, day_score - 45) * 0.45
     break_penalty = _break_penalty(break_hours_before)
-    circadian_penalty = min(18.0, circadian_risk_minutes / 60 * 4.5)
-    burnout_penalty = max(0.0, burnout_score - 50) * 0.18
-    recovery_bonus = _recovery_bonus(sleep_hours, sleep_quality, break_hours_before)
-    debt = (
+    interrupted_penalty = 0.0 if break_uninterrupted else 8.0
+    night_penalty = min(18.0, night_work_minutes / 60 * 4.5)
+    survey_penalty = max(0.0, workload_survey_score - 50) * 0.18
+    rest_bonus = _rest_bonus(break_hours_before, break_uninterrupted)
+    index = (
         previous * 0.65
-        + overload
-        + sleep_penalty
+        + density
         + break_penalty
-        + circadian_penalty
-        + burnout_penalty
-        - recovery_bonus
+        + interrupted_penalty
+        + night_penalty
+        + survey_penalty
+        - rest_bonus
         + extra_pressure
     )
-    return round(min(100.0, max(0.0, debt)), 1)
+    return round(min(100.0, max(0.0, index)), 1)
 
 
-def recovery_debt_contributions(
+def overwork_contributions(
     *,
     day_score: float,
-    sleep_hours: float,
-    sleep_quality: float,
     break_hours_before: float,
-    circadian_risk_minutes: float,
-    burnout_score: float,
+    break_uninterrupted: bool,
+    night_work_minutes: float,
+    workload_survey_score: float,
 ) -> list[Contribution]:
-    """Разложить долг на слагаемые, чтобы человек видел, откуда он взялся.
+    """Разложить переработку на слагаемые, чтобы человек видел, откуда она взялась.
 
     Без этого цифра «65 из 100» — приговор без объяснения, и верить ей никто не станет.
-    А не веря индексу, никто не примет и решение поднять тариф.
+    А не веря индексу, никто не примет и главное — решение поднять сегодня тариф.
     """
     items: list[tuple[str, str, float, float, str]] = [
         (
-            "sleep_hours",
-            "Сон",
-            _sleep_debt_penalty(sleep_hours, sleep_quality),
-            sleep_hours,
-            f"Сон {sleep_hours:.1f} ч при качестве {sleep_quality:.0f}/5".replace(".", ","),
-        ),
-        (
-            "break_hours_before",
-            "Перерыв перед сменой",
+            "break_hours",
+            "Перерыв между сменами",
             _break_penalty(break_hours_before),
             break_hours_before,
-            f"Перерыв перед сменой {break_hours_before:.0f} ч",
+            f"Перерыв между сменами {break_hours_before:.0f} ч",
+        ),
+        (
+            "break_interrupted",
+            "Перерыв прерывался",
+            0.0 if break_uninterrupted else 8.0,
+            0.0 if break_uninterrupted else 1.0,
+            "Перерыв между сменами прерывался работой",
         ),
         (
             "night_minutes",
-            "Работа ночью",
-            min(18.0, circadian_risk_minutes / 60 * 4.5),
-            circadian_risk_minutes,
-            f"Работа в ночные часы: {circadian_risk_minutes:.0f} мин",
+            "Работа в ночные часы",
+            min(18.0, night_work_minutes / 60 * 4.5),
+            night_work_minutes,
+            f"Работа в ночные часы: {night_work_minutes:.0f} мин",
         ),
         (
-            "burnout_score",
-            "Самочувствие по опросу",
-            max(0.0, burnout_score - 50) * 0.18,
-            burnout_score,
-            f"Опрос самочувствия: {burnout_score:.0f} из 100",
+            "workload_survey_score",
+            "Опрос об условиях труда",
+            max(0.0, workload_survey_score - 50) * 0.18,
+            workload_survey_score,
+            f"Опрос об условиях труда: {workload_survey_score:.0f} из 100",
         ),
         (
             "day_load",
-            "Нагрузка за смену",
+            "Плотность смены",
             max(0.0, day_score - 45) * 0.45,
             day_score,
-            f"Нагрузка за смену: {day_score:.0f} из 100",
+            f"Загруженность смены: {day_score:.0f} из 100",
         ),
         (
             "rest_bonus",
-            "Отдых перед сменой",
-            -_recovery_bonus(sleep_hours, sleep_quality, break_hours_before),
+            "Длинный перерыв",
+            -_rest_bonus(break_hours_before, break_uninterrupted),
             break_hours_before,
-            "Хорошо отдохнул перед сменой",
+            "Длинный непрерывный перерыв перед сменой",
         ),
     ]
     return [
@@ -359,14 +356,14 @@ def recovery_debt_contributions(
             normal=0.0,
             deviation_percent=None,
             points=points,
-            text=f"{text}: {'+' if points >= 0 else '−'}{abs(points):.0f} к долгу",
+            text=f"{text}: {'+' if points >= 0 else '−'}{abs(points):.0f} к переработке",
         )
         for metric, title, points, value, text in items
         if abs(points) >= 1.0
     ]
 
 
-def calculate_circadian_risk_minutes(started_at: str | None, total_work_minutes: float) -> float:
+def calculate_night_work_minutes(started_at: str | None, total_work_minutes: float) -> float:
     start = _parse_datetime(started_at)
     if start is None or total_work_minutes <= 0:
         return 0.0
@@ -383,7 +380,7 @@ def calculate_circadian_risk_minutes(started_at: str | None, total_work_minutes:
     return round(risk, 1)
 
 
-def fatigue_level(score: float) -> str:
+def workload_level(score: float) -> str:
     if score >= 85:
         return "стоп-зона"
     if score >= 75:
@@ -399,7 +396,7 @@ def _stop_loads_from_gps(events: LocationEventRepository, work_day_id: int) -> l
     rows = events.connection.execute(
         f"""
         SELECT visit_id,
-               fatigue_label,
+               stop_label,
                {events.connection.minutes_between("last_seen_at", "first_seen_at")} AS minutes
         FROM visit_location_events
         WHERE work_day_id = ?
@@ -413,7 +410,7 @@ def _stop_loads_from_gps(events: LocationEventRepository, work_day_id: int) -> l
         minutes = max(0.0, float(row["minutes"] or 0))
         if minutes <= 0:
             continue
-        override = str(row["fatigue_label"] or "").strip().lower()
+        override = str(row["stop_label"] or "").strip().lower()
         if override in {"pause", "meal"}:
             level = "pause"
             medical = min(40.0, minutes)
@@ -496,18 +493,10 @@ def _score_range(value: float, low: float, high: float) -> float:
 
 
 
-def _fatigue_enabled(settings_repo: SettingsRepository) -> bool:
-    value = (settings_repo.get("fatigue_enabled", "true") or "true").strip().lower()
+def _workload_tracking_enabled(settings_repo: SettingsRepository) -> bool:
+    value = (settings_repo.get("workload_tracking_enabled", "true") or "true").strip().lower()
     return value in {"true", "1", "yes", "да", "on"}
 
-
-def _sleep_debt_penalty(sleep_hours: float, sleep_quality: float) -> float:
-    penalty = 0.0
-    if sleep_hours > 0:
-        penalty += _score_range(7.0 - sleep_hours, 0, 3) * 0.22
-    if sleep_quality > 0:
-        penalty += _score_range(5.0 - sleep_quality, 0, 4) * 0.10
-    return penalty
 
 
 def _break_penalty(break_hours_before: float) -> float:
@@ -522,15 +511,17 @@ def _break_penalty(break_hours_before: float) -> float:
     return 0.0
 
 
-def _recovery_bonus(sleep_hours: float, sleep_quality: float, break_hours_before: float) -> float:
+def _rest_bonus(break_hours_before: float, break_uninterrupted: bool) -> float:
+    """Длинный непрерывный перерыв между сменами гасит накопленную переработку."""
+    if not break_uninterrupted:
+        return 0.0
     bonus = 0.0
-    if sleep_hours >= 7 and sleep_quality >= 4:
-        bonus += 8.0
     if break_hours_before >= 16:
         bonus += 10.0
     if break_hours_before >= 24:
         bonus += 18.0
     return bonus
+
 
 
 def _parse_datetime(value: str | None) -> datetime | None:

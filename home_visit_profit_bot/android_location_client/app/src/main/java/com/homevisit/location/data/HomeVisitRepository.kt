@@ -16,36 +16,35 @@ import com.homevisit.location.domain.AuthOutcome
 import com.homevisit.location.domain.AuthUser
 import com.homevisit.location.domain.CandidateEstimate
 import com.homevisit.location.domain.CandidateRequestResult
-import com.homevisit.location.domain.CbiInfo
+import com.homevisit.location.domain.SurveyInfo
 import com.homevisit.location.domain.ClinicOptions
 import com.homevisit.location.domain.ClinicReportRow
 import com.homevisit.location.domain.EndDayDetails
 import com.homevisit.location.domain.EndDayPreview
 import com.homevisit.location.domain.ExpenseCategory
-import com.homevisit.location.domain.FatigueCorrelationCell
-import com.homevisit.location.domain.FatigueCorrelationReport
-import com.homevisit.location.domain.FatigueFeedback
-import com.homevisit.location.domain.FatigueFeedbackResult
-import com.homevisit.location.domain.FatigueSnapshot
-import com.homevisit.location.domain.FatigueSummary
-import com.homevisit.location.domain.FatigueTrendPoint
-import com.homevisit.location.domain.FatigueTrendReport
+import com.homevisit.location.domain.WorkloadCorrelationCell
+import com.homevisit.location.domain.WorkloadCorrelationReport
+import com.homevisit.location.domain.WorkloadFeedback
+import com.homevisit.location.domain.WorkloadFeedbackResult
+import com.homevisit.location.domain.WorkloadSnapshot
+import com.homevisit.location.domain.WorkloadSummary
+import com.homevisit.location.domain.WorkloadTrendPoint
+import com.homevisit.location.domain.WorkloadTrendReport
 import com.homevisit.location.domain.GpsDayEstimate
 import com.homevisit.location.domain.GpsVisitHint
 import com.homevisit.location.domain.DrivingRating
 import com.homevisit.location.domain.HomeMoney
 import com.homevisit.location.domain.HomeRecommendation
-import com.homevisit.location.domain.HomeRecovery
+import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.LateWarning
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
-import com.homevisit.location.domain.ProfileGait
 import com.homevisit.location.domain.DrivingWithinDay
 import com.homevisit.location.domain.IndexCard
 import com.homevisit.location.domain.IndexReason
 import com.homevisit.location.domain.ProfileIndices
-import com.homevisit.location.domain.RecoveryPricing
+import com.homevisit.location.domain.OverworkPricing
 import com.homevisit.location.domain.ProfileMonth
 import com.homevisit.location.domain.ProfileSnapshot
 import com.homevisit.location.domain.ProfileUser
@@ -112,8 +111,7 @@ class HomeVisitRepository private constructor(
         startAddress: String? = null,
         finishAddress: String? = null,
         startOdometer: Double = 0.0,
-        sleepHours: Double = 0.0,
-        sleepQuality: Double = 0.0,
+        breakUninterrupted: Boolean = true,
         breakHoursBefore: Double = 0.0,
     ): String {
         val now = now()
@@ -132,8 +130,7 @@ class HomeVisitRepository private constructor(
                 finishAddress = finishAddress?.trim()?.ifEmpty { null },
                 startOdometer = startOdometer.coerceAtLeast(0.0),
                 endOdometer = null,
-                sleepHours = sleepHours.coerceAtLeast(0.0),
-                sleepQuality = sleepQuality.coerceIn(0.0, 5.0),
+                breakUninterrupted = breakUninterrupted,
                 breakHoursBefore = breakHoursBefore.coerceAtLeast(0.0),
                 createdAtEpochMillis = now,
                 updatedAtEpochMillis = now,
@@ -352,8 +349,7 @@ class HomeVisitRepository private constructor(
                         finishAddress = item.nullableString("finish_address"),
                         startOdometer = item.optDouble("start_odometer", 0.0),
                         endOdometer = item.nullableDouble("end_odometer"),
-                        sleepHours = item.optDouble("sleep_hours", 0.0),
-                        sleepQuality = item.optDouble("sleep_quality", 0.0),
+                        breakUninterrupted = item.optBoolean("break_uninterrupted", true),
                         breakHoursBefore = item.optDouble("break_hours_before", 0.0),
                         createdAtEpochMillis = item.optLong("created_at_epoch_millis", now()),
                         updatedAtEpochMillis = item.optLong("updated_at_epoch_millis", now()),
@@ -821,10 +817,10 @@ class HomeVisitRepository private constructor(
         parseProfileSnapshot(response)
     }
 
-    suspend fun fetchFatigueSummary(serverUrl: String, apiKey: String): FatigueSnapshot? = withContext(Dispatchers.IO) {
-        val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/fatigue/summary"), apiKey, "cache_fatigue_summary")
+    suspend fun fetchWorkloadSummary(serverUrl: String, apiKey: String): WorkloadSnapshot? = withContext(Dispatchers.IO) {
+        val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/workload/summary"), apiKey, "cache_fatigue_summary")
             ?: return@withContext null
-        parseFatigueSnapshot(response)
+        parseWorkloadSnapshot(response)
     }
 
     suspend fun fetchAppSettings(serverUrl: String, apiKey: String): AppSettingsSnapshot? = withContext(Dispatchers.IO) {
@@ -950,45 +946,45 @@ class HomeVisitRepository private constructor(
         }
     }
 
-    suspend fun fetchFatigueCorrelation(serverUrl: String, apiKey: String, days: Int): FatigueCorrelationReport? = withContext(Dispatchers.IO) {
-        val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/fatigue/corr?days=$days"), apiKey, "cache_fatigue_corr_$days")
+    suspend fun fetchWorkloadCorrelation(serverUrl: String, apiKey: String, days: Int): WorkloadCorrelationReport? = withContext(Dispatchers.IO) {
+        val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/workload/corr?days=$days"), apiKey, "cache_fatigue_corr_$days")
             ?: return@withContext null
-        parseFatigueCorrelationReport(response)
+        parseWorkloadCorrelationReport(response)
     }
 
-    suspend fun fetchFatigueTrend(serverUrl: String, apiKey: String, days: Int): FatigueTrendReport? = withContext(Dispatchers.IO) {
-        val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/fatigue/trend?days=$days"), apiKey, "cache_fatigue_trend_$days")
+    suspend fun fetchWorkloadTrend(serverUrl: String, apiKey: String, days: Int): WorkloadTrendReport? = withContext(Dispatchers.IO) {
+        val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/workload/trend?days=$days"), apiKey, "cache_fatigue_trend_$days")
             ?: return@withContext null
         val fromCache = response.optBoolean("_from_cache", false)
         val pointsJson = response.optJSONArray("points")
-            ?: return@withContext FatigueTrendReport(response.optInt("days", days), emptyList(), fromCache)
+            ?: return@withContext WorkloadTrendReport(response.optInt("days", days), emptyList(), fromCache)
         val points = (0 until pointsJson.length()).mapNotNull { index ->
             val obj = pointsJson.optJSONObject(index) ?: return@mapNotNull null
-            FatigueTrendPoint(
+            WorkloadTrendPoint(
                 date = obj.optString("date"),
                 score = obj.optDouble("score", 0.0),
                 weeklyAverage = obj.optDouble("weekly_average", 0.0),
-                recoveryDebt = obj.optDouble("recovery_debt", 0.0),
+                overworkIndex = obj.optDouble("overwork_index", 0.0),
             )
         }
-        FatigueTrendReport(days = response.optInt("days", days), points = points, fromCache = fromCache)
+        WorkloadTrendReport(days = response.optInt("days", days), points = points, fromCache = fromCache)
     }
 
-    suspend fun saveFatigueFeedback(
+    suspend fun saveWorkloadFeedback(
         serverUrl: String,
         apiKey: String,
         action: String,
         score: Double? = null,
         workDayId: Int? = null,
-    ): FatigueFeedbackResult? = withContext(Dispatchers.IO) {
+    ): WorkloadFeedbackResult? = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("action", action)
         score?.let { payload.put("score", it) }
         workDayId?.let { payload.put("work_day_id", it) }
-        val response = postJson(normalizeApiUrl(serverUrl, "/api/fatigue/feedback"), apiKey, payload) ?: return@withContext null
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/workload/feedback"), apiKey, payload) ?: return@withContext null
         if (!response.optBoolean("ok", false)) {
             return@withContext null
         }
-        FatigueFeedbackResult(
+        WorkloadFeedbackResult(
             predictedScore = response.optDouble("predicted_score", 0.0),
             userScore = response.optDouble("user_score", 0.0),
             error = response.optDouble("error", 0.0),
@@ -996,13 +992,13 @@ class HomeVisitRepository private constructor(
         )
     }
 
-    suspend fun saveCbi(serverUrl: String, apiKey: String, answers: List<Int>): CbiInfo? = withContext(Dispatchers.IO) {
+    suspend fun saveSurvey(serverUrl: String, apiKey: String, answers: List<Int>): SurveyInfo? = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("answers", JSONArray(answers))
-        val response = postJson(normalizeApiUrl(serverUrl, "/api/fatigue/cbi"), apiKey, payload) ?: return@withContext null
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/workload/survey"), apiKey, payload) ?: return@withContext null
         if (!response.optBoolean("ok", false)) {
             return@withContext null
         }
-        parseCbiInfo(response.optJSONObject("cbi"))
+        parseSurveyInfo(response.optJSONObject("survey"))
     }
 
     suspend fun setVisitStopLabel(serverUrl: String, apiKey: String, visitId: Int, label: StopLabel): String = withContext(Dispatchers.IO) {
@@ -1070,8 +1066,7 @@ class HomeVisitRepository private constructor(
         .put("finish_address", day.finishAddress)
         .put("start_odometer", day.startOdometer)
         .put("end_odometer", day.endOdometer)
-        .put("sleep_hours", day.sleepHours)
-        .put("sleep_quality", day.sleepQuality)
+        .put("break_uninterrupted", day.breakUninterrupted)
         .put("break_hours_before", day.breakHoursBefore)
         .toString()
 
@@ -1103,14 +1098,10 @@ class HomeVisitRepository private constructor(
             .put("coffee_expenses", details.coffeeExpenses)
             .put("drinks_expenses", details.drinksExpenses)
             .put("parking_expenses", details.parkingExpenses)
-            // Штуки, а не рубли: на восстановление влияет количество кофеина,
-            // а не сумма чека.
-            .put("coffee_units", details.coffeeUnits)
-            .put("drinks_units", details.drinksUnits)
-            .put("meal_units", details.mealUnits)
-            // Самооценка 1–10 — она же обратная связь для обучения модели.
-            .put("self_rating", details.selfRating)
-        details.userFatigueScore?.let { payload.put("user_fatigue_score", it) }
+            // Еда и питьё — только рубли: количество чашек это физиологический вход.
+            // Загруженность смены 1–10 — оценка условий труда, она же обратная связь.
+            .put("workload_rating", details.workloadRating)
+        details.userWorkloadIndex?.let { payload.put("user_workload_index", it) }
         return payload.toString()
     }
 
@@ -1324,11 +1315,11 @@ class HomeVisitRepository private constructor(
                 marginalHourly = calculation.optDouble("marginal_hourly", 0.0),
                 extraKm = calculation.optDouble("extra_km", 0.0),
                 extraDriveMinutes = calculation.optDouble("extra_drive_minutes", 0.0),
-                fatigueLevel = calculation.optString("fatigue_level"),
+                workloadLevel = calculation.optString("workload_level"),
                 baseMinHourly = calculation.optDouble("base_min_hourly", 0.0),
                 effectiveMinHourly = calculation.optDouble("effective_min_hourly", 0.0),
-                recoveryMarkupPercent = calculation.optInt("recovery_markup_percent", 0),
-                recoveryBlocksOutsideZone = calculation.optBoolean("recovery_blocks_outside_zone", false),
+                overworkMarkupPercent = calculation.optInt("recovery_markup_percent", 0),
+                overworkBlocksOutsideZone = calculation.optBoolean("recovery_blocks_outside_zone", false),
             )
         } else {
             null
@@ -1476,9 +1467,9 @@ class HomeVisitRepository private constructor(
                 drinksExpenses = summary.optDouble("drinks_expenses", 0.0),
                 tollExpenses = summary.optDouble("toll_expenses", 0.0),
                 otherExpenses = summary.optDouble("other_expenses", 0.0),
-                fatigueScore = summary.optDouble("fatigue_score", 0.0),
+                workloadIndex = summary.optDouble("workload_index", 0.0),
                 fatigueWeeklyAverage = summary.optDouble("fatigue_weekly_average", 0.0),
-                recoveryDebt = summary.optDouble("recovery_debt", 0.0),
+                overworkIndex = summary.optDouble("overwork_index", 0.0),
             ),
             clinics = clinics,
             fromCache = response.optBoolean("_from_cache", false),
@@ -1521,7 +1512,7 @@ class HomeVisitRepository private constructor(
                 prevEndedAt = start.optString("prev_ended_at").ifBlank { null },
                 breakHours = start.optDouble("break_hours", 0.0),
             ),
-            recovery = parseHomeRecovery(response.optJSONObject("recovery")),
+            recovery = parseHomeOverwork(response.optJSONObject("recovery")),
             pricing = parsePricing(response.optJSONObject("pricing")),
             monthMoney = parseHomeMoney(money.optJSONObject("month")),
             yesterdayMoney = parseHomeMoney(money.optJSONObject("yesterday")),
@@ -1533,14 +1524,14 @@ class HomeVisitRepository private constructor(
         )
     }
 
-    private fun parseHomeRecovery(recovery: JSONObject?): HomeRecovery? {
+    private fun parseHomeOverwork(recovery: JSONObject?): HomeOverwork? {
         if (recovery == null) {
             return null
         }
-        return HomeRecovery(
-            recoveryDebt = recovery.optDouble("recovery_debt", 0.0),
-            burnoutScore = recovery.optDouble("burnout_score", 0.0),
-            fatigueScore = recovery.optDouble("fatigue_score", 0.0),
+        return HomeOverwork(
+            overworkIndex = recovery.optDouble("overwork_index", 0.0),
+            workloadSurveyScore = recovery.optDouble("workload_survey_score", 0.0),
+            workloadIndex = recovery.optDouble("workload_index", 0.0),
             weeklyAverage = recovery.optDouble("weekly_average", 0.0),
             level = recovery.optString("level"),
             verdict = recovery.optString("verdict"),
@@ -1632,7 +1623,7 @@ class HomeVisitRepository private constructor(
                 smoothBrakePct = d.optInt("smooth_brake_pct", 0),
                 harshBrakesPer100km = d.optDouble("harsh_brakes_per100km", 0.0),
                 harshAccelPer100km = d.optDouble("harsh_accel_per100km", 0.0),
-                rating = d.optJSONObject("self_rating").let { sr ->
+                rating = d.optJSONObject("workload_rating").let { sr ->
                     DrivingRating(
                         stars = sr?.optInt("stars", 0) ?: 0,
                         deltaPct = sr?.optDouble("delta_pct", 0.0) ?: 0.0,
@@ -1649,27 +1640,7 @@ class HomeVisitRepository private constructor(
                     )
                 },
             ),
-            gait = parseGait(r.optJSONObject("gait")),
             fromCache = r.optBoolean("_from_cache", false),
-        )
-    }
-
-    private fun parseGait(o: JSONObject?): ProfileGait? {
-        if (o == null) return null
-        return ProfileGait(
-            cadence = o.optDouble("cadence", 0.0),
-            stepCv = o.optDouble("step_cv", 0.0),
-            regularity = o.optDouble("regularity", 0.0),
-            walkMinutes = o.optDouble("walk_minutes", 0.0),
-            withinDay = o.optJSONObject("within_day")?.let { wd ->
-                DrivingWithinDay(
-                    turningPoint = wd.optInt("turning_point", 0),
-                    earlyScore = wd.optDouble("early_score", 0.0),
-                    lateScore = wd.optDouble("late_score", 0.0),
-                    delta = wd.optDouble("delta", 0.0),
-                    text = wd.optString("text"),
-                )
-            },
         )
     }
 
@@ -1709,9 +1680,9 @@ class HomeVisitRepository private constructor(
         )
     }
 
-    private fun parsePricing(o: JSONObject?): RecoveryPricing? {
+    private fun parsePricing(o: JSONObject?): OverworkPricing? {
         if (o == null) return null
-        return RecoveryPricing(
+        return OverworkPricing(
             debt = o.optDouble("debt", 0.0),
             markupPercent = o.optInt("markup_percent", 0),
             baseMinHourly = o.optInt("base_min_hourly", 0),
@@ -1733,45 +1704,44 @@ class HomeVisitRepository private constructor(
     private fun optNullableDouble(o: JSONObject, key: String): Double? =
         if (o.isNull(key)) null else o.optDouble(key)
 
-    private fun parseFatigueSnapshot(response: JSONObject): FatigueSnapshot? {
-        val cbi = parseCbiInfo(response.optJSONObject("cbi")) ?: return null
+    private fun parseWorkloadSnapshot(response: JSONObject): WorkloadSnapshot? {
+        val survey = parseSurveyInfo(response.optJSONObject("survey")) ?: return null
         val dayId = response.optInt("work_day_id", 0).takeIf { it > 0 }
-        return FatigueSnapshot(
+        return WorkloadSnapshot(
             source = response.optString("source"),
             workDayId = dayId,
             date = response.optString("date").ifBlank { null },
-            summary = parseFatigueSummary(response.optJSONObject("summary")),
-            latestFeedback = parseFatigueFeedback(response.optJSONObject("latest_feedback")),
-            cbi = cbi,
+            summary = parseWorkloadSummary(response.optJSONObject("summary")),
+            latestFeedback = parseWorkloadFeedback(response.optJSONObject("latest_feedback")),
+            survey = survey,
             fromCache = response.optBoolean("_from_cache", false),
         )
     }
 
-    private fun parseFatigueSummary(summary: JSONObject?): FatigueSummary? {
+    private fun parseWorkloadSummary(summary: JSONObject?): WorkloadSummary? {
         if (summary == null) {
             return null
         }
-        return FatigueSummary(
+        return WorkloadSummary(
             score = summary.optDouble("score", 0.0),
             weeklyAverage = summary.optDouble("weekly_average", 0.0),
-            recoveryDebt = summary.optDouble("recovery_debt", 0.0),
+            overworkIndex = summary.optDouble("overwork_index", 0.0),
             level = summary.optString("level"),
             longStopCount = summary.optInt("long_stop_count", 0),
             pauseMinutes = summary.optDouble("pause_minutes", 0.0),
             heavyVisitCount = summary.optInt("heavy_visit_count", 0),
-            circadianRiskMinutes = summary.optDouble("circadian_risk_minutes", 0.0),
-            burnoutScore = summary.optDouble("burnout_score", 0.0),
-            sleepHours = summary.optDouble("sleep_hours", 0.0),
-            sleepQuality = summary.optDouble("sleep_quality", 0.0),
+            nightWorkMinutes = summary.optDouble("night_work_minutes", 0.0),
+            workloadSurveyScore = summary.optDouble("workload_survey_score", 0.0),
+            breakUninterrupted = summary.optBoolean("break_uninterrupted", true),
             breakHoursBefore = summary.optDouble("break_hours_before", 0.0),
         )
     }
 
-    private fun parseFatigueFeedback(feedback: JSONObject?): FatigueFeedback? {
+    private fun parseWorkloadFeedback(feedback: JSONObject?): WorkloadFeedback? {
         if (feedback == null) {
             return null
         }
-        return FatigueFeedback(
+        return WorkloadFeedback(
             predictedScore = feedback.optDouble("predicted_score", 0.0),
             userScore = feedback.optDouble("user_score", 0.0),
             feedbackType = feedback.optString("feedback_type"),
@@ -1780,30 +1750,30 @@ class HomeVisitRepository private constructor(
         )
     }
 
-    private fun parseCbiInfo(cbi: JSONObject?): CbiInfo? {
-        if (cbi == null) {
+    private fun parseSurveyInfo(survey: JSONObject?): SurveyInfo? {
+        if (survey == null) {
             return null
         }
         val questions = mutableListOf<String>()
-        val questionArray = cbi.optJSONArray("questions") ?: JSONArray()
+        val questionArray = survey.optJSONArray("questions") ?: JSONArray()
         for (index in 0 until questionArray.length()) {
             questions.add(questionArray.optString(index))
         }
-        return CbiInfo(
+        return SurveyInfo(
             questions = questions,
-            latestScore = cbi.optDouble("latest_score", 0.0),
-            latestDate = cbi.optString("latest_date").ifBlank { null },
-            level = cbi.optString("level"),
+            latestScore = survey.optDouble("latest_score", 0.0),
+            latestDate = survey.optString("latest_date").ifBlank { null },
+            level = survey.optString("level"),
         )
     }
 
-    private fun parseFatigueCorrelationReport(response: JSONObject): FatigueCorrelationReport {
-        val cells = mutableListOf<FatigueCorrelationCell>()
+    private fun parseWorkloadCorrelationReport(response: JSONObject): WorkloadCorrelationReport {
+        val cells = mutableListOf<WorkloadCorrelationCell>()
         val array = response.optJSONArray("cells") ?: JSONArray()
         for (index in 0 until array.length()) {
             val cell = array.optJSONObject(index) ?: continue
             cells.add(
-                FatigueCorrelationCell(
+                WorkloadCorrelationCell(
                     feature = cell.optString("feature"),
                     target = cell.optString("target"),
                     pearson = cell.nullableDouble("pearson"),
@@ -1812,7 +1782,7 @@ class HomeVisitRepository private constructor(
                 )
             )
         }
-        return FatigueCorrelationReport(
+        return WorkloadCorrelationReport(
             days = response.optInt("days", 0),
             rowsUsed = response.optInt("rows_used", 0),
             cells = cells,

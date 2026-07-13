@@ -70,8 +70,8 @@ data class HomeSnapshot(
     val shiftActive: Boolean,
     val shiftWorkDayId: Int?,
     val startPrompt: HomeStartPrompt,
-    val recovery: HomeRecovery?,
-    val pricing: RecoveryPricing?,
+    val recovery: HomeOverwork?,
+    val pricing: OverworkPricing?,
     val monthMoney: HomeMoney,
     val yesterdayMoney: HomeMoney,
     val hourlyVsMonth: Double,
@@ -90,10 +90,10 @@ data class HomeStartPrompt(
 )
 
 /** Состояние восстановления. `verdict` — go/edge/skip для окраски. */
-data class HomeRecovery(
-    val recoveryDebt: Double,
-    val burnoutScore: Double,
-    val fatigueScore: Double,
+data class HomeOverwork(
+    val overworkIndex: Double,
+    val workloadSurveyScore: Double,
+    val workloadIndex: Double,
     val weeklyAverage: Double,
     val level: String,
     val verdict: String,
@@ -158,10 +158,9 @@ data class ProfileSnapshot(
     val user: ProfileUser,
     val month: ProfileMonth,
     val indices: ProfileIndices,
-    val pricing: RecoveryPricing?,
+    val pricing: OverworkPricing?,
     val wellbeing: ProfileWellbeing,
     val driving: ProfileDriving?,
-    val gait: ProfileGait?,
     val fromCache: Boolean = false,
 )
 
@@ -198,7 +197,7 @@ data class IndexReason(
 )
 
 /** Во что состояние обходится в деньгах: обычный минимум против сегодняшнего. */
-data class RecoveryPricing(
+data class OverworkPricing(
     val debt: Double,
     val markupPercent: Int,
     val baseMinHourly: Int,
@@ -259,21 +258,6 @@ data class DrivingWithinDay(
     val text: String,
 )
 
-/**
- * Походка — по акселерометру, только во время ходьбы.
- *
- * Уставший человек идёт медленнее, но главное — неровнее: разброс времени между шагами
- * растёт. Для усталости это более прямой сигнал, чем стиль вождения: там между телом и
- * датчиком стоит машина, здесь — ничего.
- */
-data class ProfileGait(
-    val cadence: Double,       // шагов в минуту
-    val stepCv: Double,        // разброс времени шага, %
-    val regularity: Double,    // ровность шага, 0..1
-    val walkMinutes: Double,
-    val withinDay: DrivingWithinDay?,
-)
-
 data class DrivingRating(
     val stars: Int,
     val deltaPct: Double,
@@ -287,7 +271,7 @@ data class WorkDaySummary(
     val telemedCount: Int = 0,
     val grossIncome: Double = 0.0,
     val netHourlyIncome: Double = 0.0,
-    val fatigueScore: Double = 0.0,
+    val workloadIndex: Double = 0.0,
 )
 
 data class VisitDraft(
@@ -311,17 +295,17 @@ data class CandidateEstimate(
     val marginalHourly: Double,
     val extraKm: Double,
     val extraDriveMinutes: Double,
-    val fatigueLevel: String,
+    val workloadLevel: String,
     // Состояние поднимает МИНИМАЛЬНЫЙ ТАРИФ, а не добавляет отдельную надбавку.
-    // Прежнее поле fatigueExtraPayment приходило с сервера и не показывалось ни на
+    // Прежнее поле REMOVED_fatigueExtraPayment приходило с сервера и не показывалось ни на
     // одном экране; складывать его с поднятым порогом значило бы взять наценку дважды.
     val baseMinHourly: Double = 0.0,
     val effectiveMinHourly: Double = 0.0,
-    val recoveryMarkupPercent: Int = 0,
-    val recoveryBlocksOutsideZone: Boolean = false,
+    val overworkMarkupPercent: Int = 0,
+    val overworkBlocksOutsideZone: Boolean = false,
 ) {
     /** Минимум сегодня выше обычного — это надо показать на экране Оценки. */
-    val tariffRaised: Boolean get() = recoveryMarkupPercent > 0 && effectiveMinHourly > baseMinHourly
+    val tariffRaised: Boolean get() = overworkMarkupPercent > 0 && effectiveMinHourly > baseMinHourly
 }
 
 data class CandidateRequestResult(
@@ -382,19 +366,18 @@ data class EndDayDetails(
     val tollExpenses: Double,
     val tollCompensation: Double,
     val otherExpenses: Double,
-    val userFatigueScore: Double?,
+    val userWorkloadIndex: Double?,
     val foodMealExpenses: Double = 0.0,
     val coffeeExpenses: Double = 0.0,
     val drinksExpenses: Double = 0.0,
     val parkingExpenses: Double = 0.0,
-    // Штуки, а не рубли: 300 ₽ — это одна чашка в аэропорту или три в ларьке,
-    // а на восстановление влияет количество кофеина, а не сумма чека.
-    val coffeeUnits: Double = 0.0,
-    val drinksUnits: Double = 0.0,
-    val mealUnits: Double = 0.0,
-    // Самооценка усталости 1–10. Она же — обратная связь: сравнивая её с нашей
-    // оценкой, система учится на конкретном человеке.
-    val selfRating: Double = 0.0,
+    // Еда и питьё — ТОЛЬКО рубли. Количество чашек кофе это физиологический вход,
+    // из которого выводится состояние человека, а значит специальная категория
+    // персональных данных (152-ФЗ, ст. 10).
+    //
+    // Загруженность смены 1–10 — оценка УСЛОВИЙ ТРУДА, а не самочувствия. Она же
+    // обратная связь: сравнивая её с нашей, система подстраивается под человека.
+    val workloadRating: Double = 0.0,
 )
 
 /**
@@ -481,9 +464,9 @@ data class ReportSummary(
     val drinksExpenses: Double,
     val tollExpenses: Double,
     val otherExpenses: Double,
-    val fatigueScore: Double,
+    val workloadIndex: Double,
     val fatigueWeeklyAverage: Double,
-    val recoveryDebt: Double,
+    val overworkIndex: Double,
 )
 
 data class ClinicReportRow(
@@ -500,32 +483,30 @@ data class ClinicReportRow(
     val netHourlyIncome: Double,
 )
 
-data class FatigueSnapshot(
+data class WorkloadSnapshot(
     val source: String,
     val workDayId: Int?,
     val date: String?,
-    val summary: FatigueSummary?,
-    val latestFeedback: FatigueFeedback?,
-    val cbi: CbiInfo,
+    val summary: WorkloadSummary?,
+    val latestFeedback: WorkloadFeedback?,
+    val survey: SurveyInfo,
     val fromCache: Boolean = false,
 )
 
-data class FatigueSummary(
+data class WorkloadSummary(
     val score: Double,
     val weeklyAverage: Double,
-    val recoveryDebt: Double,
+    val overworkIndex: Double,
     val level: String,
     val longStopCount: Int,
     val pauseMinutes: Double,
     val heavyVisitCount: Int,
-    val circadianRiskMinutes: Double,
-    val burnoutScore: Double,
-    val sleepHours: Double,
-    val sleepQuality: Double,
+    val nightWorkMinutes: Double,
+    val workloadSurveyScore: Double,
     val breakHoursBefore: Double,
 )
 
-data class FatigueFeedback(
+data class WorkloadFeedback(
     val predictedScore: Double,
     val userScore: Double,
     val feedbackType: String,
@@ -533,28 +514,28 @@ data class FatigueFeedback(
     val createdAt: String?,
 )
 
-data class FatigueFeedbackResult(
+data class WorkloadFeedbackResult(
     val predictedScore: Double,
     val userScore: Double,
     val error: Double,
     val activeWeightsCount: Int,
 )
 
-data class CbiInfo(
+data class SurveyInfo(
     val questions: List<String>,
     val latestScore: Double,
     val latestDate: String?,
     val level: String,
 )
 
-data class FatigueCorrelationReport(
+data class WorkloadCorrelationReport(
     val days: Int,
     val rowsUsed: Int,
-    val cells: List<FatigueCorrelationCell>,
+    val cells: List<WorkloadCorrelationCell>,
     val fromCache: Boolean = false,
 )
 
-data class FatigueCorrelationCell(
+data class WorkloadCorrelationCell(
     val feature: String,
     val target: String,
     val pearson: Double?,
@@ -562,16 +543,16 @@ data class FatigueCorrelationCell(
     val n: Int,
 )
 
-data class FatigueTrendPoint(
+data class WorkloadTrendPoint(
     val date: String,
     val score: Double,
     val weeklyAverage: Double,
-    val recoveryDebt: Double,
+    val overworkIndex: Double,
 )
 
-data class FatigueTrendReport(
+data class WorkloadTrendReport(
     val days: Int,
-    val points: List<FatigueTrendPoint>,
+    val points: List<WorkloadTrendPoint>,
     val fromCache: Boolean = false,
 )
 

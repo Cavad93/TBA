@@ -3,18 +3,18 @@ from __future__ import annotations
 from app.config import AppConfig, CarConfig, DefaultsConfig, FinanceConfig, GeoConfig, LocationApiConfig, RouteConfig, RoutingConfig
 from app.db import connect, init_db
 from app.models import DailyStats
-from app.repositories import DailyStatsRepository, DrivingBehaviorRepository, FatigueFeedbackRepository, SettingsRepository, WorkDayRepository
-from app.services.mobile_fatigue_service import CBI_QUESTIONS, MobileFatigueService
+from app.repositories import DailyStatsRepository, DrivingBehaviorRepository, WorkloadFeedbackRepository, SettingsRepository, WorkDayRepository
+from app.services.mobile_workload_service import WORKLOAD_QUESTIONS, MobileWorkloadService
 
 
 def test_mobile_cbi_saves_score_and_settings(config) -> None:
 
     with connect(config) as connection:
-        result = MobileFatigueService(connection).save_cbi([4, 3, 2, 1, 0, 2, 4])
-        latest_cbi = SettingsRepository(connection).get_float("latest_cbi_score", 0)
+        result = MobileWorkloadService(connection).save_survey([4, 3, 2, 1, 0, 2, 4])
+        latest_cbi = SettingsRepository(connection).get_float("workload_survey_score", 0)
 
     assert result["ok"] is True
-    assert result["score"] == round(16 / (4 * len(CBI_QUESTIONS)) * 100, 1)
+    assert result["score"] == round(16 / (4 * len(WORKLOAD_QUESTIONS)) * 100, 1)
     assert latest_cbi == result["score"]
 
 
@@ -37,16 +37,14 @@ def test_mobile_feedback_uses_latest_closed_day(config) -> None:
                 actual_km=35,
                 actual_avg_speed_kmh=25,
                 actual_service_minutes_per_visit=20,
-                fatigue_score=60,
-                fatigue_weekly_average=55,
-                recovery_debt=35,
-                sleep_hours=6,
-                sleep_quality=3,
+                workload_index=60,
+                workload_weekly_average=55,
+                overwork_index=35,
                 break_hours_before=10,
             ),
         )
-        result = MobileFatigueService(connection).save_feedback({"action": "higher"})
-        feedback = FatigueFeedbackRepository(connection).latest_for_day(day.id)
+        result = MobileWorkloadService(connection).save_feedback({"action": "higher"})
+        feedback = WorkloadFeedbackRepository(connection).latest_for_day(day.id)
 
     assert result["ok"] is True
     assert result["predicted_score"] == 60
@@ -78,9 +76,8 @@ def test_mobile_correlation_report_payload(config) -> None:
                     actual_km=30 + index,
                     actual_avg_speed_kmh=25,
                     actual_service_minutes_per_visit=20,
-                    fatigue_score=40 + index * 10,
-                    recovery_debt=20 + index * 5,
-                    sleep_hours=7 - index,
+                    workload_index=40 + index * 10,
+                    overwork_index=20 + index * 5 - index,
                 ),
             )
             driving.upsert(
@@ -89,12 +86,12 @@ def test_mobile_correlation_report_payload(config) -> None:
                 harsh_braking_count=index,
                 aggressive_score=30 + index * 20,
             )
-        payload = MobileFatigueService(connection).correlation(14)
+        payload = MobileWorkloadService(connection).correlation(14)
 
     assert payload["ok"] is True
     assert payload["days"] == 14
     assert payload["rows_used"] == 3
-    assert any(cell["target"] == "fatigue_score" and cell["feature"] == "aggressive_score" for cell in payload["cells"])
+    assert any(cell["target"] == "workload_index" and cell["feature"] == "aggressive_score" for cell in payload["cells"])
 
 
 def test_mobile_fatigue_trend_returns_chronological_points(config) -> None:
@@ -119,13 +116,13 @@ def test_mobile_fatigue_trend_returns_chronological_points(config) -> None:
                     actual_km=30,
                     actual_avg_speed_kmh=25,
                     actual_service_minutes_per_visit=20,
-                    fatigue_score=40 + index * 10,
-                    fatigue_weekly_average=45 + index * 5,
-                    recovery_debt=20 + index * 5,
+                    workload_index=40 + index * 10,
+                    workload_weekly_average=45 + index * 5,
+                    overwork_index=20 + index * 5,
                 ),
             )
 
-        payload = MobileFatigueService(connection).trend(30)
+        payload = MobileWorkloadService(connection).trend(30)
 
     assert payload["ok"] is True
     scores = [point["score"] for point in payload["points"]]

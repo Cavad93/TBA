@@ -7,9 +7,9 @@ from datetime import date, datetime, timedelta
 
 from app.repositories import DailyStatsRepository, SettingsRepository, WorkDayRepository
 from app.services.indices_service import level_for
-from app.services.mobile_fatigue_service import MobileFatigueService
+from app.services.mobile_workload_service import MobileWorkloadService
 from app.services.mobile_report_service import MobileReportService
-from app.services.recovery_pricing_service import RecoveryPricing, build_pricing
+from app.services.overwork_pricing_service import OverworkPricing, build_pricing
 
 
 # Порог «зелёной зоны» восстановления: ниже — отдохнул, ресурс есть.
@@ -31,9 +31,9 @@ class HomeService:
         self.stats = DailyStatsRepository(connection)
         self.settings = SettingsRepository(connection)
         self.reports = MobileReportService(connection)
-        self.fatigue = MobileFatigueService(connection)
+        self.fatigue = MobileWorkloadService(connection)
 
-    def _pricing(self, debt: float) -> RecoveryPricing:
+    def _pricing(self, debt: float) -> OverworkPricing:
         min_hourly = self.settings.get_float("min_hourly_income", 600)
         return build_pricing(
             debt=debt,
@@ -84,7 +84,7 @@ class HomeService:
             },
             "start_prompt": self._start_prompt(latest_closed),
             "recovery": recovery,
-            "pricing": self._pricing(recovery["recovery_debt"]).payload() if recovery else None,
+            "pricing": self._pricing(recovery["overwork_index"]).payload() if recovery else None,
             "money": money,
             "trends": trends,
             "green_streak": streak,
@@ -122,15 +122,14 @@ class HomeService:
     def _recovery_payload(self, summary: dict[str, Any] | None, source: str | None) -> dict[str, Any] | None:
         if not summary:
             return None
-        debt = float(summary.get("recovery_debt") or 0)
+        debt = float(summary.get("overwork_index") or 0)
         return {
-            "recovery_debt": round(debt, 1),
-            "burnout_score": round(float(summary.get("burnout_score") or 0), 1),
-            "fatigue_score": round(float(summary.get("score") or 0), 1),
+            "overwork_index": round(debt, 1),
+            "workload_survey_score": round(float(summary.get("workload_survey_score") or 0), 1),
+            "workload_index": round(float(summary.get("score") or 0), 1),
             "weekly_average": round(float(summary.get("weekly_average") or 0), 1),
             "level": str(summary.get("level") or ""),
-            "sleep_hours": float(summary.get("sleep_hours") or 0),
-            "sleep_quality": float(summary.get("sleep_quality") or 0),
+            "break_hours_before": float(summary.get("break_hours_before") or 0),
             "break_hours_before": float(summary.get("break_hours_before") or 0),
             "verdict": _debt_verdict(debt),
             "source": source or "none",
@@ -141,14 +140,14 @@ class HomeService:
         debt_delta = None
         rows = self.stats.last(2)
         if recovery is not None and len(rows) >= 2:
-            prev_debt = float(rows[1]["recovery_debt"] or 0)
-            debt_delta = round(recovery["recovery_debt"] - prev_debt, 1)
+            prev_debt = float(rows[1]["overwork_index"] or 0)
+            debt_delta = round(recovery["overwork_index"] - prev_debt, 1)
         return {"hourly_vs_month": hourly_vs_month, "debt_vs_prev": debt_delta}
 
     def _green_streak(self) -> int:
         streak = 0
         for row in self.stats.last(60):
-            if float(row["recovery_debt"] or 0) < GREEN_DEBT:
+            if float(row["overwork_index"] or 0) < GREEN_DEBT:
                 streak += 1
             else:
                 break
@@ -191,7 +190,7 @@ class HomeService:
             ]
 
         recs: list[dict[str, str]] = []
-        debt = recovery["recovery_debt"]
+        debt = recovery["overwork_index"]
         weekly = recovery["weekly_average"]
 
         # 1. Состояние → уровень по матрице → что делать.
@@ -250,9 +249,9 @@ class HomeService:
         return recs[:3] if streak < 3 else recs[:4]
 
     def _planning_rec(self, recovery: dict[str, Any], active: Any, debt: float) -> dict[str, str]:
-        sleep = float(active.sleep_hours) if active is not None else recovery["sleep_hours"]
-        quality = float(active.sleep_quality) if active is not None else recovery["sleep_quality"]
-        rested = sleep >= 7 and quality >= 3
+        break_hours = float(active.break_hours_before) if active is not None else recovery["break_hours_before"]
+        # Норма перерыва между сменами — 11 часов (ТК РФ, ст. 110).
+        rested = break_hours >= 11
 
         if debt < GREEN_DEBT and rested:
             return {
@@ -261,7 +260,7 @@ class HomeService:
                 "title": "Можно поработать плотно",
                 "text": "Ты отдохнул и запас сил есть — сегодня можно взять больше заказов и дальние маршруты.",
             }
-        if debt >= EDGE_DEBT or (sleep and sleep < 6):
+        if debt >= EDGE_DEBT or (break_hours and break_hours < 11):
             return {
                 "kind": "planning",
                 "tone": "skip",

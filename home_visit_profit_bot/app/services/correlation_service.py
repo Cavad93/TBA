@@ -5,18 +5,25 @@ from dataclasses import dataclass
 from math import sqrt
 from typing import Any
 
-from app.repositories import DrivingBehaviorRepository, FatigueFeedbackRepository, SettingsRepository
+from app.repositories import DrivingBehaviorRepository, WorkloadFeedbackRepository, SettingsRepository
 
 
+# Признаки, по которым модель подстраивается под конкретного человека.
+#
+# Прежде здесь были кофеин, траты на еду и недосып: из них выводилось состояние
+# здоровья, а это специальная категория персональных данных (152-ФЗ, ст. 10). Стиль
+# вождения тоже убран — показывать телематику можно, а выводить из неё утомляемость
+# водителя уже нет.
+#
+# Осталось то, что описывает РЕЖИМ ТРУДА: длина смены, число адресов, километры,
+# ночные часы и перерыв между сменами. Модель учится, насколько плотный график
+# тяготит именно этого человека, — по его же ответу «насколько загруженной была смена».
 LEARNING_FEATURES = (
-    "aggressive_score",
-    "harsh_brake_per_100km",
-    "harsh_accel_per_100km",
-    "lane_change_per_100km",
-    "jerk_score",
-    "food_per_hour",
-    "coffee_per_hour",
-    "sleep_debt",
+    "work_hours",
+    "visits_count",
+    "day_km",
+    "night_hours",
+    "break_deficit",
 )
 MAX_SINGLE_WEIGHT = 8.0
 MAX_TOTAL_WEIGHT = 20.0
@@ -51,13 +58,13 @@ def build_correlation_report(driving_repo: DrivingBehaviorRepository, days: int 
         "stop_go_per_100km",
         "jerk_score",
         "speed_variability_score",
-        "food_per_hour",
-        "meal_per_hour",
-        "coffee_per_hour",
-        "drinks_per_hour",
-        "sleep_debt",
+        "work_hours",
+        "visits_count",
+        "day_km",
+        "night_hours",
+        "break_deficit",
     ]
-    targets = ["fatigue_score", "recovery_debt", "user_fatigue_score", "burnout_score"]
+    targets = ["workload_index", "overwork_index", "user_workload_index", "workload_survey_score"]
     cells: list[CorrelationCell] = []
     for target in targets:
         for feature in features:
@@ -79,14 +86,14 @@ def build_correlation_report(driving_repo: DrivingBehaviorRepository, days: int 
     return CorrelationReport(days=days, rows_used=len(records), cells=cells)
 
 
-def fatigue_learning_adjustment(
+def workload_learning_adjustment(
     *,
     work_day_id: int,
     settings_repo: SettingsRepository,
     driving_repo: DrivingBehaviorRepository,
     stats_row: Any | None = None,
 ) -> float:
-    if (settings_repo.get("fatigue_learning_enabled", "true") or "true").lower() not in {"true", "1", "yes", "да", "on"}:
+    if (settings_repo.get("workload_learning_enabled", "true") or "true").lower() not in {"true", "1", "yes", "да", "on"}:
         return 0.0
     driving = driving_repo.get(work_day_id)
     if driving is None and stats_row is None:
@@ -107,11 +114,11 @@ def apply_feedback_learning(
     feedback_type: str,
     settings_repo: SettingsRepository,
     driving_repo: DrivingBehaviorRepository,
-    feedback_repo: FatigueFeedbackRepository,
+    feedback_repo: WorkloadFeedbackRepository,
     stats_row: Any | None = None,
 ) -> dict[str, float]:
     feedback_repo.add(work_day_id, predicted_score, user_score, feedback_type)
-    if (settings_repo.get("fatigue_learning_enabled", "true") or "true").lower() not in {"true", "1", "yes", "да", "on"}:
+    if (settings_repo.get("workload_learning_enabled", "true") or "true").lower() not in {"true", "1", "yes", "да", "on"}:
         return _load_weights(settings_repo)
     if len(feedback_repo.recent(28)) < 5:
         return _load_weights(settings_repo)
@@ -129,7 +136,7 @@ def apply_feedback_learning(
             MAX_SINGLE_WEIGHT,
         )
     weights = _limit_total_weight(weights)
-    settings_repo.set("fatigue_learning_weights_json", json.dumps(weights, ensure_ascii=False, sort_keys=True))
+    settings_repo.set("workload_learning_weights_json", json.dumps(weights, ensure_ascii=False, sort_keys=True))
     return weights
 
 
@@ -137,10 +144,10 @@ def _record_from_row(row: Any) -> dict[str, float | None]:
     km = float(row["actual_km"] or 0)
     hours = float(row["total_work_minutes"] or 0) / 60
     return {
-        "fatigue_score": _optional_positive(row["fatigue_score"]),
-        "recovery_debt": _optional_positive(row["recovery_debt"]),
-        "user_fatigue_score": _optional_positive(row["user_fatigue_score"]),
-        "burnout_score": _optional_positive(row["burnout_score"]),
+        "workload_index": _optional_positive(row["workload_index"]),
+        "overwork_index": _optional_positive(row["overwork_index"]),
+        "user_workload_index": _optional_positive(row["user_workload_index"]),
+        "workload_survey_score": _optional_positive(row["workload_survey_score"]),
         "aggressive_score": _optional_positive(row["aggressive_score"]),
         "harsh_accel_per_100km": _per_100km(row["harsh_acceleration_count"], km),
         "harsh_brake_per_100km": _per_100km(row["harsh_braking_count"], km),
@@ -149,11 +156,12 @@ def _record_from_row(row: Any) -> dict[str, float | None]:
         "stop_go_per_100km": _per_100km(row["stop_go_count"], km),
         "jerk_score": _optional_positive(row["jerk_score"]),
         "speed_variability_score": _optional_positive(row["speed_variability_score"]),
-        "food_per_hour": _per_hour(row["food_expenses"], hours),
-        "meal_per_hour": _per_hour(row["food_meal_expenses"], hours),
-        "coffee_per_hour": _per_hour(row["coffee_expenses"], hours),
-        "drinks_per_hour": _per_hour(row["drinks_expenses"], hours),
-        "sleep_debt": max(0.0, 7.0 - float(row["sleep_hours"] or 0)),
+        "work_hours": hours,
+        "visits_count": float(row["completed_visits_count"] or 0),
+        "day_km": float(row["actual_km"] or 0),
+        "night_hours": float(row["night_work_minutes"] or 0) / 60,
+        # Нехватка перерыва до нормы в 11 часов между сменами (ТК РФ, ст. 110).
+        "break_deficit": max(0.0, 11.0 - float(row["break_hours_before"] or 0)),
     }
 
 
@@ -166,9 +174,13 @@ def _record_from_objects(*, driving: Any | None, stats_row: Any | None) -> dict[
         "harsh_brake_per_100km": _per_100km(getattr(driving, "harsh_braking_count", 0), km),
         "lane_change_per_100km": _per_100km(getattr(driving, "lane_change_proxy_count", 0), km),
         "jerk_score": float(getattr(driving, "jerk_score", 0.0) or 0.0),
-        "food_per_hour": _per_hour(stats_row["food_expenses"], hours) if stats_row is not None else 0.0,
-        "coffee_per_hour": _per_hour(stats_row["coffee_expenses"], hours) if stats_row is not None else 0.0,
-        "sleep_debt": max(0.0, 7.0 - float(stats_row["sleep_hours"] or 0)) if stats_row is not None else 0.0,
+        "work_hours": hours,
+        "visits_count": float(stats_row["completed_visits_count"] or 0) if stats_row is not None else 0.0,
+        "day_km": float(stats_row["actual_km"] or 0) if stats_row is not None else 0.0,
+        "night_hours": float(stats_row["night_work_minutes"] or 0) / 60 if stats_row is not None else 0.0,
+        "break_deficit": (
+            max(0.0, 11.0 - float(stats_row["break_hours_before"] or 0)) if stats_row is not None else 0.0
+        ),
     }
 
 
@@ -179,16 +191,18 @@ def _feature_pressure(feature: str, value: float) -> float:
         "harsh_accel_per_100km": 12.0,
         "lane_change_per_100km": 25.0,
         "jerk_score": 25.0,
-        "food_per_hour": 180.0,
-        "coffee_per_hour": 100.0,
-        "sleep_debt": 4.0,
+        "work_hours": 13.0,
+        "visits_count": 18.0,
+        "day_km": 200.0,
+        "night_hours": 4.0,
+        "break_deficit": 5.0,
     }
     pressure = _clamp(value / caps.get(feature, 1.0), 0.0, 1.0)
     return pressure - 0.35
 
 
 def _load_weights(settings_repo: SettingsRepository) -> dict[str, float]:
-    raw = settings_repo.get("fatigue_learning_weights_json", "{}") or "{}"
+    raw = settings_repo.get("workload_learning_weights_json", "{}") or "{}"
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:

@@ -127,13 +127,13 @@ import com.homevisit.location.domain.SettingType
 import com.homevisit.location.domain.SettingsSection
 import com.homevisit.location.domain.EndDayDetails
 import com.homevisit.location.domain.ExpenseCategory
-import com.homevisit.location.domain.FatigueCorrelationCell
-import com.homevisit.location.domain.FatigueCorrelationReport
-import com.homevisit.location.domain.FatigueSnapshot
-import com.homevisit.location.domain.FatigueTrendPoint
-import com.homevisit.location.domain.FatigueTrendReport
+import com.homevisit.location.domain.WorkloadCorrelationCell
+import com.homevisit.location.domain.WorkloadCorrelationReport
+import com.homevisit.location.domain.WorkloadSnapshot
+import com.homevisit.location.domain.WorkloadTrendPoint
+import com.homevisit.location.domain.WorkloadTrendReport
 import com.homevisit.location.domain.HomeRecommendation
-import com.homevisit.location.domain.HomeRecovery
+import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
@@ -150,7 +150,7 @@ import com.homevisit.location.domain.WorkDayStatus
 import com.homevisit.location.sync.SyncScheduler
 import com.homevisit.location.ui.AppSettingsUiState
 import com.homevisit.location.ui.CandidateUiState
-import com.homevisit.location.ui.FatigueUiState
+import com.homevisit.location.ui.WorkloadUiState
 import com.homevisit.location.ui.GpsEstimateUiState
 import com.homevisit.location.ui.GpsHintUiState
 import com.homevisit.location.ui.HomeUiState
@@ -269,10 +269,10 @@ internal fun ReportSummaryCard(snapshot: ReportSnapshot) {
         ReportLine("Заказы", money(snapshot.summary.visitIncome))
         ReportLine("Удалённые заказы", money(snapshot.summary.telemedIncome))
         ReportLine("На точке", "${money(snapshot.summary.officeIncome)} / ${minutesText(snapshot.summary.officeMinutes)}")
-        if (snapshot.summary.fatigueScore > 0 || snapshot.summary.recoveryDebt > 0) {
+        if (snapshot.summary.workloadIndex > 0 || snapshot.summary.overworkIndex > 0) {
             ReportLine(
                 "Нагрузка",
-                "${oneDecimal(snapshot.summary.fatigueScore)}/100, долг ${oneDecimal(snapshot.summary.recoveryDebt)}",
+                "${oneDecimal(snapshot.summary.workloadIndex)}/100, долг ${oneDecimal(snapshot.summary.overworkIndex)}",
             )
         }
     }

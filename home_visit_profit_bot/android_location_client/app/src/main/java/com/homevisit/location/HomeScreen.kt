@@ -37,6 +37,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.filled.Coffee
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.Card
@@ -127,13 +128,13 @@ import com.homevisit.location.domain.SettingType
 import com.homevisit.location.domain.SettingsSection
 import com.homevisit.location.domain.EndDayDetails
 import com.homevisit.location.domain.ExpenseCategory
-import com.homevisit.location.domain.FatigueCorrelationCell
-import com.homevisit.location.domain.FatigueCorrelationReport
-import com.homevisit.location.domain.FatigueSnapshot
-import com.homevisit.location.domain.FatigueTrendPoint
-import com.homevisit.location.domain.FatigueTrendReport
+import com.homevisit.location.domain.WorkloadCorrelationCell
+import com.homevisit.location.domain.WorkloadCorrelationReport
+import com.homevisit.location.domain.WorkloadSnapshot
+import com.homevisit.location.domain.WorkloadTrendPoint
+import com.homevisit.location.domain.WorkloadTrendReport
 import com.homevisit.location.domain.HomeRecommendation
-import com.homevisit.location.domain.HomeRecovery
+import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
@@ -150,7 +151,7 @@ import com.homevisit.location.domain.WorkDayStatus
 import com.homevisit.location.sync.SyncScheduler
 import com.homevisit.location.ui.AppSettingsUiState
 import com.homevisit.location.ui.CandidateUiState
-import com.homevisit.location.ui.FatigueUiState
+import com.homevisit.location.ui.WorkloadUiState
 import com.homevisit.location.ui.GpsEstimateUiState
 import com.homevisit.location.ui.GpsHintUiState
 import com.homevisit.location.ui.HomeUiState
@@ -197,8 +198,8 @@ internal fun HomeScreen(
         StartShiftSheet(
             startPrompt = snapshot?.startPrompt,
             onDismiss = { showStartSheet = false },
-            onConfirm = { odometer, sleep, quality, breakHours ->
-                workActions.onStartShift(odometer, sleep, quality, breakHours)
+            onConfirm = { odometer, breakUninterrupted, breakHours ->
+                workActions.onStartShift(odometer, breakUninterrupted, breakHours)
                 showStartSheet = false
             },
         )
@@ -329,7 +330,7 @@ internal fun ShiftStatusPill(active: Boolean) {
 
 /** «2026-07-10» → «ПЯТНИЦА, 10 ИЮЛЯ». */
 @Composable
-internal fun RecoveryHeroCard(recovery: HomeRecovery, debtVsPrev: Double?, streak: Int) {
+internal fun RecoveryHeroCard(recovery: HomeOverwork, debtVsPrev: Double?, streak: Int) {
     val style = homeVerdictStyle(recovery.verdict)
     Card(
         shape = RoundedCornerShape(20.dp),
@@ -344,7 +345,7 @@ internal fun RecoveryHeroCard(recovery: HomeRecovery, debtVsPrev: Double?, strea
             Text(style.phrase, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = style.onContainer)
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    oneDecimal(recovery.recoveryDebt),
+                    oneDecimal(recovery.overworkIndex),
                     fontFamily = JetBrainsMono,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
@@ -496,11 +497,13 @@ internal fun OnboardingStep(number: String, title: String, body: String) {
 internal fun StartShiftSheet(
     startPrompt: HomeStartPrompt?,
     onDismiss: () -> Unit,
-    onConfirm: (Double, Double, Double, Double) -> Unit,
+    onConfirm: (Double, Boolean, Double) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var sleepHours by rememberSaveable { mutableStateOf(7) }
-    var sleepQuality by rememberSaveable { mutableStateOf(3) } // 1 плохо / 3 норм / 5 отлично
+    // Перерыв между сменами приложение вычисляет само — из времени закрытия прошлой
+    // смены. Человек только подтверждает. Это факт о РЕЖИМЕ ТРУДА (ТК РФ, ст. 107–110),
+    // а не о состоянии здоровья: вопросов о сне здесь больше нет и не будет.
+    var breakUninterrupted by rememberSaveable { mutableStateOf(true) }
     var odometerText by rememberSaveable {
         mutableStateOf(
             if (startPrompt?.hasLastOdometer == true) startPrompt.lastOdometer.toInt().toString() else "",
@@ -516,48 +519,40 @@ internal fun StartShiftSheet(
         ) {
             Text("Начать смену", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
 
-            // Сон — обязательно. Степпер часов.
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Как спал этой ночью?", style = MaterialTheme.typography.titleSmall)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedIconButton(onClick = { if (sleepHours > 0) sleepHours-- }) {
-                        Icon(Icons.Filled.Remove, contentDescription = "Меньше")
+            // Перерыв между сменами — посчитан, подтверждаем.
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(
+                            Icons.Filled.Schedule,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Text(
+                            if (hasPrev)
+                                "Перерыв между сменами — ${oneDecimal(breakHours)} ч. Посчитали по времени закрытия прошлой смены."
+                            else
+                                "Первая смена — перерыв не считаем.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        )
                     }
-                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.Bottom) {
-                        Text("$sleepHours", fontFamily = JetBrainsMono, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.width(6.dp))
-                        Text(hoursWord(sleepHours), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 4.dp))
-                    }
-                    OutlinedIconButton(onClick = { if (sleepHours < 14) sleepHours++ }) {
-                        Icon(Icons.Filled.Add, contentDescription = "Больше")
-                    }
-                }
-                // Качество — три сегмента.
-                val options = listOf("Плохо" to 1, "Норм" to 3, "Отлично" to 5)
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(12.dp))
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    options.forEach { (label, value) ->
-                        val active = sleepQuality == value
-                        Box(
-                            Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(9.dp))
-                                .background(if (active) MaterialTheme.colorScheme.surface else Color.Transparent)
-                                .clickable { sleepQuality = value }
-                                .padding(vertical = 10.dp),
-                            contentAlignment = Alignment.Center,
+                    if (hasPrev) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                label,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                                color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                "Перерыв был непрерывным?",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
                             )
+                            Switch(checked = breakUninterrupted, onCheckedChange = { breakUninterrupted = it })
                         }
                     }
                 }
@@ -582,26 +577,10 @@ internal fun StartShiftSheet(
                 }
             }
 
-            // Перерыв — авто, синяя карточка.
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-            ) {
-                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(Icons.Filled.Coffee, contentDescription = null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(20.dp))
-                    Text(
-                        if (hasPrev) "Перерыв с прошлой смены — ${oneDecimal(breakHours)} ч. Посчитали сами по времени."
-                        else "Первая смена — перерыв не считаем.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                    )
-                }
-            }
-
             Button(
                 onClick = {
                     val odometer = odometerText.toDoubleOrNull() ?: 0.0
-                    onConfirm(odometer, sleepHours.toDouble(), sleepQuality.toDouble(), breakHours)
+                    onConfirm(odometer, breakUninterrupted, breakHours)
                 },
                 modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = RoundedCornerShape(14.dp),

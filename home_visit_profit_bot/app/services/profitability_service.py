@@ -4,9 +4,9 @@ import math
 
 from app.models import CandidateCalculation, Point, RouteSummary, Visit, WorkDay
 from app.repositories import DailyStatsRepository, LocationEventRepository, SettingsRepository, VisitRepository
-from app.services.fatigue_service import calculate_candidate_fatigue
+from app.services.workload_service import calculate_candidate_workload
 from app.services.optimization_service import optimize_route, optimize_route_estimated, optimize_route_manual
-from app.services.recovery_pricing_service import build_pricing
+from app.services.overwork_pricing_service import build_pricing
 from app.services.routing_service import RoutingError
 
 
@@ -192,7 +192,7 @@ def calculate_candidate_impact(
     # Состояние считаем ДО решения: оно поднимает пороги, а не приписывается к готовому
     # вердикту. Иначе «можно брать» и «сегодня твой минимум выше» противоречили бы друг
     # другу на одном экране.
-    fatigue = calculate_candidate_fatigue(
+    fatigue = calculate_candidate_workload(
         day=day,
         existing_visits=existing_visits,
         candidate=candidate,
@@ -203,7 +203,7 @@ def calculate_candidate_impact(
         location_events=location_events,
     )
     pricing = build_pricing(
-        debt=fatigue.recovery_debt_after,
+        debt=fatigue.overwork_index_after,
         min_hourly=min_hourly,
         outside_min_hourly=outside_min_hourly,
         min_marginal_hourly=min_marginal_hourly,
@@ -272,18 +272,18 @@ def calculate_candidate_impact(
         required_extra_for_outside_zone=tariff["required_extra_for_outside_zone"],
         target_day_hourly=target_day_hourly,
         target_marginal_hourly=min_marginal_hourly,
-        fatigue_score_before=fatigue.before_score,
-        fatigue_score_after=fatigue.after_score,
-        fatigue_weekly_average=fatigue.weekly_average,
-        fatigue_level=fatigue.level,
-        fatigue_reason=pricing.reason,
-        recovery_debt_before=fatigue.recovery_debt_before,
-        recovery_debt_after=fatigue.recovery_debt_after,
-        circadian_risk_minutes=fatigue.circadian_risk_minutes,
-        burnout_score=fatigue.burnout_score,
+        workload_index_before=fatigue.before_score,
+        workload_index_after=fatigue.after_score,
+        workload_weekly_average=fatigue.weekly_average,
+        workload_level=fatigue.level,
+        pricing_reason=pricing.reason,
+        overwork_index_before=fatigue.overwork_index_before,
+        overwork_index_after=fatigue.overwork_index_after,
+        night_work_minutes=fatigue.night_work_minutes,
+        workload_survey_score=fatigue.workload_survey_score,
         base_min_hourly=pricing.base_min_hourly,
         effective_min_hourly=pricing.effective_min_hourly,
-        recovery_markup_percent=round(pricing.markup * 100),
+        overwork_markup_percent=round(pricing.markup * 100),
         recovery_blocks_outside_zone=pricing.blocks_outside_zone,
     )
 

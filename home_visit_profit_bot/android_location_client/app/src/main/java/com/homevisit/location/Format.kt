@@ -127,13 +127,13 @@ import com.homevisit.location.domain.SettingType
 import com.homevisit.location.domain.SettingsSection
 import com.homevisit.location.domain.EndDayDetails
 import com.homevisit.location.domain.ExpenseCategory
-import com.homevisit.location.domain.FatigueCorrelationCell
-import com.homevisit.location.domain.FatigueCorrelationReport
-import com.homevisit.location.domain.FatigueSnapshot
-import com.homevisit.location.domain.FatigueTrendPoint
-import com.homevisit.location.domain.FatigueTrendReport
+import com.homevisit.location.domain.WorkloadCorrelationCell
+import com.homevisit.location.domain.WorkloadCorrelationReport
+import com.homevisit.location.domain.WorkloadSnapshot
+import com.homevisit.location.domain.WorkloadTrendPoint
+import com.homevisit.location.domain.WorkloadTrendReport
 import com.homevisit.location.domain.HomeRecommendation
-import com.homevisit.location.domain.HomeRecovery
+import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
@@ -150,7 +150,7 @@ import com.homevisit.location.domain.WorkDayStatus
 import com.homevisit.location.sync.SyncScheduler
 import com.homevisit.location.ui.AppSettingsUiState
 import com.homevisit.location.ui.CandidateUiState
-import com.homevisit.location.ui.FatigueUiState
+import com.homevisit.location.ui.WorkloadUiState
 import com.homevisit.location.ui.GpsEstimateUiState
 import com.homevisit.location.ui.GpsHintUiState
 import com.homevisit.location.ui.HomeUiState
@@ -324,7 +324,7 @@ internal fun parseNumber(value: String): Double? {
         ?.takeIf { it >= 0.0 }
 }
 
-internal fun parseCbiAnswers(value: String, count: Int): List<Int> {
+internal fun parseSurveyAnswers(value: String, count: Int): List<Int> {
     if (count <= 0) {
         return emptyList()
     }
@@ -335,21 +335,21 @@ internal fun parseCbiAnswers(value: String, count: Int): List<Int> {
     return values.take(count)
 }
 
-internal fun updateCbiAnswer(raw: String, count: Int, index: Int, value: Int): String {
-    val answers = parseCbiAnswers(raw, count).toMutableList()
+internal fun updateSurveyAnswer(raw: String, count: Int, index: Int, value: Int): String {
+    val answers = parseSurveyAnswers(raw, count).toMutableList()
     if (index in answers.indices) {
         answers[index] = value
     }
     return answers.joinToString(",")
 }
 
-internal fun sortedCorrelationCells(cells: List<FatigueCorrelationCell>): List<FatigueCorrelationCell> {
+internal fun sortedCorrelationCells(cells: List<WorkloadCorrelationCell>): List<WorkloadCorrelationCell> {
     return cells
         .filter { it.n >= 3 && (it.pearson != null || it.spearman != null) }
         .sortedByDescending { kotlin.math.abs(it.pearson ?: it.spearman ?: 0.0) }
 }
 
-internal fun fatigueFeatureTitle(value: String): String = when (value) {
+internal fun workloadFeatureTitle(value: String): String = when (value) {
     "aggressive_score" -> "агрессивность"
     "harsh_accel_per_100km" -> "резкие ускорения"
     "harsh_brake_per_100km" -> "резкие торможения"
@@ -366,11 +366,11 @@ internal fun fatigueFeatureTitle(value: String): String = when (value) {
     else -> value
 }
 
-internal fun fatigueTargetTitle(value: String): String = when (value) {
-    "fatigue_score" -> "нагрузка"
-    "recovery_debt" -> "долг"
-    "user_fatigue_score" -> "оценка исполнителя"
-    "burnout_score" -> "Самочувствие"
+internal fun workloadTargetTitle(value: String): String = when (value) {
+    "workload_index" -> "нагрузка"
+    "overwork_index" -> "долг"
+    "user_workload_index" -> "оценка исполнителя"
+    "workload_survey_score" -> "Самочувствие"
     else -> value
 }
 

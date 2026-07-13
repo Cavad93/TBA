@@ -127,13 +127,13 @@ import com.homevisit.location.domain.SettingType
 import com.homevisit.location.domain.SettingsSection
 import com.homevisit.location.domain.EndDayDetails
 import com.homevisit.location.domain.ExpenseCategory
-import com.homevisit.location.domain.FatigueCorrelationCell
-import com.homevisit.location.domain.FatigueCorrelationReport
-import com.homevisit.location.domain.FatigueSnapshot
-import com.homevisit.location.domain.FatigueTrendPoint
-import com.homevisit.location.domain.FatigueTrendReport
+import com.homevisit.location.domain.WorkloadCorrelationCell
+import com.homevisit.location.domain.WorkloadCorrelationReport
+import com.homevisit.location.domain.WorkloadSnapshot
+import com.homevisit.location.domain.WorkloadTrendPoint
+import com.homevisit.location.domain.WorkloadTrendReport
 import com.homevisit.location.domain.HomeRecommendation
-import com.homevisit.location.domain.HomeRecovery
+import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
@@ -150,7 +150,7 @@ import com.homevisit.location.domain.WorkDayStatus
 import com.homevisit.location.sync.SyncScheduler
 import com.homevisit.location.ui.AppSettingsUiState
 import com.homevisit.location.ui.CandidateUiState
-import com.homevisit.location.ui.FatigueUiState
+import com.homevisit.location.ui.WorkloadUiState
 import com.homevisit.location.ui.GpsEstimateUiState
 import com.homevisit.location.ui.GpsHintUiState
 import com.homevisit.location.ui.HomeUiState
@@ -166,77 +166,77 @@ import java.util.Locale
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun FatigueScreen(fatigueState: FatigueUiState, workActions: WorkActions) {
+internal fun WorkloadScreen(workloadState: WorkloadUiState, workActions: WorkActions) {
     var manualScoreText by rememberSaveable { mutableStateOf("") }
     var selectedCorrelationDays by rememberSaveable { mutableStateOf(14) }
     var selectedTrendDays by rememberSaveable { mutableStateOf(30) }
     var showAllCorrelations by rememberSaveable { mutableStateOf(false) }
-    var cbiAnswersText by rememberSaveable { mutableStateOf("") }
-    val snapshot = fatigueState.snapshot
+    var surveyAnswersText by rememberSaveable { mutableStateOf("") }
+    val snapshot = workloadState.snapshot
     val summary = snapshot?.summary
-    val cbiQuestions = snapshot?.cbi?.questions.orEmpty()
-    val cbiAnswers = parseCbiAnswers(cbiAnswersText, cbiQuestions.size)
+    val surveyQuestions = snapshot?.survey?.questions.orEmpty()
+    val surveyAnswers = parseSurveyAnswers(surveyAnswersText, surveyQuestions.size)
     ScreenColumn {
         StatusCard(
             title = "Нагрузка",
             value = summary?.let { "${oneDecimal(it.score)} / 100" } ?: "Нет данных",
             body = summary?.let {
-                "${it.level}. 7 дней: ${oneDecimal(it.weeklyAverage)}, долг восстановления: ${oneDecimal(it.recoveryDebt)}, Самочувствие: ${oneDecimal(it.burnoutScore)}."
+                "${it.level}. 7 дней: ${oneDecimal(it.weeklyAverage)}, долг восстановления: ${oneDecimal(it.overworkIndex)}, Самочувствие: ${oneDecimal(it.workloadSurveyScore)}."
             } ?: "Обновите сводку после синхронизации. Активный день считается предварительно, закрытый день берётся из статистики.",
         )
         Button(
             modifier = Modifier.fillMaxWidth(),
-            enabled = !fatigueState.isLoading,
-            onClick = workActions.onRefreshFatigue,
+            enabled = !workloadState.isLoading,
+            onClick = workActions.onRefreshWorkload,
         ) {
-            Text(if (fatigueState.isLoading) "Обновляю..." else "Обновить нагрузку")
+            Text(if (workloadState.isLoading) "Обновляю..." else "Обновить нагрузку")
         }
-        if (fatigueState.message.isNotBlank()) {
-            CompactCard(title = "Статус", body = fatigueState.message)
+        if (workloadState.message.isNotBlank()) {
+            CompactCard(title = "Статус", body = workloadState.message)
         }
         if (snapshot != null) {
             if (snapshot.fromCache) OfflineBadge()
-            FatigueSummaryCard(snapshot)
-            FatigueFeedbackCard(
+            WorkloadSummaryCard(snapshot)
+            WorkloadFeedbackCard(
                 snapshot = snapshot,
                 manualScoreText = manualScoreText,
                 onManualScoreChange = { manualScoreText = it },
-                onSubmit = workActions.onSubmitFatigueFeedback,
+                onSubmit = workActions.onSubmitWorkloadFeedback,
             )
-            CbiCard(
-                questions = cbiQuestions,
-                answers = cbiAnswers,
-                latestScore = snapshot.cbi.latestScore,
-                latestLevel = snapshot.cbi.level,
+            SurveyCard(
+                questions = surveyQuestions,
+                answers = surveyAnswers,
+                latestScore = snapshot.survey.latestScore,
+                latestLevel = snapshot.survey.level,
                 onAnswer = { index, value ->
-                    cbiAnswersText = updateCbiAnswer(cbiAnswersText, cbiQuestions.size, index, value)
+                    surveyAnswersText = updateSurveyAnswer(surveyAnswersText, surveyQuestions.size, index, value)
                 },
                 onSubmit = {
-                    workActions.onSubmitCbi(cbiAnswers)
-                    cbiAnswersText = ""
+                    workActions.onSubmitSurvey(surveyAnswers)
+                    surveyAnswersText = ""
                 },
             )
         }
-        FatigueTrendCard(
-            trend = fatigueState.trend,
+        WorkloadTrendCard(
+            trend = workloadState.trend,
             selectedDays = selectedTrendDays,
             onDaysChange = { selectedTrendDays = it },
-            onRefresh = { workActions.onRefreshFatigueTrend(selectedTrendDays) },
+            onRefresh = { workActions.onRefreshWorkloadTrend(selectedTrendDays) },
         )
-        FatigueCorrelationCard(
-            report = fatigueState.correlation,
+        WorkloadCorrelationCard(
+            report = workloadState.correlation,
             selectedDays = selectedCorrelationDays,
             showAll = showAllCorrelations,
             onDaysChange = { selectedCorrelationDays = it },
             onToggleShowAll = { showAllCorrelations = !showAllCorrelations },
-            onRefresh = { workActions.onRefreshFatigueCorrelation(selectedCorrelationDays) },
+            onRefresh = { workActions.onRefreshWorkloadCorrelation(selectedCorrelationDays) },
         )
     }
 }
 
 @Composable
-internal fun FatigueTrendCard(
-    trend: FatigueTrendReport?,
+internal fun WorkloadTrendCard(
+    trend: WorkloadTrendReport?,
     selectedDays: Int,
     onDaysChange: (Int) -> Unit,
     onRefresh: () -> Unit,
@@ -268,17 +268,17 @@ internal fun FatigueTrendCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            FatigueTrendChart(points)
+            WorkloadTrendChart(points)
             val last = points.last()
             ReportLine("Последний индекс", "${oneDecimal(last.score)}/100")
             ReportLine("7-дневная средняя", "${oneDecimal(last.weeklyAverage)}/100")
-            ReportLine("Долг восстановления", "${oneDecimal(last.recoveryDebt)}/100")
+            ReportLine("Долг восстановления", "${oneDecimal(last.overworkIndex)}/100")
         }
     }
 }
 
 @Composable
-internal fun FatigueTrendChart(points: List<FatigueTrendPoint>) {
+internal fun WorkloadTrendChart(points: List<WorkloadTrendPoint>) {
     val scoreColor = MaterialTheme.colorScheme.primary
     val avgColor = MaterialTheme.colorScheme.tertiary
     val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
@@ -321,19 +321,17 @@ internal fun FatigueTrendChart(points: List<FatigueTrendPoint>) {
 }
 
 @Composable
-internal fun FatigueSummaryCard(snapshot: FatigueSnapshot) {
+internal fun WorkloadSummaryCard(snapshot: WorkloadSnapshot) {
     val summary = snapshot.summary ?: return
     InputCard("Нагрузка и восстановление") {
         ReportMetricGrid(
             metrics = listOf(
                 "Индекс" to "${oneDecimal(summary.score)}/100",
                 "7 дней" to "${oneDecimal(summary.weeklyAverage)}/100",
-                "Долг" to "${oneDecimal(summary.recoveryDebt)}/100",
-                "Самочувствие" to "${oneDecimal(summary.burnoutScore)}/100",
-                "Сон" to "${oneDecimal(summary.sleepHours)} ч",
-                "Качество" to "${oneDecimal(summary.sleepQuality)}/5",
+                "Долг" to "${oneDecimal(summary.overworkIndex)}/100",
+                "Самочувствие" to "${oneDecimal(summary.workloadSurveyScore)}/100",
                 "Перерыв" to "${oneDecimal(summary.breakHoursBefore)} ч",
-                "Работа ночью" to minutesText(summary.circadianRiskMinutes),
+                "Работа ночью" to minutesText(summary.nightWorkMinutes),
             ),
         )
         ReportLine("Длинные остановки", summary.longStopCount.toString())
@@ -344,8 +342,8 @@ internal fun FatigueSummaryCard(snapshot: FatigueSnapshot) {
 }
 
 @Composable
-internal fun FatigueFeedbackCard(
-    snapshot: FatigueSnapshot,
+internal fun WorkloadFeedbackCard(
+    snapshot: WorkloadSnapshot,
     manualScoreText: String,
     onManualScoreChange: (String) -> Unit,
     onSubmit: (String, Double?) -> Unit,
@@ -396,7 +394,7 @@ internal fun FatigueFeedbackCard(
 }
 
 @Composable
-internal fun CbiCard(
+internal fun SurveyCard(
     questions: List<String>,
     answers: List<Int>,
     latestScore: Double,
@@ -438,8 +436,8 @@ internal fun CbiCard(
 }
 
 @Composable
-internal fun FatigueCorrelationCard(
-    report: FatigueCorrelationReport?,
+internal fun WorkloadCorrelationCard(
+    report: WorkloadCorrelationReport?,
     selectedDays: Int,
     showAll: Boolean,
     onDaysChange: (Int) -> Unit,
@@ -487,10 +485,10 @@ internal fun FatigueCorrelationCard(
 }
 
 @Composable
-internal fun CorrelationRow(cell: FatigueCorrelationCell) {
+internal fun CorrelationRow(cell: WorkloadCorrelationCell) {
     val value = cell.pearson ?: cell.spearman ?: 0.0
     ReportLine(
-        "${fatigueFeatureTitle(cell.feature)} -> ${fatigueTargetTitle(cell.target)}",
+        "${workloadFeatureTitle(cell.feature)} -> ${workloadTargetTitle(cell.target)}",
         "${oneDecimal(value)} (${cell.n})",
     )
 }

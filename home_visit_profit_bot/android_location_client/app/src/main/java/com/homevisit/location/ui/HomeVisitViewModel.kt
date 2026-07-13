@@ -11,9 +11,9 @@ import com.homevisit.location.domain.ClinicOptions
 import com.homevisit.location.domain.EndDayDetails
 import com.homevisit.location.domain.EndDayPreview
 import com.homevisit.location.domain.ExpenseCategory
-import com.homevisit.location.domain.FatigueCorrelationReport
-import com.homevisit.location.domain.FatigueSnapshot
-import com.homevisit.location.domain.FatigueTrendReport
+import com.homevisit.location.domain.WorkloadCorrelationReport
+import com.homevisit.location.domain.WorkloadSnapshot
+import com.homevisit.location.domain.WorkloadTrendReport
 import com.homevisit.location.domain.GpsDayEstimate
 import com.homevisit.location.domain.GpsVisitHint
 import com.homevisit.location.domain.HomeSnapshot
@@ -49,7 +49,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     private val endShiftState = MutableStateFlow(EndShiftUiState())
     private val gpsHintState = MutableStateFlow(GpsHintUiState())
     private val reportState = MutableStateFlow(ReportUiState())
-    private val fatigueState = MutableStateFlow(FatigueUiState())
+    private val workloadState = MutableStateFlow(WorkloadUiState())
     private val appSettingsState = MutableStateFlow(AppSettingsUiState())
     private val clinicsState = MutableStateFlow(ClinicOptions())
     private val syncMessageState = MutableStateFlow("")
@@ -89,8 +89,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                         finishAddress = day.finishAddress.orEmpty(),
                         startOdometer = day.startOdometer,
                         endOdometer = day.endOdometer,
-                        sleepHours = day.sleepHours,
-                        sleepQuality = day.sleepQuality,
+                        breakUninterrupted = day.breakUninterrupted,
                         breakHoursBefore = day.breakHoursBefore,
                         activeVisit = visits
                             .filter { it.status == VisitStatus.Accepted }
@@ -111,8 +110,8 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         gpsEstimate to endShift
     }
 
-    private val operationalState = combine(routeState, estimatesState, gpsHintState, reportState, fatigueState) { route, estimates, gpsHint, report, fatigue ->
-        OperationalUiState(route, estimates.first, gpsHint, report, fatigue, estimates.second)
+    private val operationalState = combine(routeState, estimatesState, gpsHintState, reportState, workloadState) { route, estimates, gpsHint, report, fatigue ->
+        OperationalUiState(route, estimates.first, gpsHint, report, workload, estimates.second)
     }
 
     private val auxState = combine(appSettingsState, clinicsState, homeStateFlow, shiftStateFlow, profileStateFlow) { appSettings, clinics, home, shift, profile ->
@@ -141,7 +140,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             gpsEstimate = operational.gpsEstimate,
             gpsHint = operational.gpsHint,
             report = operational.report,
-            fatigue = operational.fatigue,
+            workload = operational.workload,
             endShift = operational.endShift,
             sync = sync,
             appSettings = aux.appSettings,
@@ -212,12 +211,11 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     /** Старт смены с главного экрана: без адресов, перерыв рассчитан автоматически. */
-    fun startShift(startOdometer: Double, sleepHours: Double, sleepQuality: Double, breakHoursBefore: Double) {
+    fun startShift(startOdometer: Double, breakUninterrupted: Boolean, breakHoursBefore: Double) {
         viewModelScope.launch {
             repository.startDay(
                 startOdometer = startOdometer,
-                sleepHours = sleepHours,
-                sleepQuality = sleepQuality,
+                breakUninterrupted = breakUninterrupted,
                 breakHoursBefore = breakHoursBefore,
             )
         }
@@ -233,8 +231,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         startAddress: String,
         finishAddress: String,
         startOdometer: Double,
-        sleepHours: Double,
-        sleepQuality: Double,
+        breakUninterrupted: Boolean,
         breakHoursBefore: Double,
     ) {
         viewModelScope.launch {
@@ -242,8 +239,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 startAddress = startAddress,
                 finishAddress = finishAddress,
                 startOdometer = startOdometer,
-                sleepHours = sleepHours,
-                sleepQuality = sleepQuality,
+                breakUninterrupted = breakUninterrupted,
                 breakHoursBefore = breakHoursBefore,
             )
         }
@@ -562,94 +558,94 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun refreshFatigue(serverUrl: String, apiKey: String) {
+    fun refreshWorkload(serverUrl: String, apiKey: String) {
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) {
-                fatigueState.value = FatigueUiState(message = "Заполните URL сервера и API ключ")
+                workloadState.value = WorkloadUiState(message = "Заполните URL сервера и API ключ")
                 return@launch
             }
-            fatigueState.value = fatigueState.value.copy(isLoading = true, message = "Обновляю нагрузку...")
+            workloadState.value = workloadState.value.copy(isLoading = true, message = "Обновляю нагрузку...")
             repository.syncPending(serverUrl, apiKey)
-            val snapshot = repository.fetchFatigueSummary(serverUrl, apiKey)
-            fatigueState.value = if (snapshot == null) {
-                FatigueUiState(message = "Не удалось получить данные нагрузки")
+            val snapshot = repository.fetchWorkloadSummary(serverUrl, apiKey)
+            workloadState.value = if (snapshot == null) {
+                WorkloadUiState(message = "Не удалось получить данные нагрузки")
             } else {
-                fatigueState.value.copy(isLoading = false, snapshot = snapshot, message = "Нагрузка обновлена")
+                workloadState.value.copy(isLoading = false, snapshot = snapshot, message = "Нагрузка обновлена")
             }
         }
     }
 
-    fun submitFatigueFeedback(serverUrl: String, apiKey: String, action: String, score: Double?) {
+    fun submitWorkloadFeedback(serverUrl: String, apiKey: String, action: String, score: Double?) {
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) {
-                fatigueState.value = fatigueState.value.copy(message = "Заполните URL сервера и API ключ")
+                workloadState.value = workloadState.value.copy(message = "Заполните URL сервера и API ключ")
                 return@launch
             }
-            fatigueState.value = fatigueState.value.copy(isLoading = true, message = "Сохраняю оценку...")
-            val workDayId = fatigueState.value.snapshot?.workDayId
-            val result = repository.saveFatigueFeedback(serverUrl, apiKey, action, score, workDayId)
+            workloadState.value = workloadState.value.copy(isLoading = true, message = "Сохраняю оценку...")
+            val workDayId = workloadState.value.snapshot?.workDayId
+            val result = repository.saveWorkloadFeedback(serverUrl, apiKey, action, score, workDayId)
             if (result == null) {
-                fatigueState.value = fatigueState.value.copy(isLoading = false, message = "Не удалось сохранить оценку")
+                workloadState.value = workloadState.value.copy(isLoading = false, message = "Не удалось сохранить оценку")
                 return@launch
             }
-            val snapshot = repository.fetchFatigueSummary(serverUrl, apiKey)
-            fatigueState.value = fatigueState.value.copy(
+            val snapshot = repository.fetchWorkloadSummary(serverUrl, apiKey)
+            workloadState.value = workloadState.value.copy(
                 isLoading = false,
-                snapshot = snapshot ?: fatigueState.value.snapshot,
+                snapshot = snapshot ?: workloadState.value.snapshot,
                 message = "Оценка сохранена: ${result.userScore.toInt()}/100, ошибка ${result.error.toInt()}, весов ${result.activeWeightsCount}",
             )
         }
     }
 
-    fun refreshFatigueCorrelation(serverUrl: String, apiKey: String, days: Int) {
+    fun refreshWorkloadCorrelation(serverUrl: String, apiKey: String, days: Int) {
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) {
-                fatigueState.value = fatigueState.value.copy(message = "Заполните URL сервера и API ключ")
+                workloadState.value = workloadState.value.copy(message = "Заполните URL сервера и API ключ")
                 return@launch
             }
-            fatigueState.value = fatigueState.value.copy(isLoading = true, message = "Считаю корреляции...")
-            val report = repository.fetchFatigueCorrelation(serverUrl, apiKey, days)
-            fatigueState.value = if (report == null) {
-                fatigueState.value.copy(isLoading = false, message = "Не удалось получить корреляции")
+            workloadState.value = workloadState.value.copy(isLoading = true, message = "Считаю корреляции...")
+            val report = repository.fetchWorkloadCorrelation(serverUrl, apiKey, days)
+            workloadState.value = if (report == null) {
+                workloadState.value.copy(isLoading = false, message = "Не удалось получить корреляции")
             } else {
-                fatigueState.value.copy(isLoading = false, correlation = report, message = "Корреляции за $days дней обновлены")
+                workloadState.value.copy(isLoading = false, correlation = report, message = "Корреляции за $days дней обновлены")
             }
         }
     }
 
-    fun refreshFatigueTrend(serverUrl: String, apiKey: String, days: Int) {
+    fun refreshWorkloadTrend(serverUrl: String, apiKey: String, days: Int) {
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) {
-                fatigueState.value = fatigueState.value.copy(message = "Заполните URL сервера и API ключ")
+                workloadState.value = workloadState.value.copy(message = "Заполните URL сервера и API ключ")
                 return@launch
             }
-            fatigueState.value = fatigueState.value.copy(isLoading = true, message = "Загружаю тренд нагрузки...")
-            val report = repository.fetchFatigueTrend(serverUrl, apiKey, days)
-            fatigueState.value = if (report == null) {
-                fatigueState.value.copy(isLoading = false, message = "Не удалось получить тренд нагрузки")
+            workloadState.value = workloadState.value.copy(isLoading = true, message = "Загружаю тренд нагрузки...")
+            val report = repository.fetchWorkloadTrend(serverUrl, apiKey, days)
+            workloadState.value = if (report == null) {
+                workloadState.value.copy(isLoading = false, message = "Не удалось получить тренд нагрузки")
             } else {
-                fatigueState.value.copy(isLoading = false, trend = report, message = "Тренд за ${report.days} дн. обновлён")
+                workloadState.value.copy(isLoading = false, trend = report, message = "Тренд за ${report.days} дн. обновлён")
             }
         }
     }
 
-    fun submitCbi(serverUrl: String, apiKey: String, answers: List<Int>) {
+    fun submitSurvey(serverUrl: String, apiKey: String, answers: List<Int>) {
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) {
-                fatigueState.value = fatigueState.value.copy(message = "Заполните URL сервера и API ключ")
+                workloadState.value = workloadState.value.copy(message = "Заполните URL сервера и API ключ")
                 return@launch
             }
-            fatigueState.value = fatigueState.value.copy(isLoading = true, message = "Сохраняю индекс восст....")
-            val cbi = repository.saveCbi(serverUrl, apiKey, answers)
-            if (cbi == null) {
-                fatigueState.value = fatigueState.value.copy(isLoading = false, message = "Не удалось сохранить индекс восст.")
+            workloadState.value = workloadState.value.copy(isLoading = true, message = "Сохраняю индекс восст....")
+            val survey = repository.saveSurvey(serverUrl, apiKey, answers)
+            if (survey == null) {
+                workloadState.value = workloadState.value.copy(isLoading = false, message = "Не удалось сохранить индекс восст.")
                 return@launch
             }
-            val snapshot = repository.fetchFatigueSummary(serverUrl, apiKey)
-            fatigueState.value = fatigueState.value.copy(
+            val snapshot = repository.fetchWorkloadSummary(serverUrl, apiKey)
+            workloadState.value = workloadState.value.copy(
                 isLoading = false,
-                snapshot = snapshot ?: fatigueState.value.snapshot,
-                message = "Индекс восст. сохранён: ${cbi.latestScore.toInt()}/100 (${cbi.level})",
+                snapshot = snapshot ?: workloadState.value.snapshot,
+                message = "Опрос сохранён: ${survey.latestScore.toInt()}/100 (${survey.level})",
             )
         }
     }
@@ -863,8 +859,7 @@ data class HomeVisitUiState(
     val finishAddress: String = "",
     val startOdometer: Double = 0.0,
     val endOdometer: Double? = null,
-    val sleepHours: Double = 0.0,
-    val sleepQuality: Double = 0.0,
+    val breakUninterrupted: Boolean = true,
     val breakHoursBefore: Double = 0.0,
     val candidate: CandidateUiState = CandidateUiState(),
     val activeVisit: RouteVisitUi? = null,
@@ -874,7 +869,7 @@ data class HomeVisitUiState(
     val endShift: EndShiftUiState = EndShiftUiState(),
     val gpsHint: GpsHintUiState = GpsHintUiState(),
     val report: ReportUiState = ReportUiState(),
-    val fatigue: FatigueUiState = FatigueUiState(),
+    val fatigue: WorkloadUiState = WorkloadUiState(),
     val sync: SyncUiState = SyncUiState(),
     val appSettings: AppSettingsUiState = AppSettingsUiState(),
     val clinics: ClinicOptions = ClinicOptions(),
@@ -891,7 +886,7 @@ private data class OperationalUiState(
     val gpsEstimate: GpsEstimateUiState,
     val gpsHint: GpsHintUiState,
     val report: ReportUiState,
-    val fatigue: FatigueUiState,
+    val fatigue: WorkloadUiState,
     val endShift: EndShiftUiState,
 )
 
@@ -974,11 +969,11 @@ data class ReportUiState(
     val availableClinics: List<String> = emptyList(),
 )
 
-data class FatigueUiState(
+data class WorkloadUiState(
     val isLoading: Boolean = false,
-    val snapshot: FatigueSnapshot? = null,
-    val correlation: FatigueCorrelationReport? = null,
-    val trend: FatigueTrendReport? = null,
+    val snapshot: WorkloadSnapshot? = null,
+    val correlation: WorkloadCorrelationReport? = null,
+    val trend: WorkloadTrendReport? = null,
     val message: String = "",
 )
 

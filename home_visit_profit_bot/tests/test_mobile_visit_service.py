@@ -122,7 +122,7 @@ def test_mobile_stop_label_updates_gps_location_event(config) -> None:
 
     assert response["ok"]
     assert response["reason"] == "stop_label_saved"
-    assert event["fatigue_label"] == "heavy"
+    assert event["stop_label"] == "heavy"
 
 
 def test_mobile_stop_label_reports_missing_gps_stop(config) -> None:

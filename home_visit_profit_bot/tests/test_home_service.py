@@ -27,9 +27,7 @@ def test_home_with_active_shift_reports_shift_and_recovery(config) -> None:
         day = days.create(
             "Дом", "Дом", 30, 20,
             start_odometer=100000,
-            sleep_hours=8,
-            sleep_quality=4,
-        )
+            )
         visit = visits.create_candidate(
             day.id, address="Невский 1", income=2500, route_km=10, route_minutes=30,
             district=None, is_base_district=True, clinic="Династия",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.recovery_pricing_service import build_pricing, recovery_markup
+from app.services.overwork_pricing_service import build_pricing, overwork_markup
 
 
 def test_normal_state_does_not_touch_the_tariff() -> None:
@@ -23,11 +23,11 @@ def test_high_debt_raises_the_minimum_tariff() -> None:
 
 
 def test_markup_grows_with_the_matrix_bands() -> None:
-    assert recovery_markup(10) == 0.0
-    assert recovery_markup(40) == 0.0
-    assert recovery_markup(55) == 0.10
-    assert recovery_markup(75) == 0.25
-    assert recovery_markup(90) == 0.40
+    assert overwork_markup(10) == 0.0
+    assert overwork_markup(40) == 0.0
+    assert overwork_markup(55) == 0.10
+    assert overwork_markup(75) == 0.25
+    assert overwork_markup(90) == 0.40
 
 
 def test_critical_debt_blocks_outside_zone_orders() -> None:
