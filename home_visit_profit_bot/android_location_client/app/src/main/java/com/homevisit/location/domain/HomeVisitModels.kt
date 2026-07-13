@@ -504,6 +504,7 @@ data class WorkloadSummary(
     val nightWorkMinutes: Double,
     val workloadSurveyScore: Double,
     val breakHoursBefore: Double,
+    val breakUninterrupted: Boolean,
 )
 
 data class WorkloadFeedback(

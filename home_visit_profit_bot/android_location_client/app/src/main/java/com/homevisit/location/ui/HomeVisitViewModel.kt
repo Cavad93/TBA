@@ -110,7 +110,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         gpsEstimate to endShift
     }
 
-    private val operationalState = combine(routeState, estimatesState, gpsHintState, reportState, workloadState) { route, estimates, gpsHint, report, fatigue ->
+    private val operationalState = combine(routeState, estimatesState, gpsHintState, reportState, workloadState) { route, estimates, gpsHint, report, workload ->
         OperationalUiState(route, estimates.first, gpsHint, report, workload, estimates.second)
     }
 
@@ -886,7 +886,7 @@ private data class OperationalUiState(
     val gpsEstimate: GpsEstimateUiState,
     val gpsHint: GpsHintUiState,
     val report: ReportUiState,
-    val fatigue: WorkloadUiState,
+    val workload: WorkloadUiState,
     val endShift: EndShiftUiState,
 )
 
