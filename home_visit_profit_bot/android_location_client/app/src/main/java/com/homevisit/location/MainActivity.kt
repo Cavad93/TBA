@@ -632,7 +632,7 @@ internal fun HomeVisitApp(
             settingsState = settingsState,
             appSettings = uiState.appSettings,
             reportState = uiState.report,
-            workloadState = uiState.fatigue,
+            workloadState = uiState.workload,
             workActions = workActions,
             onBack = { showSettings = false },
         )
