@@ -17,6 +17,7 @@ from app.repositories import (
 )
 from app.services.day_metrics_service import load_baselines
 from app.services.driving_service import within_day_trend
+from app.services.gait_service import within_day_trend as gait_within_day_trend
 from app.services.indices_service import economy_index, load_index, recovery_result
 from app.services.mobile_fatigue_service import MobileFatigueService
 from app.services.mobile_report_service import parse_report_period
@@ -61,6 +62,7 @@ class ProfileService:
             "pricing": self._pricing_block(indices),
             "wellbeing": self._wellbeing_block(),
             "driving": self._driving_block(today),
+            "gait": self._gait_block(),
         }
 
     # --- три индекса ------------------------------------------------------
@@ -248,6 +250,31 @@ class ProfileService:
         if latest is None:
             return None
         return within_day_trend(self.segments, latest.id)
+
+    # --- походка ----------------------------------------------------------
+
+    def _gait_block(self) -> dict[str, Any] | None:
+        """Походка по последней смене: темп, разброс шага, ровность — и тренд внутри дня.
+
+        Для усталости это более прямой сигнал, чем стиль вождения: там между телом и
+        датчиком стоит машина, здесь — ничего.
+        """
+        latest = self.days.latest_closed() or self.days.active()
+        if latest is None:
+            return None
+
+        metrics = self.metrics.for_day(latest.id)
+        cadence = float(metrics.get("walk_cadence") or 0)
+        if cadence <= 0:
+            return None
+
+        return {
+            "cadence": cadence,
+            "step_cv": float(metrics.get("walk_step_cv") or 0),
+            "regularity": float(metrics.get("walk_regularity") or 0),
+            "walk_minutes": float(metrics.get("walk_minutes") or 0),
+            "within_day": gait_within_day_trend(self.segments, latest.id),
+        }
 
 
 # --- вспомогательные функции --------------------------------------------

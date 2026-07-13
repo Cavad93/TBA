@@ -5,6 +5,7 @@ from app.repositories import (
     DailyStatsRepository,
     DayMetricRepository,
     DrivingBehaviorRepository,
+    DrivingSegmentRepository,
     LocationEventRepository,
     LocationSampleRepository,
     SettingsRepository,
@@ -130,6 +131,7 @@ def finalize_day(
         net_profit=net_profit,
         net_hourly=net_hourly,
         driving_repo=DrivingBehaviorRepository(connection),
+        segments_repo=DrivingSegmentRepository(connection),
         samples_repo=LocationSampleRepository(connection),
         settings_repo=settings_repo,
     )

@@ -1542,6 +1542,12 @@ class DrivingSegmentRepository:
         jerk_score: float = 0.0,
         speed_variability_score: float = 0.0,
         aggressive_score: float = 0.0,
+        gait_bouts: int = 0,
+        gait_walk_seconds: float = 0.0,
+        gait_cadence: float = 0.0,
+        gait_step_cv: float = 0.0,
+        gait_regularity: float = 0.0,
+        gait_impact: float = 0.0,
     ) -> None:
         updated_at = now_iso()
         self.connection.execute(
@@ -1550,8 +1556,10 @@ class DrivingSegmentRepository:
                 work_day_id, segment_index, date, started_at, ended_at, km,
                 samples_count, sensor_minutes, harsh_acceleration_count, harsh_braking_count,
                 hard_cornering_count, lane_change_proxy_count, stop_go_count,
-                jerk_score, speed_variability_score, aggressive_score, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                jerk_score, speed_variability_score, aggressive_score,
+                gait_bouts, gait_walk_seconds, gait_cadence, gait_step_cv,
+                gait_regularity, gait_impact, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(work_day_id, segment_index) DO UPDATE SET
                 ended_at = excluded.ended_at,
                 km = excluded.km,
@@ -1565,13 +1573,21 @@ class DrivingSegmentRepository:
                 jerk_score = excluded.jerk_score,
                 speed_variability_score = excluded.speed_variability_score,
                 aggressive_score = excluded.aggressive_score,
+                gait_bouts = excluded.gait_bouts,
+                gait_walk_seconds = excluded.gait_walk_seconds,
+                gait_cadence = excluded.gait_cadence,
+                gait_step_cv = excluded.gait_step_cv,
+                gait_regularity = excluded.gait_regularity,
+                gait_impact = excluded.gait_impact,
                 updated_at = excluded.updated_at
             """,
             (
                 work_day_id, segment_index, date, started_at, ended_at, km,
                 samples_count, sensor_minutes, harsh_acceleration_count, harsh_braking_count,
                 hard_cornering_count, lane_change_proxy_count, stop_go_count,
-                jerk_score, speed_variability_score, aggressive_score, updated_at, updated_at,
+                jerk_score, speed_variability_score, aggressive_score,
+                gait_bouts, gait_walk_seconds, gait_cadence, gait_step_cv,
+                gait_regularity, gait_impact, updated_at, updated_at,
             ),
         )
         self.connection.commit()

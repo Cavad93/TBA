@@ -45,6 +45,14 @@ def save_segment(
         jerk_score=float(payload.get("jerk_score") or 0),
         speed_variability_score=float(payload.get("speed_variability_score") or 0),
         aggressive_score=float(payload.get("aggressive_score") or 0),
+        # Походка: только агрегаты за отрезок. Сырой сигнал акселерометра телефон не
+        # отправляет и не должен — по паттерну походки человека можно опознать.
+        gait_bouts=int(payload.get("gait_bouts") or 0),
+        gait_walk_seconds=float(payload.get("gait_walk_seconds") or 0),
+        gait_cadence=float(payload.get("gait_cadence") or 0),
+        gait_step_cv=float(payload.get("gait_step_cv") or 0),
+        gait_regularity=float(payload.get("gait_regularity") or 0),
+        gait_impact=float(payload.get("gait_impact") or 0),
     )
     rebuild_daily(segments, daily, work_day_id=work_day_id, date=date)
 

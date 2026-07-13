@@ -207,6 +207,12 @@ internal fun ProfileScreen(profile: ProfileUiState, onRefresh: () -> Unit, onOpe
                 WellbeingCard(snapshot.wellbeing)
             }
 
+            snapshot.gait?.let {
+                SectionHeader("Походка · по датчику движения")
+                GaitCard(it)
+                it.withinDay?.let { trend -> WithinDayCard(trend) }
+            }
+
             snapshot.driving?.let {
                 SectionHeader("Стиль вождения · по данным приложения")
                 DrivingCard(it)

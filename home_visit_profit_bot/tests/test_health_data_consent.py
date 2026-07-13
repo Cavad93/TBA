@@ -5,11 +5,14 @@ from app.models import EndDayData
 from app.repositories import (
     DailyStatsRepository,
     DayMetricRepository,
+    DrivingBehaviorRepository,
+    DrivingSegmentRepository,
     FatigueFeedbackRepository,
     SettingsRepository,
     VisitRepository,
     WorkDayRepository,
 )
+from app.services.driving_service import save_segment
 from app.services.stats_service import finalize_day
 
 
@@ -46,6 +49,25 @@ def _close(connection, *, fatigue_enabled: str) -> tuple[dict[str, float], int]:
     settings.set("fatigue_enabled", fatigue_enabled)
     day = days.create("start", "finish", 30, 20, sleep_hours=6, sleep_quality=3, break_hours_before=10)
 
+    # Походка приходит с телефона отрезками — она тоже под тумблером.
+    save_segment(
+        DrivingSegmentRepository(connection),
+        DrivingBehaviorRepository(connection),
+        work_day_id=day.id,
+        date=day.date,
+        segment_index=0,
+        payload={
+            "samples_count": 400,
+            "aggressive_score": 35.0,
+            "gait_bouts": 2,
+            "gait_walk_seconds": 120.0,
+            "gait_cadence": 108.0,
+            "gait_step_cv": 5.5,
+            "gait_regularity": 0.72,
+            "gait_impact": 2.4,
+        },
+    )
+
     finalize_day(day, _end_day_data(), days, visits, stats, settings)
 
     return metrics.for_day(day.id), len(feedback.recent(limit=10))
@@ -58,6 +80,9 @@ def test_health_metrics_are_collected_when_enabled(config) -> None:
     assert metrics["sleep_hours"] == 6
     assert metrics["coffee_units"] == 4
     assert metrics["self_rating"] == 8
+    # Походка измерена и вошла в метрики — из неё строится личная норма.
+    assert metrics["walk_cadence"] == 108.0
+    assert metrics["walk_step_cv"] == 5.5
     # Самооценка стала обратной связью — на ней и учится модель.
     assert feedback_count == 1
 
@@ -72,7 +97,13 @@ def test_disabled_toggle_actually_stops_collecting_health_data(config) -> None:
     with connect(config) as connection:
         metrics, feedback_count = _close(connection, fatigue_enabled="false")
 
-    for key in ("sleep_hours", "coffee_units", "drinks_units", "meal_units", "meal_skipped", "self_rating", "burnout_score"):
+    # Походка — биометрия: по её паттерну человека можно опознать. Под тумблером
+    # она не собирается наравне со сном, едой и самооценкой.
+    for key in (
+        "sleep_hours", "coffee_units", "drinks_units", "meal_units", "meal_skipped",
+        "self_rating", "burnout_score",
+        "walk_cadence", "walk_step_cv", "walk_regularity", "walk_impact",
+    ):
         assert key not in metrics, f"{key} сохранился при выключенном тумблере"
 
     # Обратной связи тоже нет: самооценка — это данные о самочувствии.

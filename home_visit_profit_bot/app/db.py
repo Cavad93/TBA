@@ -309,6 +309,14 @@ CREATE TABLE IF NOT EXISTS driving_behavior_segments (
     jerk_score REAL DEFAULT 0,
     speed_variability_score REAL DEFAULT 0,
     aggressive_score REAL DEFAULT 0,
+    -- Походка на этом отрезке: агрегаты, посчитанные на телефоне. Сам сигнал сюда
+    -- не попадает и не должен: по паттерну походки человека можно опознать.
+    gait_bouts INTEGER DEFAULT 0,
+    gait_walk_seconds REAL DEFAULT 0,
+    gait_cadence REAL DEFAULT 0,
+    gait_step_cv REAL DEFAULT 0,
+    gait_regularity REAL DEFAULT 0,
+    gait_impact REAL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(work_day_id, segment_index),
@@ -632,6 +640,14 @@ def _ensure_columns(db: Database) -> None:
     _ensure_column(db, "visits", "service_minutes", "REAL DEFAULT 0")
     _ensure_column(db, "visits", "planned_start_at", "TEXT")
     _ensure_column(db, "visits", "planned_end_at", "TEXT")
+    # Походка по отрезкам пути: таблица уже создана на боевом сервере, поэтому колонки
+    # добавляются миграцией, а не только через DDL.
+    _ensure_column(db, "driving_behavior_segments", "gait_bouts", "INTEGER DEFAULT 0")
+    _ensure_column(db, "driving_behavior_segments", "gait_walk_seconds", "REAL DEFAULT 0")
+    _ensure_column(db, "driving_behavior_segments", "gait_cadence", "REAL DEFAULT 0")
+    _ensure_column(db, "driving_behavior_segments", "gait_step_cv", "REAL DEFAULT 0")
+    _ensure_column(db, "driving_behavior_segments", "gait_regularity", "REAL DEFAULT 0")
+    _ensure_column(db, "driving_behavior_segments", "gait_impact", "REAL DEFAULT 0")
     _ensure_column(db, "work_days", "telemed_minutes", "REAL DEFAULT 0")
     _ensure_column(db, "work_days", "office_income", "REAL DEFAULT 0")
     _ensure_column(db, "work_days", "office_minutes", "REAL DEFAULT 0")

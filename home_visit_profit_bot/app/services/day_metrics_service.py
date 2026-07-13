@@ -6,11 +6,13 @@ from app.models import EndDayData, Visit, WorkDay
 from app.repositories import (
     DayMetricRepository,
     DrivingBehaviorRepository,
+    DrivingSegmentRepository,
     LocationSampleRepository,
     SettingsRepository,
     UserBaselineRepository,
 )
 from app.services.baseline_service import Baseline, build_baseline
+from app.services.gait_service import day_gait_metrics
 
 # Смена, в которой человек не потратился на еду, — повод присмотреться:
 # больше шести часов работы без нормальной еды организм не прощает.
@@ -55,6 +57,7 @@ def build_closed_day_metrics(
     net_profit: float,
     net_hourly: float,
     driving_repo: DrivingBehaviorRepository | None = None,
+    segments_repo: DrivingSegmentRepository | None = None,
     samples_repo: LocationSampleRepository | None = None,
     settings_repo: SettingsRepository | None = None,
 ) -> dict[str, float]:
@@ -106,6 +109,11 @@ def build_closed_day_metrics(
     # прятать индекс: выключенный переключатель, который всё равно всё пишет в базу, —
     # это обман, и по закону, и по-человечески.
     if _health_metrics_allowed(settings_repo):
+        # Походка — тоже спецкатегория, и даже строже: по её паттерну человека можно
+        # опознать. Собирается только с явного согласия, вместе с остальным состоянием.
+        if segments_repo is not None:
+            metrics.update(day_gait_metrics(segments_repo, day.id))
+
         if day.sleep_hours > 0:
             metrics["sleep_hours"] = float(day.sleep_hours)
         if settings_repo is not None:

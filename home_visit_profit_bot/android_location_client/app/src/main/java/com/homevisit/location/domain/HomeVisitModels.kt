@@ -161,6 +161,7 @@ data class ProfileSnapshot(
     val pricing: RecoveryPricing?,
     val wellbeing: ProfileWellbeing,
     val driving: ProfileDriving?,
+    val gait: ProfileGait?,
     val fromCache: Boolean = false,
 )
 
@@ -256,6 +257,21 @@ data class DrivingWithinDay(
     val lateScore: Double,
     val delta: Double,
     val text: String,
+)
+
+/**
+ * Походка — по акселерометру, только во время ходьбы.
+ *
+ * Уставший человек идёт медленнее, но главное — неровнее: разброс времени между шагами
+ * растёт. Для усталости это более прямой сигнал, чем стиль вождения: там между телом и
+ * датчиком стоит машина, здесь — ничего.
+ */
+data class ProfileGait(
+    val cadence: Double,       // шагов в минуту
+    val stepCv: Double,        // разброс времени шага, %
+    val regularity: Double,    // ровность шага, 0..1
+    val walkMinutes: Double,
+    val withinDay: DrivingWithinDay?,
 )
 
 data class DrivingRating(

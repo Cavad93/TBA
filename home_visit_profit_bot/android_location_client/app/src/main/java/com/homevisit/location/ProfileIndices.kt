@@ -63,6 +63,7 @@ import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.DirectionsWalk
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
@@ -170,6 +171,7 @@ import androidx.compose.ui.unit.sp
 import com.homevisit.location.domain.DrivingWithinDay
 import com.homevisit.location.domain.IndexCard
 import com.homevisit.location.domain.IndexReason
+import com.homevisit.location.domain.ProfileGait
 import com.homevisit.location.domain.RecoveryPricing
 import kotlin.math.roundToInt
 
@@ -366,5 +368,57 @@ private fun shiftWord(count: Int): String {
         mod10 == 1 -> "смена"
         mod10 in 2..4 -> "смены"
         else -> "смен"
+    }
+}
+
+/**
+ * Походка — по акселерометру, только во время ходьбы.
+ *
+ * Для усталости это более прямой сигнал, чем стиль вождения: там между телом и датчиком
+ * стоит машина, здесь — ничего. Уставший человек идёт медленнее, но главное — неровнее:
+ * разброс времени между шагами растёт.
+ */
+@Composable
+internal fun GaitCard(gait: ProfileGait) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(
+                    Icons.Filled.DirectionsWalk,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp),
+                )
+                Column {
+                    Text("Походка", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "${gait.walkMinutes.roundToInt()} мин пешком за смену",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            MetricLine(
+                "Темп",
+                "${gait.cadence.roundToInt()} шаг/мин",
+                MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // Главный маркер: у отдохнувшего человека шаг ровный, у вымотанного «плавает».
+            MetricLine(
+                "Разброс шага",
+                "${oneDecimal(gait.stepCv)}%",
+                if (gait.stepCv > 6) VerdictColors.edge else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            MetricBar(
+                "Ровность шага",
+                "${(gait.regularity * 100).roundToInt()}%",
+                gait.regularity.toFloat(),
+                VerdictColors.go,
+            )
+        }
     }
 }

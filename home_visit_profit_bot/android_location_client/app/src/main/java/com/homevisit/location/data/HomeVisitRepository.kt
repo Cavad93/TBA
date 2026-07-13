@@ -40,6 +40,7 @@ import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.LateWarning
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
+import com.homevisit.location.domain.ProfileGait
 import com.homevisit.location.domain.DrivingWithinDay
 import com.homevisit.location.domain.IndexCard
 import com.homevisit.location.domain.IndexReason
@@ -1648,7 +1649,27 @@ class HomeVisitRepository private constructor(
                     )
                 },
             ),
+            gait = parseGait(r.optJSONObject("gait")),
             fromCache = r.optBoolean("_from_cache", false),
+        )
+    }
+
+    private fun parseGait(o: JSONObject?): ProfileGait? {
+        if (o == null) return null
+        return ProfileGait(
+            cadence = o.optDouble("cadence", 0.0),
+            stepCv = o.optDouble("step_cv", 0.0),
+            regularity = o.optDouble("regularity", 0.0),
+            walkMinutes = o.optDouble("walk_minutes", 0.0),
+            withinDay = o.optJSONObject("within_day")?.let { wd ->
+                DrivingWithinDay(
+                    turningPoint = wd.optInt("turning_point", 0),
+                    earlyScore = wd.optDouble("early_score", 0.0),
+                    lateScore = wd.optDouble("late_score", 0.0),
+                    delta = wd.optDouble("delta", 0.0),
+                    text = wd.optString("text"),
+                )
+            },
         )
     }
 
