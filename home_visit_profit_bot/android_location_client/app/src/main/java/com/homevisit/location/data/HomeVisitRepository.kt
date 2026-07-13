@@ -1733,7 +1733,7 @@ class HomeVisitRepository private constructor(
             pauseMinutes = summary.optDouble("pause_minutes", 0.0),
             heavyVisitCount = summary.optInt("heavy_visit_count", 0),
             nightWorkMinutes = summary.optDouble("night_work_minutes", 0.0),
-            workloadSurveyScore = summary.optDouble("workload_survey_score", 0.0), true),
+            workloadSurveyScore = summary.optDouble("workload_survey_score", 0.0),
             breakHoursBefore = summary.optDouble("break_hours_before", 0.0),
         )
     }
