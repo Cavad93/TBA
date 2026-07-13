@@ -170,6 +170,8 @@ data class ProfileSnapshot(
     val month: ProfileMonth,
     val indices: ProfileIndices,
     val pricing: OverworkPricing?,
+    val vehicle: VehicleCost?,
+    val income: IncomeModel?,
     val wellbeing: ProfileWellbeing,
     val driving: ProfileDriving?,
     val fromCache: Boolean = false,
@@ -304,6 +306,10 @@ data class CandidateEstimate(
     val beforeHourly: Double,
     val afterHourly: Double,
     val marginalHourly: Double,
+    // Деньги на километр — рядом с деньгами на час. Порознь обманчивы: короткий
+    // дорогой заказ в соседнем доме даёт огромные ₽/км и нулевые ₽/ч.
+    val marginalPerKm: Double = 0.0,
+    val costPerKm: Double = 0.0,
     val extraKm: Double,
     val extraDriveMinutes: Double,
     val workloadLevel: String,
@@ -389,6 +395,11 @@ data class EndDayDetails(
     // Загруженность смены 1–10 — оценка УСЛОВИЙ ТРУДА, а не самочувствия. Она же
     // обратная связь: сравнивая её с нашей, система подстраивается под человека.
     val workloadRating: Double = 0.0,
+    // Ремонт, ТО, шины, страховка — из них считается настоящий коэффициент износа.
+    val vehicleExpenses: Double = 0.0,
+    val vehicleRent: Double = 0.0,
+    // Халтура, разовая премия — доход, который не пришёл заказом.
+    val extraIncome: Double = 0.0,
 )
 
 /**
@@ -614,6 +625,8 @@ enum class SettingType(val wire: String) {
     ListValue("list"),
     /** Зоны обслуживания: область → город → районы (JSON). */
     Zones("zones"),
+    /** Выбор из вариантов: тип транспорта, режим расчёта километра, кто платит. */
+    Choice("choice"),
     Unknown("");
 
     companion object {
@@ -628,8 +641,55 @@ data class SettingField(
     val textValue: String = "",
     val boolValue: Boolean = false,
     val listValue: List<String> = emptyList(),
+    /** Варианты для типа Choice: значение и то, что видит человек. */
+    val options: List<SettingOption> = emptyList(),
     /** Одно предложение: что это за параметр и зачем он нужен. */
     val hint: String = "",
+)
+
+data class SettingOption(
+    val value: String,
+    val title: String,
+)
+
+/**
+ * Сколько стоит километр — и что из этого посчитано по таблице, а что измерено по
+ * вашим заправкам и расходам на машину.
+ *
+ * Считать один бензин — значит обманывать себя: машина ещё изнашивается, требует шин,
+ * масла и ремонта. Коэффициент нужен ровно для этого — оценить реальную рентабельность
+ * заказа. Это приблизительная модель, и она уступает факту, как только факт появится.
+ */
+data class VehicleCost(
+    val total: Double,
+    val fuelPerKm: Double,
+    val maintenancePerKm: Double,
+    val mode: String,
+    val wearCoefficient: Double,
+    val riskMarkupPercent: Int,
+    val fuelMeasured: Boolean,
+    val maintenanceMeasured: Boolean,
+    val explanation: String,
+    val measuredConsumption: Double?,
+    val measuredCoefficient: Double?,
+    val measuredKm: Double,
+)
+
+/**
+ * Как человеку платят. От этого зависит сам смысл вопроса «стоит ли ехать»: у окладника
+ * лишний заказ не приносит денег — он только тратит его топливо и его время.
+ */
+data class IncomeModel(
+    val kind: String,
+    val title: String,
+    val isSalary: Boolean,
+    val paysPerOrder: Boolean,
+    val monthlySalary: Int,
+    val monthlyBonus: Int,
+    val monthHours: Int,
+    val hourlyRate: Double,
+    val needsConfirmation: Boolean,
+    val confirmText: String,
 )
 
 data class SettingsSection(

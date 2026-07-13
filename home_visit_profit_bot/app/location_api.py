@@ -32,6 +32,7 @@ from app.services.auth_service import AuthError, AuthService
 from app.services.day_summary_service import build_end_day_preview, preview_payload
 from app.services.driving_service import save_segment as save_driving_segment
 from app.services.feedback_policy_service import should_ask_feedback
+from app.services.income_service import confirm_month
 from app.services.rest_service import rest_facts
 from app.services.home_service import HomeService
 from app.services.location_service import calculate_location_day_estimate, process_location_update
@@ -200,6 +201,9 @@ def _handler_factory(config: AppConfig):
                 return
             if path == "/api/settings":
                 self._handle_settings_update()
+                return
+            if path == "/api/income/confirm":
+                self._handle_income_confirm()
                 return
             if path == "/driving":
                 self._handle_driving()
@@ -446,6 +450,19 @@ def _handler_factory(config: AppConfig):
                     "reason": result.reason,
                 }
             )
+
+        def _handle_income_confirm(self) -> None:
+            """Оклад не изменился — одна кнопка, без ввода.
+
+            Спрашивать человека заново то, что он уже вводил, незачем: подтверждения
+            достаточно, а если что-то поменялось — он поправит в настройках.
+            """
+            if not _authorize_request(self, config):
+                self._json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            with connect(config) as connection:
+                confirm_month(SettingsRepository(connection))
+            self._json_response({"ok": True, "reason": "income_confirmed"})
 
         def _handle_settings_read(self) -> None:
             if not _authorize_request(self, config):

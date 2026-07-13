@@ -170,6 +170,9 @@ import androidx.compose.ui.unit.sp
 import com.homevisit.location.domain.DrivingWithinDay
 import com.homevisit.location.domain.IndexCard
 import com.homevisit.location.domain.IndexReason
+import androidx.compose.material.icons.filled.LocalGasStation
+import com.homevisit.location.domain.VehicleCost
+import com.homevisit.location.domain.IncomeModel
 import com.homevisit.location.domain.OverworkPricing
 import kotlin.math.roundToInt
 
@@ -369,3 +372,113 @@ private fun shiftWord(count: Int): String {
     }
 }
 
+
+/**
+ * Сколько стоит километр — и что из этого посчитано, а что измерено.
+ *
+ * Считать один бензин — значит обманывать себя: машина ещё изнашивается, требует шин,
+ * масла и ремонта. Коэффициент нужен ровно для этого — оценить реальную рентабельность
+ * заказа. Это приблизительная модель, и мы честно её так и называем: как только человек
+ * начнёт вносить расходы на машину, приложение посчитает его настоящий рубль за
+ * километр и покажет, насколько таблица ошибалась.
+ */
+@Composable
+internal fun VehicleCostCard(cost: VehicleCost) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(
+                    Icons.Filled.LocalGasStation,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp),
+                )
+                Column {
+                    Text("Километр стоит", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "${oneDecimal(cost.total)} ₽",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontFamily = JetBrainsMono,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+
+            MetricLine(
+                if (cost.fuelMeasured) "Топливо (по вашим заправкам)" else "Топливо (из настроек)",
+                "${oneDecimal(cost.fuelPerKm)} ₽/км",
+                MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            MetricLine(
+                if (cost.maintenanceMeasured) "Обслуживание (по вашим расходам)" else "Обслуживание (по коэффициенту)",
+                "${oneDecimal(cost.maintenancePerKm)} ₽/км",
+                MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Text(
+                cost.explanation,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            // Самое ценное: показать, насколько таблица ошибалась.
+            val measured = cost.measuredCoefficient
+            if (measured != null && !cost.maintenanceMeasured) {
+                MeasuredHint(
+                    "Ваш реальный коэффициент за ${cost.measuredKm.roundToInt()} км — " +
+                        "${oneDecimal(measured)}. В таблице стояло ${oneDecimal(cost.wearCoefficient)}."
+                )
+            }
+            cost.measuredConsumption?.let {
+                MeasuredHint("Реальный расход по вашим заправкам: ${oneDecimal(it)} л/100 км.")
+            }
+        }
+    }
+}
+
+@Composable
+private fun MeasuredHint(text: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(VerdictColors.goContainer)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = VerdictColors.go, modifier = Modifier.size(16.dp))
+        Text(text, style = MaterialTheme.typography.bodySmall, color = VerdictColors.onGoContainer)
+    }
+}
+
+/** У окладника лишний заказ не приносит денег — он только тратит топливо и время. */
+@Composable
+internal fun SalaryCard(income: IncomeModel, onConfirm: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = VerdictColors.edgeContainer),
+        border = BorderStroke(1.dp, VerdictColors.edge),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Оклад", style = MaterialTheme.typography.titleSmall, color = VerdictColors.onEdgeContainer)
+            Text(
+                income.confirmText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = VerdictColors.onEdgeContainer,
+            )
+            Text(
+                "Ваш час по окладу — ${money(income.hourlyRate)}. С этой ставкой и сравниваются заказы.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = onConfirm, modifier = Modifier.fillMaxWidth()) {
+                Text("Всё так же")
+            }
+        }
+    }
+}

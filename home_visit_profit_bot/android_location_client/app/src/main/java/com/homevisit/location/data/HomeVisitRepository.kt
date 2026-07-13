@@ -60,6 +60,9 @@ import com.homevisit.location.domain.ReportSnapshot
 import com.homevisit.location.domain.ReportSummary
 import com.homevisit.location.domain.ServerRouteLeg
 import com.homevisit.location.domain.ServerRouteSnapshot
+import com.homevisit.location.domain.SettingOption
+import com.homevisit.location.domain.VehicleCost
+import com.homevisit.location.domain.IncomeModel
 import com.homevisit.location.domain.SettingField
 import com.homevisit.location.domain.SettingType
 import com.homevisit.location.domain.SettingsSection
@@ -808,6 +811,11 @@ class HomeVisitRepository private constructor(
         parseShiftSnapshot(response)
     }
 
+    suspend fun confirmIncome(serverUrl: String, apiKey: String): Boolean = withContext(Dispatchers.IO) {
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/income/confirm"), apiKey, JSONObject())
+        response?.optBoolean("ok", false) ?: false
+    }
+
     suspend fun fetchProfile(serverUrl: String, apiKey: String): ProfileSnapshot? = withContext(Dispatchers.IO) {
         val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/profile"), apiKey, "cache_profile")
             ?: return@withContext null
@@ -893,6 +901,15 @@ class HomeVisitRepository private constructor(
         dao.enqueueSync(sync("settings_saved", "settings", "settings", now, payload))
     }
 
+    private fun parseOptions(array: JSONArray?): List<SettingOption> {
+        val result = mutableListOf<SettingOption>()
+        for (i in 0 until (array?.length() ?: 0)) {
+            val item = array?.optJSONObject(i) ?: continue
+            result += SettingOption(item.optString("value"), item.optString("title"))
+        }
+        return result
+    }
+
     private fun parseAppSettings(response: JSONObject): AppSettingsSnapshot? {
         val sectionsJson = response.optJSONArray("sections") ?: return null
         val sections = mutableListOf<SettingsSection>()
@@ -920,7 +937,8 @@ class HomeVisitRepository private constructor(
                         } else {
                             emptyList()
                         },
-                        hint = fieldJson.optString("hint"),
+                        options = parseOptions(fieldJson.optJSONArray("options")),
+                hint = fieldJson.optString("hint"),
                     )
                 )
             }
@@ -1097,6 +1115,11 @@ class HomeVisitRepository private constructor(
             // Еда и питьё — только рубли: количество чашек это физиологический вход.
             // Загруженность смены 1–10 — оценка условий труда, она же обратная связь.
             .put("workload_rating", details.workloadRating)
+            // Расходы на машину — из них считается настоящий коэффициент износа.
+            .put("vehicle_expenses", details.vehicleExpenses)
+            .put("vehicle_rent", details.vehicleRent)
+            // Халтура и разовая премия — доход, не пришедший заказом.
+            .put("extra_income", details.extraIncome)
         details.userWorkloadIndex?.let { payload.put("user_workload_index", it) }
         return payload.toString()
     }
@@ -1309,6 +1332,8 @@ class HomeVisitRepository private constructor(
                 beforeHourly = calculation.optDouble("before_hourly", 0.0),
                 afterHourly = calculation.optDouble("after_hourly", 0.0),
                 marginalHourly = calculation.optDouble("marginal_hourly", 0.0),
+                marginalPerKm = calculation.optDouble("marginal_per_km", 0.0),
+                costPerKm = calculation.optDouble("cost_per_km", 0.0),
                 extraKm = calculation.optDouble("extra_km", 0.0),
                 extraDriveMinutes = calculation.optDouble("extra_drive_minutes", 0.0),
                 workloadLevel = calculation.optString("workload_level"),
@@ -1612,6 +1637,8 @@ class HomeVisitRepository private constructor(
             ),
             indices = parseIndices(r.optJSONObject("indices")),
             pricing = parsePricing(r.optJSONObject("pricing")),
+            vehicle = parseVehicleCost(r.optJSONObject("vehicle")),
+            income = parseIncomeModel(r.optJSONObject("income")),
             wellbeing = ProfileWellbeing(
                 hasData = w.optBoolean("has_data", false),
                 recovery = parseGauge(w.optJSONObject("recovery")),
@@ -1643,6 +1670,43 @@ class HomeVisitRepository private constructor(
                 },
             ),
             fromCache = r.optBoolean("_from_cache", false),
+        )
+    }
+
+    private fun parseVehicleCost(o: JSONObject?): VehicleCost? {
+        if (o == null) return null
+        val measured = o.optJSONObject("measured")
+        return VehicleCost(
+            total = o.optDouble("total", 0.0),
+            fuelPerKm = o.optDouble("fuel_per_km", 0.0),
+            maintenancePerKm = o.optDouble("maintenance_per_km", 0.0),
+            mode = o.optString("mode"),
+            wearCoefficient = o.optDouble("wear_coefficient", 0.0),
+            riskMarkupPercent = o.optInt("risk_markup_percent", 0),
+            fuelMeasured = o.optBoolean("fuel_measured", false),
+            maintenanceMeasured = o.optBoolean("maintenance_measured", false),
+            explanation = o.optString("explanation"),
+            measuredConsumption = measured?.takeIf { !it.isNull("consumption_l_per_100km") }
+                ?.optDouble("consumption_l_per_100km"),
+            measuredCoefficient = measured?.takeIf { !it.isNull("measured_coefficient") }
+                ?.optDouble("measured_coefficient"),
+            measuredKm = measured?.optDouble("km", 0.0) ?: 0.0,
+        )
+    }
+
+    private fun parseIncomeModel(o: JSONObject?): IncomeModel? {
+        if (o == null) return null
+        return IncomeModel(
+            kind = o.optString("kind"),
+            title = o.optString("title"),
+            isSalary = o.optBoolean("is_salary", false),
+            paysPerOrder = o.optBoolean("pays_per_order", true),
+            monthlySalary = o.optInt("monthly_salary", 0),
+            monthlyBonus = o.optInt("monthly_bonus", 0),
+            monthHours = o.optInt("month_hours", 164),
+            hourlyRate = o.optDouble("hourly_rate", 0.0),
+            needsConfirmation = o.optBoolean("needs_confirmation", false),
+            confirmText = o.optString("confirm_text"),
         )
     }
 

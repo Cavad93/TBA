@@ -166,7 +166,13 @@ import java.util.Locale
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun ProfileScreen(profile: ProfileUiState, onRefresh: () -> Unit, onOpenSettings: () -> Unit, onLogout: () -> Unit) {
+internal fun ProfileScreen(
+    profile: ProfileUiState,
+    onRefresh: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onConfirmIncome: () -> Unit,
+    onLogout: () -> Unit,
+) {
     LaunchedEffect(Unit) { onRefresh() }
     val snapshot = profile.snapshot
     when {
@@ -190,6 +196,16 @@ internal fun ProfileScreen(profile: ProfileUiState, onRefresh: () -> Unit, onOpe
                 snapshot.indices.economy?.let { IndexCardView(it) }
             } else {
                 IndicesNotReadyCard(snapshot.indices.needMoreShifts)
+            }
+
+            // Оклад: подтверждение раз в месяц, одной кнопкой, без ввода.
+            snapshot.income?.takeIf { it.needsConfirmation }?.let {
+                SalaryCard(it, onConfirm = onConfirmIncome)
+            }
+
+            snapshot.vehicle?.let {
+                SectionHeader("Машина · сколько стоит километр")
+                VehicleCostCard(it)
             }
 
             SectionHeader("Показатели · за месяц")

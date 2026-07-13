@@ -690,6 +690,13 @@ internal fun CandidateGauge(candidate: CandidateUiState, onAccept: () -> Unit, o
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     GaugeTile(Modifier.weight(1f), money(estimate.afterHourly), "чистыми/ч")
+                    // Деньги на километр — рядом с деньгами на час. Порознь они обманчивы:
+                    // короткий дорогой заказ в соседнем доме даёт огромные ₽/км и нулевые
+                    // ₽/ч. У городского курьера ограничивает время, у межгорода — километры.
+                    GaugeTile(Modifier.weight(1f), money(estimate.marginalPerKm), "чистыми/км")
+                    GaugeTile(Modifier.weight(1f), "${oneDecimal(estimate.costPerKm)} ₽", "км стоит")
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     GaugeTile(Modifier.weight(1f), "+${oneDecimal(estimate.extraKm)} км", "дорога")
                     GaugeTile(Modifier.weight(1f), "+${oneDecimal(estimate.extraDriveMinutes)} мин", "в пути")
                 }

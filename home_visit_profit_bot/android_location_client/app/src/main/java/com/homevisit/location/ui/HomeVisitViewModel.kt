@@ -197,6 +197,17 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /**
+     * Подтвердить, что оклад и премия не изменились. Одна кнопка, без ввода — спрашивать
+     * человека заново то, что он уже вводил, незачем.
+     */
+    fun confirmIncome(serverUrl: String, apiKey: String) {
+        viewModelScope.launch {
+            repository.confirmIncome(serverUrl, apiKey)
+            refreshProfile(serverUrl, apiKey)
+        }
+    }
+
     fun refreshProfile(serverUrl: String, apiKey: String) {
         viewModelScope.launch {
             if (serverUrl.isBlank() || apiKey.isBlank()) {

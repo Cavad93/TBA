@@ -366,6 +366,14 @@ internal fun AppSettingsSection(
                     )
                 }
             }
+            SettingType.Choice -> {
+                ChoiceField(
+                    field = field,
+                    value = textEdits[field.key] ?: field.textValue,
+                    onValue = { textEdits[field.key] = it },
+                )
+            }
+
             SettingType.Number -> {
                 OutlinedTextField(
                     modifier = Modifier.fillMaxWidth(),
@@ -747,3 +755,48 @@ internal fun AccountCard(settingsState: GpsSettingsState) {
     }
 }
 
+
+
+/**
+ * Выбор из вариантов: тип транспорта, режим расчёта километра, кто платит за топливо.
+ *
+ * Список, а не текстовое поле: набирать «crossover» руками человек не должен, а ошибка
+ * в таком значении молча испортила бы весь расчёт экономики.
+ */
+@Composable
+private fun ChoiceField(field: SettingField, value: String, onValue: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val current = field.options.firstOrNull { it.value == value }?.title ?: value
+
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = current,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(field.label) },
+            trailingIcon = {
+                IconButton(onClick = { expanded = true }) {
+                    Icon(Icons.Filled.ArrowDropDown, contentDescription = "Выбрать")
+                }
+            },
+        )
+        // Прозрачная накладка: тап по всему полю открывает список, а не только по стрелке.
+        Box(
+            Modifier
+                .matchParentSize()
+                .clickable { expanded = true }
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            field.options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option.title) },
+                    onClick = {
+                        onValue(option.value)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
