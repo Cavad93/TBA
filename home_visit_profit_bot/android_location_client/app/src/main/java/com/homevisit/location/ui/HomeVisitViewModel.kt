@@ -856,7 +856,6 @@ data class HomeVisitUiState(
     val finishAddress: String = "",
     val startOdometer: Double = 0.0,
     val endOdometer: Double? = null,
-    val
     val breakHoursBefore: Double = 0.0,
     val candidate: CandidateUiState = CandidateUiState(),
     val activeVisit: RouteVisitUi? = null,
