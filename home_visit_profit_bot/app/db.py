@@ -171,8 +171,6 @@ CREATE TABLE IF NOT EXISTS parking_zones (
 CREATE INDEX IF NOT EXISTS idx_parking_zones_bbox
     ON parking_zones(min_lat, max_lat, min_lon, max_lon);
 
-CREATE INDEX IF NOT EXISTS idx_parking_zones_region ON parking_zones(region);
-
 -- Тарифы парковки по коду зоны. Приходят с портала открытых данных города (Москва),
 -- обновляются вместе с зонами. Тоже публичные — не под RLS.
 CREATE TABLE IF NOT EXISTS parking_tariffs (
@@ -686,6 +684,11 @@ def _ensure_columns(db: Database) -> None:
         )
         """
     db.execute(_to_postgres_ddl(conflicts_ddl))
+    # parking_zones мог быть создан прошлым деплоем ещё без региона: CREATE TABLE
+    # IF NOT EXISTS колонку в существующую таблицу не добавит, и индекс по ней упал бы
+    # на старте. Поэтому колонка и индекс — здесь, после миграций, а не в SCHEMA.
+    _ensure_column(db, "parking_zones", "region", "TEXT DEFAULT ''")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_parking_zones_region ON parking_zones(region)")
     _ensure_column(db, "visits", "clinic", "TEXT")
     # Вердикт заказа ('go'|'edge'|'skip'), вычисленный из решения профитабельности.
     _ensure_column(db, "visits", "verdict", "TEXT")
