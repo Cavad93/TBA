@@ -49,10 +49,11 @@ STREET_ZONE_KEYS = (
     "ref",
 )
 
+# Площадь «Россия» здесь НЕ используется намеренно: Overpass строит её долго и отдаёт
+# 504. Код ISO3166-2 сам по себе однозначно опознаёт российский регион — площадь не нужна.
 REGIONS_QUERY = """
-[out:json][timeout:120];
-area["name"="Россия"]["admin_level"="2"]->.ru;
-relation["admin_level"="4"]["boundary"="administrative"]["ISO3166-2"~"^RU-"](area.ru);
+[out:json][timeout:180];
+relation["admin_level"="4"]["boundary"="administrative"]["ISO3166-2"~"^RU-"];
 out tags;
 """.strip()
 
@@ -61,17 +62,28 @@ class ParkingImportError(RuntimeError):
     """Overpass не ответил или ответил не тем. Старые данные при этом не трогаем."""
 
 
+# Overpass — общественный сервис: он регулярно отвечает 429 (занят) и 504 (не успел).
+# Это не ошибка данных, а очередь. Поэтому повторяем с нарастающей паузой, а не сдаёмся.
+MAX_ATTEMPTS = 3
+RETRY_PAUSE_SECONDS = 30
+
+
 def _post(query: str, *, url: str) -> dict[str, Any]:
-    request = urllib.request.Request(
-        url,
-        data=query.encode("utf-8"),
-        headers={"User-Agent": "vizitorkrut/1.0 (parking zones import)"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT + 30) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
-        raise ParkingImportError(f"Overpass не ответил: {error}") from error
+    last_error: Exception | None = None
+    for attempt in range(MAX_ATTEMPTS):
+        request = urllib.request.Request(
+            url,
+            data=query.encode("utf-8"),
+            headers={"User-Agent": "vizitorkrut/1.0 (parking zones import)"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT + 30) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+            last_error = error
+            if attempt < MAX_ATTEMPTS - 1:
+                time.sleep(RETRY_PAUSE_SECONDS * (attempt + 1))
+    raise ParkingImportError(f"Overpass не ответил: {last_error}") from last_error
 
 
 def fetch_regions(*, url: str = OVERPASS_URL) -> list[str]:
