@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -83,11 +84,20 @@ internal fun NavFacts(leg: ServerRouteLeg?, net: Double?) {
 internal fun GoButton(
     target: NavTarget?,
     primary: Boolean,
+    remaining: Int,
     onGo: () -> Unit,
+    onCopyCoordinates: () -> Unit,
 ) {
     if (target == null) {
         // Координат у заказа нет — вести некуда. Показывать кнопку, которая
         // отправит Яндексу строку адреса и уведёт не туда, честнее не показывать вовсе.
+        return
+    }
+    if (remaining <= 0) {
+        // Переходы за сутки кончились. Шестое нажатие открыло бы рекламную страницу
+        // Яндекса вместо навигатора — это выглядело бы как поломка приложения. Лучше
+        // сказать правду и отдать координаты.
+        ExhaustedGoButton(onCopyCoordinates)
         return
     }
     if (primary) {
@@ -123,6 +133,47 @@ internal fun GoButton(
             Text("  Поехали", color = VerdictColors.route)
         }
     }
+    if (remaining in 1..NavQuota.WARN_BELOW) {
+        Text(
+            "Осталось запусков сегодня: $remaining. Дальше отдам координаты — " +
+                "вставите в навигатор сами. Работаем над тем, чтобы лимита не было.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Кнопка, когда переходы за сутки исчерпаны.
+ *
+ * Лимит не наш — Яндекс пускает по ссылке пять раз в сутки, пока у нас нет ключа
+ * доступа. Ключ дают тем, у кого уже есть работающий сервис и статистика, так что
+ * это временно. Молчать об этом нельзя: человек должен понимать, что происходит,
+ * иначе решит, что приложение сломалось.
+ */
+@Composable
+private fun ExhaustedGoButton(onCopyCoordinates: () -> Unit) {
+    OutlinedButton(
+        modifier = Modifier.fillMaxWidth().height(50.dp),
+        onClick = onCopyCoordinates,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, VerdictColors.route),
+    ) {
+        Icon(
+            Icons.Filled.ContentCopy,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = VerdictColors.route,
+        )
+        Text("  Скопировать координаты", color = VerdictColors.route)
+    }
+    Text(
+        "Пять запусков навигатора за сутки — лимит Яндекса, пока у нас нет их ключа " +
+            "доступа. Мы над этим работаем. Координаты лягут в буфер обмена: вставьте " +
+            "их в навигатор и поезжайте.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /**

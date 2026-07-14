@@ -372,6 +372,8 @@ data class NavTarget(
     val app: String,
     val packageName: String,
     val signed: Boolean,
+    /** Координаты текстом — их кладём в буфер, когда переходы за сутки кончились. */
+    val coordinates: String = "",
 )
 
 /** Настройки навигатора: чем ехать и что приложение делает само. */

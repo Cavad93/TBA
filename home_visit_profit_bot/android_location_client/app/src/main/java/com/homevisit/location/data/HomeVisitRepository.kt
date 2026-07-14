@@ -1431,6 +1431,7 @@ class HomeVisitRepository private constructor(
                 app = nav.optString("app"),
                 packageName = nav.optString("package"),
                 signed = nav.optBoolean("signed", false),
+                coordinates = nav.optString("coordinates"),
             )
         }
         val navJson = response.optJSONObject("navigation")

@@ -187,6 +187,9 @@ import com.homevisit.location.domain.NavTarget
 import com.homevisit.location.domain.NavigationPrefs
 import com.homevisit.location.domain.ServerRouteLeg
 import kotlinx.coroutines.delay
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 
 @Composable
 internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, settingsState: GpsSettingsState) {
@@ -205,15 +208,40 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
     val pendingNav = uiState.serverRoute.pendingNav
     val autoClosed = uiState.serverRoute.autoClosed
 
+    // Сколько запусков навигатора осталось сегодня. Лимит не наш — Яндекс пускает по
+    // ссылке пять раз в сутки, пока у нас нет ключа доступа. Пересчитываем при каждой
+    // смене заказа: за смену счётчик успевает измениться.
+    var navRemaining by remember { mutableStateOf(NavQuota.DAILY_LIMIT) }
+    LaunchedEffect(navTarget, activeServerId) {
+        navRemaining = NavQuota.remaining(context, navTarget?.signed == true)
+    }
+
+    val copyCoordinates: (NavTarget) -> Unit = { target ->
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Координаты заказа", target.coordinates))
+        Toast.makeText(context, "Скопировал: ${target.coordinates}", Toast.LENGTH_LONG).show()
+    }
+
     val go: (NavTarget) -> Unit = { target ->
-        when (NavLauncher.open(context, target)) {
-            NavLauncher.Result.NothingInstalled ->
-                Toast.makeText(
-                    context,
-                    "Не нашёл, чем открыть маршрут. Установите Яндекс.Карты или Навигатор.",
-                    Toast.LENGTH_LONG,
-                ).show()
-            else -> Unit
+        if (NavQuota.exhausted(context, target.signed)) {
+            // Шестой переход открыл бы рекламную страницу Яндекса вместо навигатора.
+            // Не отправляем человека в тупик — отдаём координаты.
+            copyCoordinates(target)
+            navRemaining = 0
+        } else {
+            when (NavLauncher.open(context, target)) {
+                NavLauncher.Result.NothingInstalled ->
+                    Toast.makeText(
+                        context,
+                        "Не нашёл, чем открыть маршрут. Установите Яндекс.Карты или Навигатор.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                else -> {
+                    // Считаем только состоявшиеся переходы: Яндекс считает так же.
+                    NavQuota.record(context, target.signed)
+                    navRemaining = NavQuota.remaining(context, target.signed)
+                }
+            }
         }
     }
 
@@ -277,8 +305,10 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
                 navTarget = navTarget,
                 leg = snapshot?.legFor(activeServerId),
                 net = activeServerId?.let { snapshot?.netByVisitId?.get(it) },
+                remaining = navRemaining,
                 onRefreshGpsHint = workActions.onRefreshGpsHint,
                 onGo = { navTarget?.let(go) },
+                onCopyCoordinates = { navTarget?.let(copyCoordinates) },
                 onComplete = workActions.onCompleteCurrentVisit,
                 onCancel = workActions.onCancelCurrentVisit,
             )
@@ -522,8 +552,10 @@ internal fun FocusOrderCard(
     navTarget: NavTarget?,
     leg: ServerRouteLeg?,
     net: Double?,
+    remaining: Int,
     onRefreshGpsHint: () -> Unit,
     onGo: () -> Unit,
+    onCopyCoordinates: () -> Unit,
     onComplete: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -560,7 +592,13 @@ internal fun FocusOrderCard(
                 // Километры, минуты и деньги — наши, из OSRM. Человек видит, за что едет,
                 // до того как экран сменится на чужой.
                 NavFacts(leg = leg, net = net)
-                GoButton(target = navTarget, primary = !arrived, onGo = onGo)
+                GoButton(
+                    target = navTarget,
+                    primary = !arrived,
+                    remaining = remaining,
+                    onGo = onGo,
+                    onCopyCoordinates = onCopyCoordinates,
+                )
                 GpsHintBlock(gpsHint = gpsHint, onRefresh = onRefreshGpsHint, onComplete = onComplete)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (arrived) {

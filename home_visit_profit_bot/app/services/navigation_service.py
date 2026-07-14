@@ -67,6 +67,15 @@ class NavLink:
     # Запасной вариант: системная схема geo:. Открывает любое установленное
     # картографическое приложение — на случай, если Яндекса на телефоне нет.
     fallback_url: str
+    # Координаты текстом. Когда переходы за сутки исчерпаны, телефон кладёт их в буфер
+    # обмена: человек вставит их в навигатор руками. Хуже, чем кнопка, но лучше, чем
+    # тупик.
+    lat: float = 0.0
+    lon: float = 0.0
+
+    @property
+    def coordinates(self) -> str:
+        return f"{_coord(self.lat)}, {_coord(self.lon)}"
 
     def payload(self) -> dict[str, object]:
         return {
@@ -76,6 +85,9 @@ class NavLink:
             "signed": self.signed,
             "profile": self.profile,
             "fallback_url": self.fallback_url,
+            "lat": self.lat,
+            "lon": self.lon,
+            "coordinates": self.coordinates,
         }
 
 
@@ -130,6 +142,8 @@ def build_link(
         signed=signed,
         profile=profile,
         fallback_url=geo_url(lat, lon),
+        lat=lat,
+        lon=lon,
     )
 
 
