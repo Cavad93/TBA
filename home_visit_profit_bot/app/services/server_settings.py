@@ -26,6 +26,19 @@ from functools import lru_cache
 from app.config import load_config
 
 DEFAULT_OSRM_URL = "https://router.project-osrm.org"
+
+# У каждого профиля СВОЙ маршрутизатор, и это не прихоть: OSRM игнорирует профиль
+# в адресе запроса — он отдаёт то, какой граф загрузил. Спросить пеший маршрут
+# у автомобильного инстанса значит получить автомобильный ответ и не заметить этого.
+#
+# Пеший и велосипедный графы собраны только по Москве и Петербургу: держать их
+# на пять округов бессмысленно — пешком из Москвы в Нижний Новгород никто не ходит,
+# а память они съели бы гигабайтами.
+OSRM_ENV_BY_PROFILE = {
+    "driving": "OSRM_URL",
+    "foot": "OSRM_URL_FOOT",
+    "cycling": "OSRM_URL_CYCLING",
+}
 DEFAULT_NOMINATIM_URL = "https://nominatim.openstreetmap.org"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
@@ -36,8 +49,18 @@ def _config():
     return load_config()
 
 
-def osrm_url() -> str:
-    return (os.getenv("OSRM_URL") or _config().routing.osrm_url or DEFAULT_OSRM_URL).rstrip("/")
+def osrm_url(profile: str = "driving") -> str:
+    """Адрес маршрутизатора для этого профиля.
+
+    Если для пешего или велосипедного профиля адрес не задан — возвращаем автомобильный.
+    Это не «на всякий случай»: без явной настройки лучше честно посчитать по машине,
+    чем спросить пеший маршрут у автомобильного графа и выдать его за пеший.
+    """
+    variable = OSRM_ENV_BY_PROFILE.get(profile, "OSRM_URL")
+    value = os.getenv(variable)
+    if not value and profile != "driving":
+        value = os.getenv("OSRM_URL")
+    return (value or _config().routing.osrm_url or DEFAULT_OSRM_URL).rstrip("/")
 
 
 def nominatim_url() -> str:

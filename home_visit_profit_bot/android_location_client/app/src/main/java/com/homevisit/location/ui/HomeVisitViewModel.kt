@@ -311,6 +311,13 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                     message = "Расчёт готов",
                     parking = result.parking,
                 )
+                result.outsideCoverage -> CandidateUiState(
+                    // Не «ошибка», а честная граница: карты этого города у нас пока нет.
+                    // Молча подставить ноль километров было бы куда хуже — заказ выглядел
+                    // бы бесконечно выгодным.
+                    message = "Этот адрес пока вне покрытия наших карт. Введите километры и минуты дороги вручную.",
+                    needsManualRoute = true,
+                )
                 result.needsManualRoute -> CandidateUiState(
                     message = "Нужно ввести километры и минуты дороги вручную.",
                     needsManualRoute = true,

@@ -427,14 +427,15 @@ def calculate_planned_route_minutes(
 
     start = _point(day.start_address or "Старт", day.start_lat, day.start_lon)
     finish = _point(day.finish_address or "Финиш", day.finish_lat, day.finish_lon)
+    profile = osrm_profile(settings_repo)
     if start and finish and all(visit.lat is not None and visit.lon is not None for visit in completed_visits):
         try:
             route = optimize_route(
                 start,
                 completed_visits,
                 finish,
-                osrm_url=server_osrm_url(),
-                profile=osrm_profile(settings_repo),
+                osrm_url=server_osrm_url(profile),
+                profile=profile,
                 timeout_seconds=server_timeout(),
                 duration_factor=1.0,
             )

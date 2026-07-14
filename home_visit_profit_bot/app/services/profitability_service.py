@@ -171,16 +171,20 @@ def calculate_remaining_route_summary(
     current_point = _current_point(day, completed)
     finish_point = _finish_point(day)
 
+    # Профиль по типу транспорта: раньше был всегда автомобильный, и курьер на
+    # велосипеде получал маршрут для машины — неверные километры и время. У каждого
+    # профиля свой маршрутизатор: OSRM игнорирует профиль в адресе запроса и отдаёт
+    # то, какой граф загрузил.
+    profile = osrm_profile(settings_repo)
+
     if current_point and finish_point and all(visit.lat is not None and visit.lon is not None for visit in future):
         try:
             future_route = optimize_route(
                 current_point,
                 future,
                 finish_point,
-                osrm_url=server_osrm_url(),
-                # Профиль по типу транспорта: раньше был всегда автомобильный, и курьер
-                # на велосипеде получал маршрут для машины — неверные километры и время.
-                profile=osrm_profile(settings_repo),
+                osrm_url=server_osrm_url(profile),
+                profile=profile,
                 timeout_seconds=server_timeout(),
                 duration_factor=day.planned_route_time_factor,
             )

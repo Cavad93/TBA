@@ -28,7 +28,7 @@ from app.services.profitability_service import (
     decision_to_verdict,
     profitability_score,
 )
-from app.services.routing_service import RoutingError
+from app.services.routing_service import OutsideCoverageError, RoutingError
 from app.services.settings_service import allowed_clinics
 from app.services.visit_navigation import attach_navigation, navigation_settings
 from app.services.visit_parking import address_hint
@@ -121,6 +121,18 @@ class MobileVisitService:
                 self.stats,
                 LocationEventRepository(self.connection),
                 strict_routing=route_km is None or route_minutes is None,
+            )
+        except OutsideCoverageError as error:
+            # Адрес за пределами наших карт. Раньше OSRM в этом случае прилипал к
+            # ближайшей точке своего графа — хоть за четыреста километров — и возвращал
+            # ноль километров с кодом «Ok». Заказ выглядел бесконечно выгодным.
+            # Теперь честно говорим, что посчитать не можем, и просим ввести дорогу руками.
+            self.visits.reject(candidate.id)
+            return CandidateApiResult(
+                ok=False,
+                reason="outside_coverage",
+                candidate=candidate,
+                detail=str(error),
             )
         except RoutingError as error:
             self.visits.reject(candidate.id)

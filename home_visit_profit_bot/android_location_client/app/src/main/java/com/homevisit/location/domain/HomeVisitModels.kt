@@ -334,7 +334,11 @@ data class CandidateRequestResult(
     val parking: ParkingHint? = null,
 ) {
     val needsManualRoute: Boolean
-        get() = reason == "needs_manual_route"
+        get() = reason == "needs_manual_route" || outsideCoverage
+
+    /** Адрес вне покрытия наших карт: посчитать дорогу нечем, но сказать об этом надо иначе. */
+    val outsideCoverage: Boolean
+        get() = reason == "outside_coverage"
 
     val needsCoordinates: Boolean
         get() = reason == "needs_coordinates"

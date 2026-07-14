@@ -13,6 +13,26 @@ class RoutingError(RuntimeError):
     pass
 
 
+class OutsideCoverageError(RoutingError):
+    """Точка вне покрытия нашего маршрутизатора. Считать по ней нечего."""
+
+
+# Насколько далеко OSRM разрешено «прилипать» к ближайшей дороге.
+#
+# Без этого ограничения он прилипает к БЛИЖАЙШЕЙ точке графа — хоть за четыреста
+# километров. Проверено: пеший маршрутизатор, спрошенный про Нижний Новгород, притянул
+# обе точки к одному узлу на краю Москвы и вернул код Ok, ноль километров и ноль минут.
+# Приложение приняло бы это за правду, и заказ без дороги выглядел бы бесконечно
+# выгодным. Молчаливый неверный ответ — худшее, что маршрутизатор может сделать.
+#
+# Дом от дороги дальше километра не стоит даже в деревне. Два — с большим запасом.
+SNAP_RADIUS_M = 2000
+
+# Пешком и на велосипеде граф гуще (тропинки, дворы), а покрытие уже — только Москва
+# и Петербург. Здесь запас не нужен: если дороги нет в километре, человек не в зоне.
+SNAP_RADIUS_WALK_M = 1000
+
+
 @dataclass(frozen=True)
 class DistanceMatrix:
     distances_km: list[list[float]]
@@ -39,9 +59,11 @@ def get_route(
     duration_factor: float = 1.0,
 ) -> tuple[float, float]:
     coordinates = f"{from_point.lon},{from_point.lat};{to_point.lon},{to_point.lat}"
-    params = urlencode({"overview": "false"})
+    radius = snap_radius(profile)
+    params = urlencode({"overview": "false", "radiuses": f"{radius};{radius}"})
     url = f"{osrm_url.rstrip('/')}/route/v1/{profile}/{coordinates}?{params}"
     payload = _get_json(url, timeout_seconds)
+    _raise_if_outside_coverage(payload)
     if payload.get("code") != "Ok" or not payload.get("routes"):
         raise RoutingError(payload.get("message") or "OSRM не вернул маршрут")
     route = payload["routes"][0]
@@ -59,9 +81,14 @@ def get_distance_matrix(
     if len(points) < 2:
         return DistanceMatrix(distances_km=[[0.0]], durations_minutes=[[0.0]])
     coordinates = ";".join(f"{point.lon},{point.lat}" for point in points)
-    params = urlencode({"annotations": "duration,distance"})
+    radius = snap_radius(profile)
+    params = urlencode({
+        "annotations": "duration,distance",
+        "radiuses": ";".join([str(radius)] * len(points)),
+    })
     url = f"{osrm_url.rstrip('/')}/table/v1/{profile}/{coordinates}?{params}"
     payload = _get_json(url, timeout_seconds)
+    _raise_if_outside_coverage(payload)
     if payload.get("code") != "Ok":
         raise RoutingError(payload.get("message") or "OSRM не вернул матрицу расстояний")
     distances = payload.get("distances")
@@ -116,6 +143,22 @@ def _get_json(url: str, timeout_seconds: float) -> dict:
             return response.json()
     except httpx.HTTPError as error:
         raise RoutingError(f"Не удалось обратиться к OSRM: {error}") from error
+
+
+def snap_radius(profile: str) -> int:
+    return SNAP_RADIUS_WALK_M if profile in ("foot", "cycling") else SNAP_RADIUS_M
+
+
+def _raise_if_outside_coverage(payload: dict) -> None:
+    """OSRM говорит NoSegment, когда рядом с точкой в его графе нет дороги.
+
+    Значит человек за пределами наших карт. Это не сбой — это честный ответ, и
+    подменять его нулём километров нельзя.
+    """
+    if payload.get("code") == "NoSegment":
+        raise OutsideCoverageError(
+            "Этот адрес пока вне покрытия наших карт. Введите километры и минуты дороги вручную."
+        )
 
 
 def _matrix_has_nulls(matrix: list[list[float | None]]) -> bool:
