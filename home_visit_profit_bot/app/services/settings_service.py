@@ -46,6 +46,8 @@ class SettingField:
 
 
 SECTION_TITLES: dict[str, str] = {
+    # Первой в настройках: это то, что напрямую двигает вердикт по каждому заказу.
+    "km_cost": "Стоимость километра",
     "economics": "Деньги",
     "car": "Машина и стоимость километра",
     "income": "Доход",
@@ -61,6 +63,17 @@ SECTION_TITLES: dict[str, str] = {
 # OSRM) в каталог намеренно не входят: пользователю они ничего не говорят, а ошибка в
 # них ломает расчёт маршрута. Они зафиксированы дефолтами сервера (app/db.py, config).
 SETTINGS_CATALOG: list[SettingField] = [
+    # Иные расходы на километр — ПЕРВЫМ полем в настройках.
+    #
+    # Модель приложения знает про топливо и износ, но не знает про «Платон», платные
+    # дороги, мойку, стоянку, лизинг — у каждого своё. Пояснение к этому полю
+    # СОБИРАЕТСЯ НА ЛЕТУ (см. _extra_cost_hint): в нём стоят настоящие цифры этого
+    # человека. Общий текст здесь бесполезен: не понимая, что уже посчитано, он либо
+    # задвоит расходы, либо не внесёт ничего.
+    SettingField(
+        "extra_cost_per_km", "km_cost", "Иные расходы, ₽ за км", "number", 0.0, min=0,
+        hint="",
+    ),
     # Деньги
     SettingField(
         "min_hourly_income", "economics", "Минимум ₽/час", "number", 600.0, min=0,
@@ -322,6 +335,48 @@ def _coerce(field: SettingField, value: Any) -> str:
     return text
 
 
+def _extra_cost_hint(settings: SettingsRepository, connection: Any) -> str:
+    """«Сейчас приложение считает: топливо X + износ Y = Z ₽/км. Сюда добавьте своё.»
+
+    Показывать здесь общие слова бессмысленно: человек не поймёт, что уже учтено, а
+    что нет, и либо задвоит расходы, либо не внесёт ничего. Поэтому в пояснении стоят
+    его настоящие цифры — те самые, по которым прямо сейчас считается каждый заказ.
+    """
+    from app.repositories import DailyStatsRepository
+    from app.services.profitability_service import vehicle_km_cost
+
+    try:
+        cost = vehicle_km_cost(settings, DailyStatsRepository(connection))
+    except Exception:  # настройки читаются и без активной базы — не роняем экран
+        return _EXTRA_COST_BASE_HINT
+
+    parts = []
+    if cost.fuel_per_km > 0:
+        source = "по вашим заправкам" if cost.fuel_measured else "по цене и расходу из настроек"
+        parts.append(f"топливо {cost.fuel_per_km:.1f} ₽ ({source})")
+    if cost.maintenance_per_km > 0:
+        source = "по вашим расходам на машину" if cost.maintenance_measured else "по коэффициенту износа"
+        parts.append(f"обслуживание и износ {cost.maintenance_per_km:.1f} ₽ ({source})")
+
+    if not parts:
+        counted = "Сейчас приложение не считает расходов на километр: за машину платит компания."
+    else:
+        counted = (
+            "Сейчас приложение считает на километр: "
+            + " и ".join(parts)
+            + f" — итого {cost.total:.1f} ₽ за километр."
+        )
+
+    return counted + " " + _EXTRA_COST_BASE_HINT
+
+
+_EXTRA_COST_BASE_HINT = (
+    "Сюда внесите то, что приложение не учло: «Платон» для грузовиков, платные дороги, "
+    "мойку, стоянку, лизинг, страховку — всё, что вы платите за километр сверх этого. "
+    "Не вносите сюда то, что уже посчитано выше, иначе расход задвоится."
+)
+
+
 def allowed_clinics(settings: SettingsRepository) -> set[str]:
     return set(_parse_list(settings.get("clinics") or ""))
 
@@ -332,7 +387,14 @@ def allowed_telemed_clinics(settings: SettingsRepository) -> set[str]:
 
 class SettingsService:
     def __init__(self, connection) -> None:
+        self.connection = connection
         self.settings = SettingsRepository(connection)
+
+    def _hint(self, field: SettingField) -> str:
+        """Пояснение к полю. Для стоимости километра оно живое — с вашими цифрами."""
+        if field.key == "extra_cost_per_km":
+            return _extra_cost_hint(self.settings, self.connection)
+        return field.hint
 
     def read(self) -> dict[str, Any]:
         sections: dict[str, list[dict[str, Any]]] = {}
@@ -346,7 +408,7 @@ class SettingsService:
                     "default": field.default,
                     "min": field.min,
                     "max": field.max,
-                    "hint": field.hint,
+                    "hint": self._hint(field),
                     "options": [{"value": key, "title": title} for key, title in field.options],
                 }
             )

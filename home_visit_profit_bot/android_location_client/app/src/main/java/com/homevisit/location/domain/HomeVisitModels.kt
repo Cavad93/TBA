@@ -664,6 +664,8 @@ data class VehicleCost(
     val total: Double,
     val fuelPerKm: Double,
     val maintenancePerKm: Double,
+    /** «Платон», платные дороги, мойка, лизинг — то, чего модель знать не может. */
+    val extraPerKm: Double,
     val mode: String,
     val wearCoefficient: Double,
     val riskMarkupPercent: Int,

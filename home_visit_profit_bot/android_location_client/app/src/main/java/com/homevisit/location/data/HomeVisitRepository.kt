@@ -1680,6 +1680,7 @@ class HomeVisitRepository private constructor(
             total = o.optDouble("total", 0.0),
             fuelPerKm = o.optDouble("fuel_per_km", 0.0),
             maintenancePerKm = o.optDouble("maintenance_per_km", 0.0),
+            extraPerKm = o.optDouble("extra_per_km", 0.0),
             mode = o.optString("mode"),
             wearCoefficient = o.optDouble("wear_coefficient", 0.0),
             riskMarkupPercent = o.optInt("risk_markup_percent", 0),

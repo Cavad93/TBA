@@ -113,6 +113,9 @@ class KmCost:
 
     fuel_per_km: float
     maintenance_per_km: float
+    # То, чего модель знать не может: «Платон» для грузовиков, платные дороги, мойка,
+    # стоянка, лизинг. У каждого своё, и вычислить это неоткуда — только спросить.
+    extra_per_km: float
     mode: str
     wear_coefficient: float
     risk_markup: float
@@ -123,13 +126,14 @@ class KmCost:
 
     @property
     def total(self) -> float:
-        return round(self.fuel_per_km + self.maintenance_per_km, 3)
+        return round(self.fuel_per_km + self.maintenance_per_km + self.extra_per_km, 3)
 
     def payload(self) -> dict[str, object]:
         return {
             "total": self.total,
             "fuel_per_km": round(self.fuel_per_km, 2),
             "maintenance_per_km": round(self.maintenance_per_km, 2),
+            "extra_per_km": round(self.extra_per_km, 2),
             "mode": self.mode,
             "wear_coefficient": round(self.wear_coefficient, 2),
             "risk_markup_percent": round(self.risk_markup * 100),
@@ -140,7 +144,10 @@ class KmCost:
 
     def explanation(self) -> str:
         if self.mode == "exact":
-            return f"Стоимость километра задана вручную: {self.total:.1f} ₽/км."
+            text = f"Стоимость километра задана вручную: {self.fuel_per_km:.1f} ₽/км."
+            if self.extra_per_km > 0:
+                text += f" Плюс иные расходы {self.extra_per_km:.1f} ₽/км — итого {self.total:.1f} ₽/км."
+            return text
         parts = []
         if self.fuel_paid_by_me:
             source = "по вашим заправкам" if self.fuel_measured else "по цене и расходу из настроек"
@@ -156,6 +163,8 @@ class KmCost:
             parts.append(f"обслуживание и износ {self.maintenance_per_km:.1f} ₽/км ({source})")
         else:
             parts.append("обслуживание оплачивает компания")
+        if self.extra_per_km > 0:
+            parts.append(f"иные расходы {self.extra_per_km:.1f} ₽/км (внесли вы)")
         return "Километр стоит " + f"{self.total:.1f} ₽: " + ", ".join(parts) + "."
 
 
@@ -241,12 +250,17 @@ def km_cost(
     mode = _mode(settings)
     fuel_mine = _payer(settings, "fuel_paid_by") == "me" and uses_fuel(settings)
     maintenance_mine = _payer(settings, "maintenance_paid_by") == "me"
+    # Иные расходы человек вносит сам и платит сам — иначе он бы их и не вносил.
+    # Они прибавляются в ЛЮБОМ режиме: это то, что приложение не учло, а не замена
+    # его расчёту.
+    extra = max(0.0, settings.get_float("extra_cost_per_km", 0.0))
 
     if mode == "exact":
         exact = max(0.0, settings.get_float("exact_cost_per_km", 0.0))
         return KmCost(
             fuel_per_km=exact if fuel_mine else 0.0,
             maintenance_per_km=0.0,
+            extra_per_km=extra,
             mode=mode,
             wear_coefficient=0.0,
             risk_markup=0.0,
@@ -284,6 +298,7 @@ def km_cost(
     return KmCost(
         fuel_per_km=fuel_per_km if fuel_mine else 0.0,
         maintenance_per_km=maintenance_per_km if maintenance_mine else 0.0,
+        extra_per_km=extra,
         mode=mode,
         wear_coefficient=coefficient,
         risk_markup=risk_markup(

@@ -419,6 +419,14 @@ internal fun VehicleCostCard(cost: VehicleCost) {
                 MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
+            if (cost.extraPerKm > 0) {
+                MetricLine(
+                    "Иные расходы (внесли вы)",
+                    "${oneDecimal(cost.extraPerKm)} ₽/км",
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             Text(
                 cost.explanation,
                 style = MaterialTheme.typography.bodySmall,

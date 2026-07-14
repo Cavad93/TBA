@@ -69,6 +69,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.NearMe
@@ -327,6 +328,23 @@ internal fun AppSettingsSection(
     val templates = templatesField?.let { parseAddressTemplates(textEdits[it.key] ?: it.textValue) }.orEmpty()
 
     fields.forEach { field ->
+        // Иные расходы на километр. Пояснение здесь — не мелкая подпись под полем, а
+        // полноценная карточка: в нём стоят НАСТОЯЩИЕ цифры этого человека («сейчас
+        // приложение считает столько-то на топливо и столько-то на износ»). Не понимая,
+        // что уже посчитано, он либо задвоит расходы, либо не внесёт ничего.
+        if (field.key == "extra_cost_per_km") {
+            ExtraCostExplanation(field.hint)
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                value = textEdits[field.key] ?: field.textValue,
+                onValueChange = { textEdits[field.key] = it },
+                label = { Text(field.label) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            )
+            return@forEach
+        }
+
         // Шаблоны адресов хранятся как JSON — вместо сырого текстового поля даём
         // нормальный редактор «название + адрес».
         if (field.key == "address_templates") {
@@ -797,6 +815,43 @@ private fun ChoiceField(field: SettingField, value: String, onValue: (String) ->
                     },
                 )
             }
+        }
+    }
+}
+
+
+/**
+ * Живое пояснение к «иным расходам на километр».
+ *
+ * Текст приходит с сервера и собран под конкретного человека: в нём стоят его цифры —
+ * сколько приложение уже считает на топливо и на износ, и что остаётся добавить
+ * («Платон» для грузовиков, платные дороги, мойка, стоянка, лизинг). Общими словами
+ * здесь не обойтись: не понимая, что уже посчитано, человек либо задвоит расходы,
+ * либо не внесёт ничего.
+ */
+@Composable
+private fun ExtraCostExplanation(hint: String) {
+    if (hint.isBlank()) return
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = VerdictColors.edgeContainer),
+        border = BorderStroke(1.dp, VerdictColors.edge),
+    ) {
+        Row(
+            Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                Icons.Filled.Info,
+                contentDescription = null,
+                tint = VerdictColors.edge,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = VerdictColors.onEdgeContainer,
+            )
         }
     }
 }
