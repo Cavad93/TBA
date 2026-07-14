@@ -25,6 +25,18 @@ REQUEST_TIMEOUT = 300
 
 FEE_KEYS = ("parking:both:fee", "parking:left:fee", "parking:right:fee")
 
+# Город нужен ровно затем, чтобы найти тариф. Беда в том, что у улиц в OSM тега
+# `addr:city` обычно нет — он ставится на дома, а не на дорогу. Поэтому определяем город
+# по координатам: рамки грубые, но платная парковка есть только в центрах, а перепутать
+# Москву с Петербургом на таком расстоянии невозможно.
+#
+# Тарифы у нас есть только для этих двух городов; для остальных город не важен —
+# цены всё равно нет, а предупредить о платной зоне мы предупредим и без него.
+CITY_BOXES = (
+    ("Москва", 55.40, 56.05, 36.95, 37.97),
+    ("Санкт-Петербург", 59.70, 60.10, 29.55, 30.60),
+)
+
 ZONE_KEYS = (
     "parking:both:zone",
     "parking:left:zone",
@@ -87,11 +99,11 @@ def _zone(feature: dict[str, Any]) -> dict[str, Any] | None:
 
     lats = [point[0] for point in points]
     lons = [point[1] for point in points]
+    center_lat = sum(lats) / len(lats)
+    center_lon = sum(lons) / len(lons)
     return {
         "region": "Россия",
-        # Город нужен только ради тарифа. OSM называет его не всегда — где не назвал,
-        # цены у нас всё равно нет.
-        "city": tags.get("addr:city") or "Россия",
+        "city": _city(tags, center_lat, center_lon),
         "osm_type": _osm_type(feature),
         "osm_id": _osm_id(feature),
         "kind": kind,
@@ -103,6 +115,17 @@ def _zone(feature: dict[str, Any]) -> dict[str, Any] | None:
         "max_lon": max(lons),
         "geometry": points,
     }
+
+
+def _city(tags: dict[str, Any], lat: float, lon: float) -> str:
+    """Какому городу принадлежит зона. Тег есть не всегда — тогда смотрим на карту."""
+    named = (tags.get("addr:city") or "").strip()
+    if named:
+        return named
+    for city, min_lat, max_lat, min_lon, max_lon in CITY_BOXES:
+        if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
+            return city
+    return "Россия"
 
 
 def _points(geometry: dict[str, Any]) -> list[tuple[float, float]]:
@@ -141,10 +164,32 @@ def _zone_code(tags: dict[str, Any]) -> str | None:
     return None
 
 
+# Ниже этого числа зон артефакт считаем сломанным. Платных зон в пяти округах — тысячи;
+# если их вдруг стало сто, это не отмена парковок постановлением, а сбой сборки. Заменить
+# ими всю страну — значит молча стереть настоящие данные и перестать предупреждать людей.
+#
+# Порог не выдуман: ровно так мы и обожглись. osmium export не пишет id, пока не попросишь,
+# и все зоны приехали с osm_id=0 — по уникальному ключу они затёрли друг друга, и в базу
+# вместо двенадцати тысяч попала ОДНА. Заметить это удалось только потому, что цифры
+# в отчёте не сошлись с цифрами в таблице.
+MIN_SANE_ZONES = 1000
+
+
 def import_artifact(repository, url: str = DEFAULT_ARTIFACT_URL) -> int:
     zones = list(parse(download(url)))
-    if not zones:
-        # Пустой артефакт почти наверняка означает сбой сборки, а не отмену всех парковок
-        # в стране. Старые данные не трогаем.
-        raise ArtifactError("в артефакте не нашлось ни одной платной зоны")
+    if len(zones) < MIN_SANE_ZONES:
+        # Старые данные не трогаем: устаревшая карта лучше пустой.
+        raise ArtifactError(
+            f"в артефакте всего {len(zones)} зон — это похоже на сбой сборки, а не на данные. "
+            f"Старые зоны оставляю."
+        )
+
+    # Уникальность в базе — по паре (тип, id). Если артефакт вдруг придёт без id, зоны
+    # начнут затирать друг друга, и мы снова этого не заметим. Проверяем здесь, до записи.
+    unique = {(zone["osm_type"], zone["osm_id"]) for zone in zones}
+    if len(unique) < len(zones) * 0.9:
+        raise ArtifactError(
+            f"в артефакте {len(zones)} зон, но лишь {len(unique)} различимых по id — "
+            f"похоже, id потерялись. Старые зоны оставляю."
+        )
     return repository.replace_region("Россия", zones)

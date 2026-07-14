@@ -288,3 +288,116 @@ def test_moscow_skips_deleted_entries() -> None:
         _entry(HourPrice=777, is_deleted=1, global_id=99),
     ])]
     assert parse_tariffs(rows)["7"].price_text == "40 ₽/час"
+
+
+# --- Артефакт с сервера карт ---
+
+def _feature(fid, tags, coords, geom="LineString"):
+    return {"id": fid, "properties": tags, "geometry": {"type": geom, "coordinates": coords}}
+
+
+def test_artifact_keeps_osm_id_and_type() -> None:
+    """Без id все зоны приезжают с osm_id=0 и затирают друг друга по уникальному ключу.
+
+    Именно это и произошло: osmium export не пишет id, пока не попросишь (--add-unique-id).
+    В базу вместо двенадцати тысяч зон попала одна.
+    """
+    from app.services.parking_artifact_service import _zone
+    zone = _zone(_feature("w12345", {"parking:both:fee": "yes", "name": "Уланский переулок"},
+                          [[37.639, 55.766], [37.640, 55.767]]))
+    assert zone is not None
+    assert zone["osm_type"] == "way"
+    assert zone["osm_id"] == 12345
+
+
+def test_artifact_city_falls_back_to_coordinates() -> None:
+    """У улиц в OSM тега addr:city нет — он ставится на дома. Без города цена не найдётся."""
+    from app.services.parking_artifact_service import _zone
+    moscow = _zone(_feature("w1", {"parking:both:fee": "yes"}, [[37.639, 55.766], [37.640, 55.767]]))
+    spb = _zone(_feature("w2", {"parking:both:fee": "yes"}, [[30.331, 59.931], [30.332, 59.932]]))
+    far = _zone(_feature("w3", {"parking:both:fee": "yes"}, [[49.10, 55.79], [49.11, 55.80]]))
+    assert moscow["city"] == "Москва"
+    assert spb["city"] == "Санкт-Петербург"
+    assert far["city"] == "Россия"
+
+
+def test_artifact_skips_free_parking() -> None:
+    """fee=no — тег есть, но парковка бесплатная. Предупреждать не о чем."""
+    from app.services.parking_artifact_service import _zone
+    assert _zone(_feature("w9", {"parking:both:fee": "no"}, [[37.6, 55.7], [37.61, 55.71]])) is None
+    assert _zone(_feature("w8", {"amenity": "parking", "fee": "no"},
+                          [[[37.6, 55.7], [37.61, 55.7], [37.61, 55.71], [37.6, 55.7]]], "Polygon")) is None
+
+
+def test_artifact_coordinates_are_not_swapped() -> None:
+    """GeoJSON — (долгота, широта), у нас везде (широта, долгота). Перепутать — увезти Москву в океан."""
+    from app.services.parking_artifact_service import _zone
+    zone = _zone(_feature("w7", {"parking:both:fee": "yes"}, [[37.639, 55.766], [37.640, 55.767]]))
+    assert 55.0 < zone["min_lat"] < 56.0
+    assert 37.0 < zone["min_lon"] < 38.0
+
+
+def test_artifact_refuses_to_wipe_the_country_with_a_broken_build(monkeypatch) -> None:
+    """Десять зон вместо тысяч — это сбой сборки, а не отмена парковок постановлением.
+
+    Ровно так мы и обожглись: osmium export не писал id, все зоны приехали с osm_id=0
+    и затёрли друг друга. В базу попала ОДНА строка вместо двенадцати тысяч.
+    """
+    import gzip
+    import json as _json
+
+    import pytest as _pytest
+
+    from app.services import parking_artifact_service as artifact
+
+    class FakeRepo:
+        def __init__(self):
+            self.calls = 0
+
+        def replace_region(self, region, zones):
+            self.calls += 1
+            return len(zones)
+
+    lines = [
+        _json.dumps(_feature("w%d" % i, {"parking:both:fee": "yes"},
+                             [[37.6 + i / 10000, 55.7], [37.61 + i / 10000, 55.71]]))
+        for i in range(10)
+    ]
+    monkeypatch.setattr(artifact, "download", lambda url: gzip.compress("\n".join(lines).encode("utf-8")))
+
+    repo = FakeRepo()
+    with _pytest.raises(artifact.ArtifactError, match="сбой сборки"):
+        artifact.import_artifact(repo)
+
+    # Ничего не записали — старые зоны на месте.
+    assert repo.calls == 0
+
+
+def test_artifact_refuses_when_ids_are_lost(monkeypatch) -> None:
+    """Зоны без id неразличимы и затрут друг друга по уникальному ключу. Ловим до записи."""
+    import gzip
+    import json as _json
+
+    import pytest as _pytest
+
+    from app.services import parking_artifact_service as artifact
+
+    class FakeRepo:
+        calls = 0
+
+        def replace_region(self, region, zones):
+            FakeRepo.calls += 1
+            return len(zones)
+
+    # Много зон, но у всех id отсутствует — как было до --add-unique-id.
+    lines = [
+        _json.dumps({"properties": {"parking:both:fee": "yes"},
+                     "geometry": {"type": "LineString",
+                                  "coordinates": [[37.6 + i / 10000, 55.7], [37.61 + i / 10000, 55.71]]}})
+        for i in range(2000)
+    ]
+    monkeypatch.setattr(artifact, "download", lambda url: gzip.compress("\n".join(lines).encode("utf-8")))
+
+    with _pytest.raises(artifact.ArtifactError, match="id потерялись"):
+        artifact.import_artifact(FakeRepo())
+    assert FakeRepo.calls == 0
