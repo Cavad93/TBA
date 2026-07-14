@@ -6,3 +6,7 @@ __pycache__/
 .pytest_cache/
 data.sqlite3
 *.sqlite3
+
+# Слепок графа кода (codebase-memory-mcp). Бинарник, меняется при каждой
+# переиндексации, а строится за 4 секунды — в git ему делать нечего.
+.codebase-memory/
