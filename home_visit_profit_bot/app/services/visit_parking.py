@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any
 
 from app.database import Database
-from app.repositories_parking import ParkingZoneRepository
+from app.repositories_parking import ParkingTariffRepository, ParkingZoneRepository
 from app.services.parking_service import ParkingHit, find_zone
 
 
@@ -23,7 +23,13 @@ def zone_at(connection: Database, lat: float | None, lon: float | None, *, momen
     zones = ParkingZoneRepository(connection).near(lat, lon)
     if not zones:
         return None
-    return find_zone(zones, lat, lon, moment=moment or datetime.now())
+    hit = find_zone(zones, lat, lon, moment=moment or datetime.now())
+    if hit is None:
+        return None
+    # Точная цена из открытых данных города, если город её публикует. Нет — останется
+    # вилка по городу, и это честнее выдуманного числа.
+    price = ParkingTariffRepository(connection).price(hit.zone.city, hit.zone.zone_code)
+    return hit.with_price(price)
 
 
 def address_hint(connection: Database, lat: float | None, lon: float | None) -> dict[str, Any] | None:

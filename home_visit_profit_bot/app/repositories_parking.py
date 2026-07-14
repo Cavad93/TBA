@@ -33,26 +33,27 @@ class ParkingZoneRepository:
         ).fetchall()
         return [_zone_from_row(row) for row in rows]
 
-    def replace_city(self, city: str, zones: list[dict[str, object]]) -> int:
-        """Заменить зоны города целиком.
+    def replace_region(self, region: str, zones: list[dict[str, object]]) -> int:
+        """Заменить зоны региона целиком.
 
         Именно заменить, а не долить: улицу могли вывести из платной зоны, и старая
         запись осталась бы предупреждать о плате там, где её уже нет. Пустой список —
         отдельный случай: он почти наверняка означает сбой импорта, а не отмену всех
-        парковок в городе, поэтому старые данные мы в этом случае не трогаем.
+        парковок в регионе, поэтому старые данные мы в этом случае не трогаем.
         """
         if not zones:
             return 0
-        self.connection.execute("DELETE FROM parking_zones WHERE city = ?", (city,))
+        self.connection.execute("DELETE FROM parking_zones WHERE region = ?", (region,))
         stamp = now_iso()
         for zone in zones:
             self.connection.execute(
                 """
                 INSERT INTO parking_zones(
-                    city, osm_type, osm_id, kind, name, zone_code,
+                    region, city, osm_type, osm_id, kind, name, zone_code,
                     min_lat, min_lon, max_lat, max_lon, geometry, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(osm_type, osm_id) DO UPDATE SET
+                    region = excluded.region,
                     city = excluded.city,
                     kind = excluded.kind,
                     name = excluded.name,
@@ -65,7 +66,8 @@ class ParkingZoneRepository:
                     updated_at = excluded.updated_at
                 """,
                 (
-                    city,
+                    region,
+                    zone["city"],
                     zone["osm_type"],
                     zone["osm_id"],
                     zone["kind"],
@@ -107,3 +109,49 @@ def _zone_from_row(row) -> ParkingZone:
         zone_code=row["zone_code"],
         geometry=parse_geometry(row["geometry"]),
     )
+
+
+class ParkingTariffRepository:
+    """Цены по коду зоны — из открытых данных города.
+
+    Точная цена лучше вилки, но только если она настоящая. Поэтому пусто здесь —
+    нормальное состояние: без записи приложение назовёт вилку по городу, а не выдумает
+    число.
+    """
+
+    def __init__(self, connection: Database):
+        self.connection = connection
+
+    def price(self, city: str, zone_code: str | None) -> float | None:
+        if not city or not zone_code:
+            return None
+        row = self.connection.execute(
+            "SELECT price_per_hour FROM parking_tariffs WHERE city = ? AND zone_code = ?",
+            (city, zone_code),
+        ).fetchone()
+        return float(row["price_per_hour"]) if row else None
+
+    def replace_city(self, city: str, tariffs: dict[str, float]) -> int:
+        if not tariffs:
+            return 0
+        self.connection.execute("DELETE FROM parking_tariffs WHERE city = ?", (city,))
+        stamp = now_iso()
+        for zone_code, price in tariffs.items():
+            self.connection.execute(
+                """
+                INSERT INTO parking_tariffs(city, zone_code, price_per_hour, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(city, zone_code) DO UPDATE SET
+                    price_per_hour = excluded.price_per_hour,
+                    updated_at = excluded.updated_at
+                """,
+                (city, zone_code, float(price), stamp),
+            )
+        self.connection.commit()
+        return len(tariffs)
+
+    def count(self, city: str) -> int:
+        row = self.connection.execute(
+            "SELECT COUNT(*) AS n FROM parking_tariffs WHERE city = ?", (city,)
+        ).fetchone()
+        return int(row["n"]) if row else 0

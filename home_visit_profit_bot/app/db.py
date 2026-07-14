@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS parking_state (
 -- в PostgreSQL ради этого дороже, чем сорок строк математики.
 CREATE TABLE IF NOT EXISTS parking_zones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    region TEXT NOT NULL,
     city TEXT NOT NULL,
     osm_type TEXT NOT NULL,
     osm_id INTEGER NOT NULL,
@@ -169,6 +170,19 @@ CREATE TABLE IF NOT EXISTS parking_zones (
 
 CREATE INDEX IF NOT EXISTS idx_parking_zones_bbox
     ON parking_zones(min_lat, max_lat, min_lon, max_lon);
+
+CREATE INDEX IF NOT EXISTS idx_parking_zones_region ON parking_zones(region);
+
+-- Тарифы парковки по коду зоны. Приходят с портала открытых данных города (Москва),
+-- обновляются вместе с зонами. Тоже публичные — не под RLS.
+CREATE TABLE IF NOT EXISTS parking_tariffs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    city TEXT NOT NULL,
+    zone_code TEXT NOT NULL,
+    price_per_hour REAL NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(city, zone_code)
+);
 
 -- Кэш геокодера. Уникальность — по паре (user_id, input_text): она навешивается
 -- миграцией _migrate_address_cache_to_per_user, потому что user_id добавляется позже,

@@ -130,7 +130,7 @@ def test_parse_street_from_overpass() -> None:
             },
         ],
     }
-    zones = parse(payload)
+    zones = parse(payload, "Москва")
     assert len(zones) == 1
     zone = zones[0]
     assert zone["kind"] == "street"
@@ -156,7 +156,7 @@ def test_parse_lot_from_overpass() -> None:
             },
         ],
     }
-    zones = parse(payload)
+    zones = parse(payload, "Москва")
     assert zones[0]["kind"] == "lot"
 
 
@@ -167,4 +167,36 @@ def test_parse_skips_bare_points() -> None:
             {"type": "node", "id": 1, "tags": {"amenity": "parking", "fee": "yes"}, "lat": 55.7, "lon": 37.6},
         ],
     }
-    assert parse(payload) == []
+    assert parse(payload, "Москва") == []
+
+
+def test_parse_uses_addr_city_and_falls_back_to_region() -> None:
+    """Город нужен только ради тарифа. OSM его называет не всегда — тогда берём регион."""
+    payload = {
+        "elements": [
+            {
+                "type": "way", "id": 1,
+                "tags": {"parking:both:fee": "yes", "addr:city": "Казань"},
+                "geometry": [{"lat": 55.79, "lon": 49.10}, {"lat": 55.80, "lon": 49.11}],
+            },
+            {
+                "type": "way", "id": 2,
+                "tags": {"parking:both:fee": "yes"},
+                "geometry": [{"lat": 55.79, "lon": 49.10}, {"lat": 55.80, "lon": 49.11}],
+            },
+        ],
+    }
+    zones = parse(payload, "Татарстан")
+    assert zones[0]["city"] == "Казань"
+    assert zones[1]["city"] == "Татарстан"
+    assert all(zone["region"] == "Татарстан" for zone in zones)
+
+
+def test_exact_price_beats_the_range() -> None:
+    """Точная цена из открытых данных города всегда лучше вилки — но только настоящая."""
+    hit = find_zone([lot(city="Москва", zone_code="0306")], 59.9309, 30.3318, moment=MIDDAY)
+    assert hit is not None
+    assert hit.price_text == "40–600 ₽/час"
+    assert hit.with_price(380.0).price_text == "380 ₽/час"
+    # Нет цены — возвращаемся к вилке, а не к нулю.
+    assert hit.with_price(None).price_text == "40–600 ₽/час"
