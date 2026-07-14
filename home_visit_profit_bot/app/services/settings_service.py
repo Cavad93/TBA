@@ -18,7 +18,14 @@ from app.services.base_zones_service import parse_base_zones, serialize_base_zon
 from app.services.income_service import INCOME_MODELS
 from app.services.mileage_service import MILEAGE_POLICIES
 from app.services.navigation_service import DEFAULT_NAV_APP, NAV_APPS
-from app.services.vehicle_service import COST_MODES, PAYERS, SERVICE_TIERS, TRANSPORT_TYPES, WEAR_CLASSES
+from app.services.vehicle_service import (
+    COST_MODES,
+    LIMITED_TRANSPORT_WARNING,
+    PAYERS,
+    SERVICE_TIERS,
+    TRANSPORT_TYPES,
+    WEAR_CLASSES,
+)
 
 
 # Имена клиник не захардкожены: список полностью задаётся настройками
@@ -126,7 +133,10 @@ SETTINGS_CATALOG: list[SettingField] = [
     SettingField(
         "transport_type", "car", "Транспорт", "choice", "car",
         options=tuple((key, str(spec["title"])) for key, spec in TRANSPORT_TYPES.items()),
-        hint="От него зависит и износ, и то, как строится маршрут: велосипедисту не нужен маршрут по шоссе.",
+        hint=(
+            "От него зависит и износ, и то, как строится маршрут: велосипедисту не нужен "
+            "маршрут по шоссе. " + LIMITED_TRANSPORT_WARNING
+        ),
     ),
     SettingField(
         "cost_mode", "car", "Режим расчёта километра", "choice", "auto",

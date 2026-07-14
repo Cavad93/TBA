@@ -843,3 +843,15 @@ def seed_default_settings(db: Database, config: AppConfig) -> None:
         "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(user_id, key) DO NOTHING",
         defaults.items(),
     )
+
+    # Технические параметры принудительно следуют за сервером, а не за копией в базе.
+    #
+    # Всё остальное выше — DO NOTHING: настройки пользователя мы не перетираем, это его
+    # выбор. Но эти три — не выбор. Их нет в каталоге настроек, человек их не видит и
+    # менять не может (см. SETTINGS_CATALOG). Они копируются в settings при первом старте
+    # и, если не синхронизировать, навсегда застревают на старом значении: переехал OSRM
+    # на другой сервер — а у всех, кто зарегистрировался раньше, в базе лежит прежний
+    # адрес, и маршруты им считает чужой демо-сервис.
+    for key in ("osrm_url", "nominatim_url", "request_timeout_seconds"):
+        db.execute("UPDATE settings SET value = ? WHERE key = ?", (defaults[key], key))
+    db.commit()

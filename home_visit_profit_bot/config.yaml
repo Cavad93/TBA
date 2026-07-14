@@ -31,7 +31,10 @@ geo:
   telemed_clinics: []
 
 routing:
-  osrm_url: "https://router.project-osrm.org"
+  # Свой OSRM на сервере 2 (5 федеральных округов, профиль car). Публичный
+  # router.project-osrm.org — демо-сервис: он лимитирует запросы и не даёт гарантий,
+  # а у нас на нём висит вердикт по каждому заказу.
+  osrm_url: "http://194.87.93.174:5000"
   request_timeout_seconds: 10
   fallback_to_estimate: true
   straight_line_factor: 1.35

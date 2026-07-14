@@ -165,7 +165,7 @@ def load_config(project_dir: Path | None = None) -> AppConfig:
             telemed_clinics=[str(item).strip() for item in raw.get("geo", {}).get("telemed_clinics", _DEFAULT_TELEMED_CLINICS) if str(item).strip()],
         ),
         routing=RoutingConfig(
-            osrm_url=str(raw.get("routing", {}).get("osrm_url", "https://router.project-osrm.org")),
+            osrm_url=os.getenv("OSRM_URL") or str(raw.get("routing", {}).get("osrm_url", "https://router.project-osrm.org")),
             request_timeout_seconds=float(raw.get("routing", {}).get("request_timeout_seconds", 10)),
             fallback_to_estimate=bool(raw.get("routing", {}).get("fallback_to_estimate", True)),
             straight_line_factor=float(raw.get("routing", {}).get("straight_line_factor", 1.35)),
