@@ -844,14 +844,8 @@ def seed_default_settings(db: Database, config: AppConfig) -> None:
         defaults.items(),
     )
 
-    # Технические параметры принудительно следуют за сервером, а не за копией в базе.
-    #
-    # Всё остальное выше — DO NOTHING: настройки пользователя мы не перетираем, это его
-    # выбор. Но эти три — не выбор. Их нет в каталоге настроек, человек их не видит и
-    # менять не может (см. SETTINGS_CATALOG). Они копируются в settings при первом старте
-    # и, если не синхронизировать, навсегда застревают на старом значении: переехал OSRM
-    # на другой сервер — а у всех, кто зарегистрировался раньше, в базе лежит прежний
-    # адрес, и маршруты им считает чужой демо-сервис.
-    for key in ("osrm_url", "nominatim_url", "request_timeout_seconds"):
-        db.execute("UPDATE settings SET value = ? WHERE key = ?", (defaults[key], key))
-    db.commit()
+    # Строки osrm_url / nominatim_url / request_timeout_seconds здесь остаются ради
+    # совместимости, но КОДОМ БОЛЬШЕ НЕ ЧИТАЮТСЯ: технические параметры берутся из
+    # конфига сервера (app/services/server_settings.py). Обновлять их здесь бесполезно —
+    # на settings включён FORCE ROW LEVEL SECURITY, и UPDATE видит только строки текущего
+    # пользователя, а не всех.

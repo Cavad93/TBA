@@ -24,6 +24,7 @@ from app.services.optimization_service import optimize_route
 from app.services.profitability_service import calculate_car_expenses, vehicle_km_cost
 from app.services.vehicle_service import osrm_profile
 from app.services.routing_service import RoutingError
+from app.services.server_settings import osrm_url as server_osrm_url, request_timeout_seconds as server_timeout
 
 
 MIN_ROUTE_TIME_FACTOR = 0.5
@@ -432,9 +433,9 @@ def calculate_planned_route_minutes(
                 start,
                 completed_visits,
                 finish,
-                osrm_url=settings_repo.get("osrm_url", "https://router.project-osrm.org") or "https://router.project-osrm.org",
+                osrm_url=server_osrm_url(),
                 profile=osrm_profile(settings_repo),
-                timeout_seconds=settings_repo.get_float("request_timeout_seconds", 10),
+                timeout_seconds=server_timeout(),
                 duration_factor=1.0,
             )
             return route.total_minutes

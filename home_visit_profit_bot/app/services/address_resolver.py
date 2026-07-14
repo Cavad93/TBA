@@ -21,6 +21,7 @@ from app.services.geocoding_service import (
     geocode_address,
     parse_coordinates,
 )
+from app.services.server_settings import nominatim_url as server_nominatim_url, request_timeout_seconds as server_timeout
 
 
 @dataclass(frozen=True)
@@ -116,11 +117,11 @@ def resolve_address(
             cache_repo=AddressCacheRepository(connection),
             default_city=settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург",
             default_region=settings.get("default_region", "Ленинградская область") or "Ленинградская область",
-            nominatim_url=settings.get("nominatim_url", "https://nominatim.openstreetmap.org")
+            nominatim_url=server_nominatim_url()
             or "https://nominatim.openstreetmap.org",
             user_agent=settings.get("geo_user_agent", "home-visit-profit-bot/1.0")
             or "home-visit-profit-bot/1.0",
-            timeout_seconds=settings.get_float("request_timeout_seconds", 10),
+            timeout_seconds=server_timeout(),
         )
     except GeocodingError:
         return ResolvedAddress(address=expanded)

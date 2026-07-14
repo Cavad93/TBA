@@ -16,6 +16,7 @@ from app.services.overwork_pricing_service import build_pricing
 from app.services.vehicle_facts_service import measure
 from app.services.vehicle_service import KmCost, km_cost, osrm_profile
 from app.services.routing_service import RoutingError
+from app.services.server_settings import osrm_url as server_osrm_url, request_timeout_seconds as server_timeout
 
 
 def _safe_hourly(net_profit: float, total_minutes: float) -> float:
@@ -176,11 +177,11 @@ def calculate_remaining_route_summary(
                 current_point,
                 future,
                 finish_point,
-                osrm_url=settings_repo.get("osrm_url", "https://router.project-osrm.org") or "https://router.project-osrm.org",
+                osrm_url=server_osrm_url(),
                 # Профиль по типу транспорта: раньше был всегда автомобильный, и курьер
                 # на велосипеде получал маршрут для машины — неверные километры и время.
                 profile=osrm_profile(settings_repo),
-                timeout_seconds=settings_repo.get_float("request_timeout_seconds", 10),
+                timeout_seconds=server_timeout(),
                 duration_factor=day.planned_route_time_factor,
             )
             return future_route

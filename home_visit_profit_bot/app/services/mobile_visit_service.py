@@ -32,6 +32,7 @@ from app.services.routing_service import RoutingError
 from app.services.settings_service import allowed_clinics
 from app.services.visit_navigation import attach_navigation, navigation_settings
 from app.services.visit_parking import address_hint
+from app.services.server_settings import nominatim_url as server_nominatim_url, request_timeout_seconds as server_timeout
 
 
 # Допустимые клиники читаются из настроек (allowed_clinics), не из константы.
@@ -84,9 +85,9 @@ class MobileVisitService:
                     cache_repo=AddressCacheRepository(self.connection),
                     default_city=self.settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург",
                     default_region=self.settings.get("default_region", "Ленинградская область") or "Ленинградская область",
-                    nominatim_url=self.settings.get("nominatim_url", "https://nominatim.openstreetmap.org") or "https://nominatim.openstreetmap.org",
+                    nominatim_url=server_nominatim_url(),
                     user_agent=self.settings.get("geo_user_agent", "home-visit-profit-bot/1.0") or "home-visit-profit-bot/1.0",
-                    timeout_seconds=self.settings.get_float("request_timeout_seconds", 10),
+                    timeout_seconds=server_timeout(),
                 )
             except GeocodingError as error:
                 return CandidateApiResult(ok=False, reason="geocoding_failed", detail=str(error))
@@ -213,9 +214,9 @@ class MobileVisitService:
                     cache_repo=AddressCacheRepository(self.connection),
                     default_city=self.settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург",
                     default_region=self.settings.get("default_region", "Ленинградская область") or "Ленинградская область",
-                    nominatim_url=self.settings.get("nominatim_url", "https://nominatim.openstreetmap.org") or "https://nominatim.openstreetmap.org",
+                    nominatim_url=server_nominatim_url(),
                     user_agent=self.settings.get("geo_user_agent", "home-visit-profit-bot/1.0") or "home-visit-profit-bot/1.0",
-                    timeout_seconds=self.settings.get_float("request_timeout_seconds", 10),
+                    timeout_seconds=server_timeout(),
                 )
             except GeocodingError as error:
                 return {"ok": False, "reason": "geocoding_failed", "detail": str(error)}
@@ -244,9 +245,9 @@ class MobileVisitService:
                     cache_repo=AddressCacheRepository(self.connection),
                     default_city=self.settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург",
                     default_region=self.settings.get("default_region", "Ленинградская область") or "Ленинградская область",
-                    nominatim_url=self.settings.get("nominatim_url", "https://nominatim.openstreetmap.org") or "https://nominatim.openstreetmap.org",
+                    nominatim_url=server_nominatim_url(),
                     user_agent=self.settings.get("geo_user_agent", "home-visit-profit-bot/1.0") or "home-visit-profit-bot/1.0",
-                    timeout_seconds=self.settings.get_float("request_timeout_seconds", 10),
+                    timeout_seconds=server_timeout(),
                 )
             except GeocodingError as error:
                 return {"ok": False, "reason": "geocoding_failed", "detail": str(error)}
@@ -287,9 +288,9 @@ class MobileVisitService:
                     cache_repo=AddressCacheRepository(self.connection),
                     default_city=self.settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург",
                     default_region=self.settings.get("default_region", "Ленинградская область") or "Ленинградская область",
-                    nominatim_url=self.settings.get("nominatim_url", "https://nominatim.openstreetmap.org") or "https://nominatim.openstreetmap.org",
+                    nominatim_url=server_nominatim_url(),
                     user_agent=self.settings.get("geo_user_agent", "home-visit-profit-bot/1.0") or "home-visit-profit-bot/1.0",
-                    timeout_seconds=self.settings.get_float("request_timeout_seconds", 10),
+                    timeout_seconds=server_timeout(),
                 )
             except GeocodingError as error:
                 return {"ok": False, "reason": "geocoding_failed", "detail": str(error)}

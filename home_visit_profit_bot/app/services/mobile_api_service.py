@@ -28,6 +28,7 @@ from app.services.address_resolver import resolve_address
 from app.services.day_summary_service import reconcile_end_day_data
 from app.services.rest_service import rest_facts
 from app.services.stats_service import finalize_day
+from app.services.server_settings import nominatim_url as server_nominatim_url, request_timeout_seconds as server_timeout
 
 
 # Допустимые клиники не захардкожены — читаются из настроек через
@@ -384,9 +385,9 @@ class MobileApiService:
                 cache_repo=AddressCacheRepository(self.connection),
                 default_city=self.settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург",
                 default_region=self.settings.get("default_region", "Ленинградская область") or "Ленинградская область",
-                nominatim_url=self.settings.get("nominatim_url", "https://nominatim.openstreetmap.org") or "https://nominatim.openstreetmap.org",
+                nominatim_url=server_nominatim_url(),
                 user_agent=self.settings.get("geo_user_agent", "home-visit-profit-bot/1.0") or "home-visit-profit-bot/1.0",
-                timeout_seconds=self.settings.get_float("request_timeout_seconds", 10),
+                timeout_seconds=server_timeout(),
             )
         except GeocodingError:
             return None
