@@ -31,6 +31,7 @@ from app.services.profitability_service import (
 from app.services.routing_service import RoutingError
 from app.services.settings_service import allowed_clinics
 from app.services.visit_navigation import attach_navigation, navigation_settings
+from app.services.visit_parking import address_hint
 
 
 # Допустимые клиники читаются из настроек (allowed_clinics), не из константы.
@@ -44,6 +45,9 @@ class CandidateApiResult:
     candidate: Visit | None = None
     calculation: CandidateCalculation | None = None
     detail: str = ""
+    # Адрес в зоне платной парковки — если да, говорим об этом до того, как человек
+    # согласился ехать, а не когда он уже там стоит.
+    parking: dict[str, Any] | None = None
 
 
 class MobileVisitService:
@@ -129,7 +133,13 @@ class MobileVisitService:
         # история могли показывать его без повторного пересчёта профитабельности.
         verdict = decision_to_verdict(calculation.decision)
         self.visits.set_verdict(candidate.id, verdict)
-        return CandidateApiResult(ok=True, reason="calculated", candidate=candidate, calculation=calculation)
+        return CandidateApiResult(
+            ok=True,
+            reason="calculated",
+            candidate=candidate,
+            calculation=calculation,
+            parking=address_hint(self.connection, geo.lat, geo.lon),
+        )
 
     def accept_candidate(self, visit_id: int) -> dict[str, Any]:
         day = self._require_active_day()
@@ -443,6 +453,7 @@ def candidate_result_payload(result: CandidateApiResult) -> dict[str, Any]:
         "reason": result.reason,
         "detail": result.detail,
         "candidate": visit_payload(result.candidate) if result.candidate else None,
+        "parking": result.parking,
     }
     if result.calculation is not None:
         payload["calculation"] = calculation_payload(result.calculation)

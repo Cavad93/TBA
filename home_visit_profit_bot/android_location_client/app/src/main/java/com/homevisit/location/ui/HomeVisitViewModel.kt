@@ -22,6 +22,7 @@ import com.homevisit.location.domain.ShiftSnapshot
 import com.homevisit.location.domain.ReportPeriod
 import com.homevisit.location.domain.ReportSnapshot
 import com.homevisit.location.domain.NavTarget
+import com.homevisit.location.domain.ParkingHint
 import com.homevisit.location.domain.ServerRouteSnapshot
 import com.homevisit.location.domain.StopLabel
 import com.homevisit.location.domain.SyncConflict
@@ -308,6 +309,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 result.ok && result.estimate != null -> CandidateUiState(
                     estimate = result.estimate,
                     message = "Расчёт готов",
+                    parking = result.parking,
                 )
                 result.needsManualRoute -> CandidateUiState(
                     message = "Нужно ввести километры и минуты дороги вручную.",
@@ -1057,6 +1059,8 @@ data class CandidateUiState(
     val estimate: CandidateEstimate? = null,
     val message: String = "",
     val needsManualRoute: Boolean = false,
+    /** Адрес в зоне платной парковки. Показываем ДО того, как человек нажал «Принять». */
+    val parking: ParkingHint? = null,
 )
 
 data class RouteUiState(

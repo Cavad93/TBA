@@ -167,6 +167,7 @@ import com.homevisit.location.ui.ShiftUiState
 import com.homevisit.location.ui.SyncUiState
 import java.util.Locale
 import kotlinx.coroutines.launch
+import com.homevisit.location.domain.ParkingHint
 
 @Composable
 internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions) {
@@ -704,6 +705,7 @@ internal fun CandidateGauge(candidate: CandidateUiState, onAccept: () -> Unit, o
                 // новому порогу, и человек должен понимать, почему сегодня строже.
                 if (estimate.tariffRaised) {
                     RaisedTariffRow(estimate)
+                    ParkingHintCard(candidate.parking)
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
@@ -851,6 +853,59 @@ internal fun TelemedInputCard(clinics: List<String>, onSubmit: (Double, Double, 
  * усталость считалась на сервере, доезжала до телефона и нигде не показывалась —
  * то есть не влияла ни на что.
  */
+@Composable
+/**
+ * «Адрес в зоне платной парковки».
+ *
+ * Стоит рядом с вердиктом, а не после согласия ехать: человек должен узнать о парковке
+ * ДО того, как нажал «Принять». Расход в вердикт не входит — платит он в приложении
+ * своего города, и цена там своя (у резидентов и по абонементу другая). Мы
+ * предупреждаем, а не считаем за него.
+ */
+@Composable
+private fun ParkingHintCard(parking: ParkingHint?) {
+    if (parking == null) return
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = VerdictColors.edgeContainer),
+        border = BorderStroke(1.dp, VerdictColors.edge),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                Modifier
+                    .size(26.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(VerdictColors.edge),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "P",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF3A2A05),
+                )
+            }
+            Column {
+                Text(
+                    parking.headline,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = VerdictColors.onEdgeContainer,
+                )
+                Text(
+                    parking.details,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = VerdictColors.onEdgeContainer,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun RaisedTariffRow(estimate: CandidateEstimate) {
     val tone = if (estimate.overworkBlocksOutsideZone) VerdictColors.skip else VerdictColors.edge

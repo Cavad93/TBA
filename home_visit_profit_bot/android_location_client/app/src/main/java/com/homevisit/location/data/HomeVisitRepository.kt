@@ -39,6 +39,7 @@ import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.LateWarning
 import com.homevisit.location.domain.NavTarget
+import com.homevisit.location.domain.ParkingHint
 import com.homevisit.location.domain.NavigationPrefs
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
@@ -1364,11 +1365,23 @@ class HomeVisitRepository private constructor(
         } else {
             null
         }
+        val parkingJson = response.optJSONObject("parking")
+        val parking = if (parkingJson == null) {
+            null
+        } else {
+            ParkingHint(
+                headline = parkingJson.optString("headline"),
+                details = parkingJson.optString("details"),
+                city = parkingJson.optString("city"),
+                zoneCode = parkingJson.optString("zone_code").ifBlank { null },
+            )
+        }
         return CandidateRequestResult(
             ok = ok,
             reason = reason,
             estimate = estimate,
             detail = response.optString("detail"),
+            parking = parking,
         )
     }
 

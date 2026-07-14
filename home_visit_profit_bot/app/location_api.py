@@ -41,6 +41,7 @@ from app.services.mobile_workload_service import MobileWorkloadService
 from app.services.mobile_report_service import MobileReportService
 from app.services.mobile_visit_service import MobileVisitService, candidate_result_payload
 from app.services.profile_service import ProfileService
+from app.services.parking_alert_service import check as parking_check
 from app.services.settings_service import SettingsService
 from app.services.shift_service import ShiftService
 
@@ -249,6 +250,20 @@ def _handler_factory(config: AppConfig):
                 segment_index = (
                     len(visits.list_for_day(active_day.id, ("completed",))) if active_day else 0
                 )
+                # Платная парковка. Скорость сервер уже посчитал сам — телефон о ней
+                # не спрашиваем: он мог бы прислать что угодно, а решение отсюда идёт
+                # человеку в виде уведомления.
+                parking_alert = None
+                if active_day is not None and settings.get_bool("parking_alerts", True):
+                    alert = parking_check(
+                        connection,
+                        work_day_id=active_day.id,
+                        lat=lat,
+                        lon=lon,
+                        speed_kmh=result.avg_speed_kmh,
+                        now=captured_at,
+                    )
+                    parking_alert = alert.payload() if alert else None
 
             # Проактивное уведомление теперь тянет приложение через
             # GET /api/visits/current-gps (pull вместо Telegram push).
@@ -268,6 +283,7 @@ def _handler_factory(config: AppConfig):
                     "sample_valid": result.sample_valid,
                     "ready_to_complete": result.should_notify,
                     "segment_index": segment_index,
+                    "parking_alert": parking_alert,
                 }
             )
 

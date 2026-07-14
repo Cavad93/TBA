@@ -44,6 +44,9 @@ public class LocationUploadService extends Service implements LocationListener, 
     private static final String CHANNEL_ID = "location_upload";
     // Package-private: StopActionReceiver гасит это уведомление после действия.
     static final int ALERT_NOTIFICATION_ID = 7002;
+    // Отдельный id: уведомление о парковке не должно затирать уведомление о том,
+    // что пора закрыть заказ, — это разные вещи, и человеку нужны обе.
+    static final int PARKING_NOTIFICATION_ID = 7003;
     static final String ALERT_CHANNEL_ID = "location_alerts";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -263,6 +266,7 @@ public class LocationUploadService extends Service implements LocationListener, 
                 if (code >= 200 && code < 300) {
                     String responseText = readResponse(connection);
                     handleLocationResponse(responseText);
+                    showParkingAlert(responseText);
                     serverSegment = readSegmentIndex(responseText, segmentIndex);
                 }
                 // Сначала досылаем то, что накопили на прошлом отрезке, и только потом
@@ -386,6 +390,52 @@ public class LocationUploadService extends Service implements LocationListener, 
         } catch (Exception ignored) {
             return fallback;
         }
+    }
+
+    /**
+     * «Вы встали в платной зоне».
+     *
+     * Решение принимает сервер: он знает и зоны, и часы оплаты, и что скорость упала
+     * ниже 5 км/ч дольше пяти минут. Телефону остаётся показать. Так и правильно:
+     * скорость, присланную телефоном, пришлось бы проверять, а карту зон — держать
+     * в APK и обновлять с каждой сборкой.
+     *
+     * Оплату мы на себя не берём: платит человек в приложении своего города.
+     */
+    private void showParkingAlert(String responseText) {
+        if (responseText == null || responseText.isEmpty()) {
+            return;
+        }
+        JSONObject alert;
+        try {
+            alert = new JSONObject(responseText).optJSONObject("parking_alert");
+        } catch (Exception ignored) {
+            return;
+        }
+        if (alert == null) {
+            return;
+        }
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager == null) {
+            return;
+        }
+
+        Intent openIntent = new Intent(this, MainActivity.class);
+        openIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent openPending = PendingIntent.getActivity(
+                this, 0, openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? new Notification.Builder(this, ALERT_CHANNEL_ID)
+                : new Notification.Builder(this);
+        builder.setContentTitle(alert.optString("title", "Вы встали в платной зоне"))
+                .setContentText(alert.optString("text", ""))
+                .setStyle(new Notification.BigTextStyle().bigText(alert.optString("text", "")))
+                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                .setAutoCancel(true)
+                .setContentIntent(openPending);
+        manager.notify(PARKING_NOTIFICATION_ID, builder.build());
     }
 
     /** Закрыт очередной адрес — начинаем новый отрезок пути с чистыми счётчиками. */

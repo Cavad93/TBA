@@ -130,6 +130,46 @@ CREATE TABLE IF NOT EXISTS office_entries (
     FOREIGN KEY(work_day_id) REFERENCES work_days(id)
 );
 
+-- Состояние «человек стоит»: с какого момента скорость упала и о какой зоне мы уже
+-- предупредили. Персональное — попадает под RLS (см. ISOLATED_TABLES).
+CREATE TABLE IF NOT EXISTS parking_state (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_day_id INTEGER NOT NULL,
+    slow_since TEXT,
+    notified_zone_id INTEGER,
+    notified_at TEXT,
+    UNIQUE(work_day_id)
+);
+
+-- Зоны платной парковки.
+--
+-- ВНИМАНИЕ: таблицы НЕТ в ISOLATED_TABLES, и это осознанно. Это публичные данные карты
+-- (OpenStreetMap) — они одинаковы для всех и ничего не говорят о конкретном человеке.
+-- Прятать их за RLS значило бы держать по копии карты Москвы на каждого пользователя.
+--
+-- Геометрия лежит текстом (JSON), а не в PostGIS: зон в городе пара тысяч, грубый отбор
+-- идёт по прямоугольнику (это индекс), точная проверка — в Python. Тянуть расширение
+-- в PostgreSQL ради этого дороже, чем сорок строк математики.
+CREATE TABLE IF NOT EXISTS parking_zones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    city TEXT NOT NULL,
+    osm_type TEXT NOT NULL,
+    osm_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    name TEXT,
+    zone_code TEXT,
+    min_lat REAL NOT NULL,
+    min_lon REAL NOT NULL,
+    max_lat REAL NOT NULL,
+    max_lon REAL NOT NULL,
+    geometry TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(osm_type, osm_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_parking_zones_bbox
+    ON parking_zones(min_lat, max_lat, min_lon, max_lon);
+
 -- Кэш геокодера. Уникальность — по паре (user_id, input_text): она навешивается
 -- миграцией _migrate_address_cache_to_per_user, потому что user_id добавляется позже,
 -- при включении RLS.
@@ -463,7 +503,7 @@ ISOLATED_TABLES = [
     "work_day_location_state", "workload_surveys", "driving_behavior_daily",
     "driving_behavior_segments", "day_metrics", "user_baselines",
     "workload_feedback", "mobile_client_entities", "mobile_sync_events",
-    "mobile_sync_conflicts",
+    "mobile_sync_conflicts", "parking_state",
     # Кэш геокодера тоже персональный: ключ — сырой текст адреса, а город у каждого
     # свой. Общий кэш отдавал бы «Ленина 40» из чужого города — и заказ считался бы
     # по чужим координатам.
@@ -776,6 +816,7 @@ def seed_default_settings(db: Database, config: AppConfig) -> None:
         "auto_open_navigator": "false",
         "auto_open_delay_seconds": "7",
         "auto_close_visit": "false",
+        "parking_alerts": "true",
     }
     db.executemany(
         "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(user_id, key) DO NOTHING",

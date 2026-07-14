@@ -330,6 +330,8 @@ data class CandidateRequestResult(
     val reason: String,
     val estimate: CandidateEstimate? = null,
     val detail: String = "",
+    /** Адрес попал в зону платной парковки — говорим об этом до согласия ехать. */
+    val parking: ParkingHint? = null,
 ) {
     val needsManualRoute: Boolean
         get() = reason == "needs_manual_route"
@@ -359,6 +361,19 @@ data class ServerRouteSnapshot(
     fun legFor(visitId: Int?): ServerRouteLeg? =
         if (visitId == null) null else legs.firstOrNull { it.visitId == visitId }
 }
+
+/**
+ * Адрес в зоне платной парковки.
+ *
+ * В вердикт этот расход НЕ входит: платит человек в приложении своего города, и цена
+ * там своя — у резидентов и по абонементу другая. Мы предупреждаем, а не считаем за него.
+ */
+data class ParkingHint(
+    val headline: String,
+    val details: String,
+    val city: String = "",
+    val zoneCode: String? = null,
+)
 
 /**
  * Ссылка «Поехали» по одному заказу.
