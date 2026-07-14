@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -100,6 +101,7 @@ private enum class WizardStep {
     Expenses,
     Fuel,
     Odometer,
+    Mileage,
     Driving,
     WorkTime,
     ServiceTime,
@@ -110,6 +112,7 @@ private val QUESTION_STEPS = listOf(
     WizardStep.Expenses,
     WizardStep.Fuel,
     WizardStep.Odometer,
+    WizardStep.Mileage,
     WizardStep.Driving,
     WizardStep.WorkTime,
     WizardStep.ServiceTime,
@@ -138,6 +141,8 @@ private fun WizardContent(
     var fuelPriceConfirmed by rememberSaveable { mutableStateOf(false) }
 
     var odometer by rememberSaveable { mutableStateOf(preview?.suggestedEndOdometer.numberText()) }
+    // Какой пробег человек выбрал рабочим, когда GPS и одометр разошлись. 0 — не спрашивали.
+    var chosenKm by rememberSaveable { mutableStateOf(0.0) }
     var drivingHours by rememberSaveable { mutableStateOf(preview?.drivingMinutes.hoursText()) }
     var workHours by rememberSaveable { mutableStateOf(preview?.totalWorkMinutes.hoursText()) }
     var serviceMinutes by rememberSaveable { mutableStateOf(preview?.avgServiceMinutes.numberText()) }
@@ -154,6 +159,7 @@ private fun WizardContent(
         fuelAmount = fuelAmount,
         fuelLiters = fuelLiters,
         odometer = odometer,
+        chosenKm = chosenKm,
         drivingHours = drivingHours,
         workHours = workHours,
         serviceMinutes = serviceMinutes,
@@ -228,6 +234,16 @@ private fun WizardContent(
                     "Получается меньше, чем проехано по заказам (${formatKm(preview.suggestedKm)}). " +
                         "Проверьте показание — иначе рабочий пробег занизится."
                 )
+            }
+        }
+
+        WizardStep.Mileage -> {
+            val gap = mileageGapFor(preview, odometer)
+            if (gap == null) {
+                // Спрашивать не о чем — расхождение мало или решено настройкой.
+                LaunchedEffect(step) { next() }
+            } else {
+                MileageStep(gap = gap, onChoose = { chosenKm = it; next() })
             }
         }
 
@@ -410,7 +426,7 @@ private fun StepButtons(onNext: () -> Unit, onSkip: () -> Unit, nextTitle: Strin
 }
 
 @Composable
-private fun Warning(text: String) {
+internal fun Warning(text: String) {
     Card(colors = CardDefaults.cardColors(containerColor = VerdictColors.edgeContainer)) {
         Text(
             text,
@@ -480,4 +496,28 @@ private fun WorkloadRatingStep(value: Int, onValue: (Int) -> Unit, onNext: () ->
     TextButton(onClick = onNext, modifier = Modifier.fillMaxWidth()) {
         Text("Пропустить")
     }
+}
+
+
+/**
+ * Считать ли расхождение GPS и одометра поводом для вопроса.
+ *
+ * Сравниваем только после того, как человек подтвердил показание одометра: до этого
+ * сравнивать не с чем. Пороги и политику присылает сервер — они настраиваются.
+ */
+private fun mileageGapFor(preview: EndDayPreview?, odometer: String): MileageGap? {
+    if (preview == null) return null
+    val odometerKm = (parseNumber(odometer) ?: return null) - preview.startOdometer
+    if (odometerKm <= 0) return null
+
+    return mileageGap(
+        EndDayPreviewGap(
+            gpsKm = preview.gpsKm,
+            policy = preview.mileagePolicy,
+            smallGap = preview.mileageSmallGap,
+            bigGap = preview.mileageBigGap,
+            minKm = preview.mileageMinKm,
+        ),
+        odometerKm = odometerKm,
+    )
 }

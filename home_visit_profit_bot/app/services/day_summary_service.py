@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from app.models import EndDayData, WorkDay
+from app.services.mileage_service import BIG_GAP, MIN_KM_TO_COMPARE, SMALL_GAP, mileage_policy
 from app.repositories import (
     DailyStatsRepository,
     LocationEventRepository,
@@ -38,6 +39,8 @@ class EndDayPreview:
     planned_km: float = 0.0
     suggested_km: float = 0.0
     km_source: str = "planned"  # gps | planned
+    # Что делать, если GPS и одометр разошлись: спросить или решить по настройке.
+    mileage: dict | None = None
 
     start_odometer: float = 0.0
     suggested_end_odometer: float = 0.0
@@ -126,6 +129,15 @@ def build_end_day_preview(
         planned_km=round(planned_km, 1),
         suggested_km=round(suggested_km, 1),
         km_source="gps" if use_gps_km else "planned",
+        # Сравнить GPS с одометром здесь ещё нельзя: показание одометра человек введёт
+        # в мастере. Поэтому отдаём политику и пороги, а сравнение делает мастер — сразу
+        # после того, как одометр подтверждён.
+        mileage={
+            "policy": mileage_policy(settings),
+            "small_gap": SMALL_GAP,
+            "big_gap": BIG_GAP,
+            "min_km_to_compare": MIN_KM_TO_COMPARE,
+        },
         start_odometer=start_odometer,
         suggested_end_odometer=round(start_odometer + suggested_km, 1),
         total_work_minutes=round(total_work_minutes),
@@ -175,6 +187,7 @@ def reconcile_end_day_data(data: EndDayData) -> EndDayData:
 
 def preview_payload(preview: EndDayPreview) -> dict[str, Any]:
     return {
+        "mileage": preview.mileage or {},
         "gps_km": preview.gps_km,
         "planned_km": preview.planned_km,
         "suggested_km": preview.suggested_km,

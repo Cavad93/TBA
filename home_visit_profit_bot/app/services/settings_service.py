@@ -16,6 +16,7 @@ from typing import Any
 from app.repositories import SettingsRepository
 from app.services.base_zones_service import parse_base_zones, serialize_base_zones
 from app.services.income_service import INCOME_MODELS
+from app.services.mileage_service import MILEAGE_POLICIES
 from app.services.vehicle_service import COST_MODES, PAYERS, SERVICE_TIERS, TRANSPORT_TYPES, WEAR_CLASSES
 
 
@@ -73,6 +74,19 @@ SETTINGS_CATALOG: list[SettingField] = [
     SettingField(
         "extra_cost_per_km", "km_cost", "Иные расходы, ₽ за км", "number", 0.0, min=0,
         hint="",
+    ),
+    # Что делать, когда GPS и одометр расходятся. Настройка действует в полосе от 10
+    # до 20%: меньше — не спрашиваем вовсе (GPS всегда чуть недосчитывает на поворотах),
+    # больше — спрашиваем ВСЕГДА, что бы здесь ни стояло. Расхождение в пятую часть
+    # пробега слишком дорого стоит, чтобы решать его молча.
+    SettingField(
+        "mileage_policy", "km_cost", "Если GPS и одометр расходятся", "choice", "gps",
+        options=tuple(MILEAGE_POLICIES.items()),
+        hint=(
+            "Разница между ними — это либо ваши личные поездки, либо километры, которые "
+            "GPS потерял в тоннеле. Так приложение поступит при расхождении от 10 до 20%. "
+            "Больше 20% — спросим в любом случае."
+        ),
     ),
     # Деньги
     SettingField(

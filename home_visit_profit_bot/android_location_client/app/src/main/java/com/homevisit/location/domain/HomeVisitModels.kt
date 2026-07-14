@@ -427,6 +427,11 @@ data class EndDayPreview(
     val lastFuelPricePerLiter: Double,
     val fuelConsumptionLitersPer100Km: Double,
     val fuelPriceWarnRatio: Double,
+    /** Что делать, если GPS и одометр разошлись. Сравнение делает мастер. */
+    val mileagePolicy: String = "gps",
+    val mileageSmallGap: Double = 0.10,
+    val mileageBigGap: Double = 0.20,
+    val mileageMinKm: Double = 5.0,
 )
 
 data class GpsDayEstimate(

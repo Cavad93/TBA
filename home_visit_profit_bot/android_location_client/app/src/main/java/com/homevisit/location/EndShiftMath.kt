@@ -61,6 +61,8 @@ internal fun buildEndDayDetails(
     fuelAmount: String,
     fuelLiters: String,
     odometer: String,
+    /** Рабочий пробег, выбранный человеком при расхождении GPS и одометра. 0 — не спрашивали. */
+    chosenKm: Double = 0.0,
     drivingHours: String,
     workHours: String,
     serviceMinutes: String,
@@ -71,7 +73,14 @@ internal fun buildEndDayDetails(
 
     val endOdometer = parseNumber(odometer) ?: (startOdometer + suggestedKm)
     val odometerKm = (endOdometer - startOdometer).coerceAtLeast(0.0)
-    val actualKm = minOf(suggestedKm, odometerKm)
+    // Если человека спрашивали, какой пробег считать рабочим, — его ответ и есть ответ.
+    // Приложение не может отличить личную поездку от провала GPS в тоннеле: это знает
+    // только он. Разница уходит в личный пробег, как и была задумана.
+    val actualKm = if (chosenKm > 0) {
+        minOf(chosenKm, odometerKm)
+    } else {
+        minOf(suggestedKm, odometerKm)
+    }
 
     val totalWorkMinutes = parseNumber(workHours)?.times(60)
         ?: preview?.totalWorkMinutes

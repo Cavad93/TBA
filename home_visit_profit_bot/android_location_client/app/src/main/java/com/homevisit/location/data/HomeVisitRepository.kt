@@ -771,6 +771,10 @@ class HomeVisitRepository private constructor(
             lastFuelPricePerLiter = json.optDouble("last_fuel_price_per_liter", 0.0),
             fuelConsumptionLitersPer100Km = json.optDouble("fuel_consumption_l_per_100km", 0.0),
             fuelPriceWarnRatio = json.optDouble("fuel_price_warn_ratio", 0.10),
+            mileagePolicy = json.optJSONObject("mileage")?.optString("policy").orEmpty().ifBlank { "gps" },
+            mileageSmallGap = json.optJSONObject("mileage")?.optDouble("small_gap", 0.10) ?: 0.10,
+            mileageBigGap = json.optJSONObject("mileage")?.optDouble("big_gap", 0.20) ?: 0.20,
+            mileageMinKm = json.optJSONObject("mileage")?.optDouble("min_km_to_compare", 5.0) ?: 5.0,
         )
     }
 
