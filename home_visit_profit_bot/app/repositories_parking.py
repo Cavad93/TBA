@@ -122,30 +122,33 @@ class ParkingTariffRepository:
     def __init__(self, connection: Database):
         self.connection = connection
 
-    def price(self, city: str, zone_code: str | None) -> float | None:
+    def price_text(self, city: str, zone_code: str | None) -> str | None:
+        """Цена этой зоны словами. Не числом: она бывает и не почасовой."""
         if not city or not zone_code:
             return None
         row = self.connection.execute(
-            "SELECT price_per_hour FROM parking_tariffs WHERE city = ? AND zone_code = ?",
+            "SELECT price_text FROM parking_tariffs WHERE city = ? AND zone_code = ?",
             (city, zone_code),
         ).fetchone()
-        return float(row["price_per_hour"]) if row else None
+        text = row["price_text"] if row else None
+        return text or None
 
-    def replace_city(self, city: str, tariffs: dict[str, float]) -> int:
+    def replace_city(self, city: str, tariffs: dict) -> int:
         if not tariffs:
             return 0
         self.connection.execute("DELETE FROM parking_tariffs WHERE city = ?", (city,))
         stamp = now_iso()
-        for zone_code, price in tariffs.items():
+        for zone_code, tariff in tariffs.items():
             self.connection.execute(
                 """
-                INSERT INTO parking_tariffs(city, zone_code, price_per_hour, updated_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO parking_tariffs(city, zone_code, price_per_hour, price_text, updated_at)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(city, zone_code) DO UPDATE SET
                     price_per_hour = excluded.price_per_hour,
+                    price_text = excluded.price_text,
                     updated_at = excluded.updated_at
                 """,
-                (city, zone_code, float(price), stamp),
+                (city, zone_code, float(tariff.price_per_hour), tariff.price_text, stamp),
             )
         self.connection.commit()
         return len(tariffs)

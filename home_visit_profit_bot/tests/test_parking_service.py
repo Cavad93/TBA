@@ -192,11 +192,99 @@ def test_parse_uses_addr_city_and_falls_back_to_region() -> None:
     assert all(zone["region"] == "Татарстан" for zone in zones)
 
 
-def test_exact_price_beats_the_range() -> None:
-    """Точная цена из открытых данных города всегда лучше вилки — но только настоящая."""
+def test_city_price_beats_the_range() -> None:
+    """Цена из открытых данных города всегда лучше вилки — но только настоящая."""
     hit = find_zone([lot(city="Москва", zone_code="0306")], 59.9309, 30.3318, moment=MIDDAY)
     assert hit is not None
     assert hit.price_text == "40–600 ₽/час"
-    assert hit.with_price(380.0).price_text == "380 ₽/час"
+    assert hit.with_price("380 ₽/час").price_text == "380 ₽/час"
     # Нет цены — возвращаемся к вилке, а не к нулю.
     assert hit.with_price(None).price_text == "40–600 ₽/час"
+
+
+def test_city_price_may_not_be_hourly_at_all() -> None:
+    """В Москве тариф бывает дифференцированным. Загонять его в ₽/час значит соврать."""
+    hit = find_zone([lot(city="Москва", zone_code="3105")], 59.9309, 30.3318, moment=MIDDAY)
+    assert hit is not None
+    text = "первые 30 мин — 50 ₽, дальше 150 ₽ до конца дня"
+    assert hit.with_price(text).price_text == text
+
+
+# --- Разбор тарифов Москвы: структура снята с живого ответа портала, не угадана ---
+
+def _entry(**kwargs):
+    base = {
+        "is_deleted": 0,
+        "TariffType": "фиксированный тариф",
+        "TariffPeriod": "будни",
+        "TimeRange": "круглосуточно",
+        "VehicleTypeForThisTariff": "Легковой автомобиль",
+        "HourPrice": None,
+        "FirstMinutesNumber": None,
+        "FirstMinutesPrice": None,
+        "FirstHoursNumber": None,
+        "FirstHoursPrice": None,
+        "RestOfTheDayPrice": None,
+        "global_id": 1,
+    }
+    base.update(kwargs)
+    return base
+
+
+def _row(zone, entries):
+    return {"Cells": {"ParkingZoneNumber": zone, "Tariffs": entries}}
+
+
+def test_moscow_takes_the_newest_revision_not_the_stale_one() -> None:
+    """Старые тарифы копятся в том же массиве. Без отбора показали бы прошлогодние 40 ₽."""
+    from app.services.moscow_tariff_service import parse_tariffs
+    rows = [_row("3105", [
+        _entry(HourPrice=40, global_id=14955616),                     # прошлая редакция
+        _entry(HourPrice=60, TimeRange="08:00-21:00", global_id=16495768),  # свежая
+    ])]
+    tariffs = parse_tariffs(rows)
+    assert tariffs["3105"].price_text == "60 ₽/час"
+
+
+def test_moscow_ignores_night_and_weekend_bands() -> None:
+    """Выездному работнику ночной тариф не нужен — он тогда не ездит."""
+    from app.services.moscow_tariff_service import parse_tariffs
+    rows = [_row("4034", [
+        _entry(HourPrice=40, TimeRange="08:00-21:00", global_id=10),
+        _entry(HourPrice=999, TimeRange="21:00-23:59", global_id=99),   # ночь, новее
+        _entry(HourPrice=888, TariffPeriod="выходные дни", global_id=98),
+    ])]
+    assert parse_tariffs(rows)["4034"].price_text == "40 ₽/час"
+
+
+def test_moscow_ignores_trucks_and_motorcycles() -> None:
+    from app.services.moscow_tariff_service import parse_tariffs
+    rows = [_row("1", [
+        _entry(HourPrice=40, global_id=10),
+        _entry(HourPrice=0, VehicleTypeForThisTariff="Мотоцикл", global_id=99),
+    ])]
+    assert parse_tariffs(rows)["1"].price_text == "40 ₽/час"
+
+
+def test_moscow_differentiated_tariff_is_not_forced_into_rubles_per_hour() -> None:
+    """«Первые 30 мин — 50 ₽, дальше 150 ₽ до конца дня» в ₽/час не выражается."""
+    from app.services.moscow_tariff_service import parse_tariffs
+    rows = [_row("3105", [
+        _entry(
+            TariffType="дифференцированный тариф", TimeRange="08:00-21:00",
+            FirstMinutesNumber=30, FirstMinutesPrice=50, RestOfTheDayPrice=150,
+            HourPrice=None, global_id=20,
+        ),
+    ])]
+    tariff = parse_tariffs(rows)["3105"]
+    assert tariff.price_per_hour == 0.0
+    assert tariff.price_text == "первые 30 мин — 50 ₽, дальше 150 ₽ до конца дня"
+
+
+def test_moscow_skips_deleted_entries() -> None:
+    from app.services.moscow_tariff_service import parse_tariffs
+    rows = [_row("7", [
+        _entry(HourPrice=40, global_id=10),
+        _entry(HourPrice=777, is_deleted=1, global_id=99),
+    ])]
+    assert parse_tariffs(rows)["7"].price_text == "40 ₽/час"

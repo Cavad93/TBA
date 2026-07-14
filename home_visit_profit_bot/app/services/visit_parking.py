@@ -28,7 +28,7 @@ def zone_at(connection: Database, lat: float | None, lon: float | None, *, momen
         return None
     # Точная цена из открытых данных города, если город её публикует. Нет — останется
     # вилка по городу, и это честнее выдуманного числа.
-    price = ParkingTariffRepository(connection).price(hit.zone.city, hit.zone.zone_code)
+    price = ParkingTariffRepository(connection).price_text(hit.zone.city, hit.zone.zone_code)
     return hit.with_price(price)
 
 

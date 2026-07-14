@@ -52,22 +52,23 @@ class ParkingHit:
     zone: ParkingZone
     tariff: CityTariff | None
     paid_now: bool
-    # Цена из открытых данных города — если она есть, вилка не нужна.
-    exact_price: float | None = None
+    # Цена из открытых данных города — текстом, а не числом: она бывает и не
+    # почасовой («первые 30 мин — 50 ₽, дальше 150 ₽ до конца дня»).
+    city_price: str | None = None
 
-    def with_price(self, price: float | None) -> "ParkingHit":
+    def with_price(self, price: str | None) -> "ParkingHit":
         return ParkingHit(
             zone=self.zone,
             tariff=self.tariff,
             paid_now=self.paid_now,
-            exact_price=price,
+            city_price=price,
         )
 
     @property
     def price_text(self) -> str:
         # Настоящая цена всегда лучше вилки. Но именно настоящая: выдумывать нельзя.
-        if self.exact_price:
-            return f"{self.exact_price:.0f} ₽/час"
+        if self.city_price:
+            return self.city_price
         if self.tariff is None:
             return ""
         return self.tariff.price_text(self.zone.zone_code)

@@ -28,7 +28,19 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# Зеркала Overpass. Основной инстанс регулярно занят и отдаёт 504 — это не поломка,
+# а очередь: сервис общественный и бесплатный. Поэтому не один адрес, а несколько:
+# отказ одного зеркала не должен останавливать импорт.
+#
+# Тянуть выгрузку .osm.pbf и разбирать её локально было бы надёжнее, но для этого нужен
+# отдельный сервер (файл на 3,8 ГБ). Это сделаем позже, вместе с OSRM — там та же
+# выгрузка нужна и ему. На этом сервере только PostgreSQL и бэкенд.
+OVERPASS_MIRRORS = (
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+)
+OVERPASS_URL = OVERPASS_MIRRORS[0]
 REQUEST_TIMEOUT = 180
 
 # Пауза между регионами. Overpass общественный — молотить его без остановки нельзя.
@@ -68,25 +80,28 @@ MAX_ATTEMPTS = 3
 RETRY_PAUSE_SECONDS = 30
 
 
-def _post(query: str, *, url: str) -> dict[str, Any]:
+def _post(query: str, *, url: str | None = None) -> dict[str, Any]:
+    """Спросить Overpass. Перебираем зеркала, потом пробуем ещё раз с паузой."""
+    mirrors = (url,) if url else OVERPASS_MIRRORS
     last_error: Exception | None = None
     for attempt in range(MAX_ATTEMPTS):
-        request = urllib.request.Request(
-            url,
-            data=query.encode("utf-8"),
-            headers={"User-Agent": "vizitorkrut/1.0 (parking zones import)"},
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT + 30) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
-            last_error = error
-            if attempt < MAX_ATTEMPTS - 1:
-                time.sleep(RETRY_PAUSE_SECONDS * (attempt + 1))
-    raise ParkingImportError(f"Overpass не ответил: {last_error}") from last_error
+        for mirror in mirrors:
+            request = urllib.request.Request(
+                mirror,
+                data=query.encode("utf-8"),
+                headers={"User-Agent": "vizitorkrut/1.0 (parking zones import)"},
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT + 30) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+                last_error = error
+        if attempt < MAX_ATTEMPTS - 1:
+            time.sleep(RETRY_PAUSE_SECONDS * (attempt + 1))
+    raise ParkingImportError(f"Overpass не ответил ни на одном зеркале: {last_error}") from last_error
 
 
-def fetch_regions(*, url: str = OVERPASS_URL) -> list[str]:
+def fetch_regions(*, url: str | None = None) -> list[str]:
     """Список регионов России — из самой карты, а не из захардкоженного списка.
 
     Фильтр по ISO3166-2 обязателен: без него в выборку лезут приграничные регионы
@@ -115,7 +130,7 @@ out geom;
 """.strip()
 
 
-def fetch(region: str, *, url: str = OVERPASS_URL) -> dict[str, Any]:
+def fetch(region: str, *, url: str | None = None) -> dict[str, Any]:
     return _post(build_query(region), url=url)
 
 
@@ -177,13 +192,13 @@ def _zone_code(tags: dict[str, Any]) -> str | None:
     return None
 
 
-def import_region(repository, region: str, *, url: str = OVERPASS_URL) -> int:
+def import_region(repository, region: str, *, url: str | None = None) -> int:
     """Обновить зоны одного региона. Возвращает, сколько записали."""
     zones = parse(fetch(region, url=url), region)
     return repository.replace_region(region, zones)
 
 
-def import_all(repository, *, url: str = OVERPASS_URL, on_progress=None) -> tuple[int, list[str]]:
+def import_all(repository, *, url: str | None = None, on_progress=None) -> tuple[int, list[str]]:
     """Пройти по всем регионам России. Возвращает (сколько зон, какие регионы упали)."""
     total = 0
     failed: list[str] = []

@@ -178,6 +178,9 @@ CREATE TABLE IF NOT EXISTS parking_tariffs (
     city TEXT NOT NULL,
     zone_code TEXT NOT NULL,
     price_per_hour REAL NOT NULL,
+    -- Цена не всегда почасовая: «первые 30 мин — 50 ₽, дальше 150 ₽ до конца дня».
+    -- Загонять это в число значит соврать, поэтому храним ещё и текст.
+    price_text TEXT DEFAULT '',
     updated_at TEXT NOT NULL,
     UNIQUE(city, zone_code)
 );
@@ -688,6 +691,7 @@ def _ensure_columns(db: Database) -> None:
     # IF NOT EXISTS колонку в существующую таблицу не добавит, и индекс по ней упал бы
     # на старте. Поэтому колонка и индекс — здесь, после миграций, а не в SCHEMA.
     _ensure_column(db, "parking_zones", "region", "TEXT DEFAULT ''")
+    _ensure_column(db, "parking_tariffs", "price_text", "TEXT DEFAULT ''")
     db.execute("CREATE INDEX IF NOT EXISTS idx_parking_zones_region ON parking_zones(region)")
     _ensure_column(db, "visits", "clinic", "TEXT")
     # Вердикт заказа ('go'|'edge'|'skip'), вычисленный из решения профитабельности.
