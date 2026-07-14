@@ -185,6 +185,20 @@ CREATE TABLE IF NOT EXISTS parking_tariffs (
     UNIQUE(city, zone_code)
 );
 
+-- Цены по НАЗВАНИЮ улицы. Код зоны в OSM проставлен лишь у части улиц (95 из 2764
+-- по Москве), а адрес в наборе 623 есть у каждой парковки. Название улицы — второй
+-- ключ связи, и он покрывает куда больше.
+CREATE TABLE IF NOT EXISTS parking_street_prices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    city TEXT NOT NULL,
+    street_key TEXT NOT NULL,
+    price_text TEXT NOT NULL,
+    -- Улица пересекает несколько зон с разной ценой: показываем вилку, а не одну наугад.
+    ambiguous INTEGER DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    UNIQUE(city, street_key)
+);
+
 -- Кэш геокодера. Уникальность — по паре (user_id, input_text): она навешивается
 -- миграцией _migrate_address_cache_to_per_user, потому что user_id добавляется позже,
 -- при включении RLS.

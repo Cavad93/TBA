@@ -36,6 +36,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from app.services.street_matching import StreetPrice, build_street_prices
+
 API_BASE = "https://apidata.mos.ru/v1"
 REQUEST_TIMEOUT = 60
 
@@ -188,15 +190,42 @@ def _number(raw: Any) -> float | None:
         return None
 
 
-def import_tariffs(repository) -> int:
-    """Обновить тарифы Москвы. Без ключа — тихо ничего не делаем."""
+def parse_street_prices(rows: list[dict[str, Any]]) -> dict[str, StreetPrice]:
+    """Цены по названию улицы — второй ключ связи, когда кода зоны в OSM нет."""
+    pairs: list[tuple[str, str]] = []
+    for row in rows:
+        cells = row.get("Cells") or {}
+        address = str(cells.get("Address") or "")
+        if not address:
+            continue
+        best_marker, best_entry = -1, None
+        for entry in cells.get("Tariffs") or []:
+            if not _is_relevant(entry):
+                continue
+            marker = int(entry.get("global_id") or 0)
+            if marker > best_marker:
+                best_marker, best_entry = marker, entry
+        if best_entry is None:
+            continue
+        tariff = _describe("", best_entry)
+        if tariff is not None:
+            pairs.append((address, tariff.price_text))
+    return build_street_prices(pairs)
+
+
+def import_tariffs(zone_repository, street_repository=None) -> tuple[int, int]:
+    """Обновить тарифы Москвы: по коду зоны и по названию улицы. Без ключа — ничего."""
     key = api_key()
     if key is None:
-        return 0
+        return 0, 0
     rows = fetch_rows(key)
     tariffs = parse_tariffs(rows)
     if not tariffs:
         # Разобрать не смогли — портал сменил структуру. Старые тарифы оставляем:
         # они устарели, но они хотя бы правдоподобны.
         raise MoscowTariffError(f"в наборе {DATASET_ID} не нашлось ни одного тарифа (строк: {len(rows)})")
-    return repository.replace_city("Москва", tariffs)
+    zones = zone_repository.replace_city("Москва", tariffs)
+    streets = 0
+    if street_repository is not None:
+        streets = street_repository.replace_city("Москва", parse_street_prices(rows))
+    return zones, streets

@@ -13,7 +13,12 @@ from datetime import datetime
 from typing import Any
 
 from app.database import Database
-from app.repositories_parking import ParkingTariffRepository, ParkingZoneRepository
+from app.repositories_parking import (
+    ParkingStreetPriceRepository,
+    ParkingTariffRepository,
+    ParkingZoneRepository,
+)
+from app.services.street_matching import normalize
 from app.services.parking_service import ParkingHit, find_zone
 
 
@@ -26,9 +31,14 @@ def zone_at(connection: Database, lat: float | None, lon: float | None, *, momen
     hit = find_zone(zones, lat, lon, moment=moment or datetime.now())
     if hit is None:
         return None
-    # Точная цена из открытых данных города, если город её публикует. Нет — останется
-    # вилка по городу, и это честнее выдуманного числа.
+    # Цена ищется в два захода. Сначала по коду зоны — он точнее всего. Но код в OSM
+    # проставлен лишь у части улиц, поэтому вторым заходом ищем по НАЗВАНИЮ улицы:
+    # в открытых данных города адрес есть у каждой парковки.
     price = ParkingTariffRepository(connection).price_text(hit.zone.city, hit.zone.zone_code)
+    if price is None and hit.zone.name:
+        price = ParkingStreetPriceRepository(connection).price_text(
+            hit.zone.city, normalize(hit.zone.name)
+        )
     return hit.with_price(price)
 
 

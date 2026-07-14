@@ -158,3 +158,45 @@ class ParkingTariffRepository:
             "SELECT COUNT(*) AS n FROM parking_tariffs WHERE city = ?", (city,)
         ).fetchone()
         return int(row["n"]) if row else 0
+
+
+class ParkingStreetPriceRepository:
+    """Цены по названию улицы — второй ключ связи, когда кода зоны в OSM нет."""
+
+    def __init__(self, connection: Database):
+        self.connection = connection
+
+    def price_text(self, city: str, street_key: str) -> str | None:
+        if not city or not street_key:
+            return None
+        row = self.connection.execute(
+            "SELECT price_text FROM parking_street_prices WHERE city = ? AND street_key = ?",
+            (city, street_key),
+        ).fetchone()
+        return (row["price_text"] if row else None) or None
+
+    def replace_city(self, city: str, streets: dict) -> int:
+        if not streets:
+            return 0
+        self.connection.execute("DELETE FROM parking_street_prices WHERE city = ?", (city,))
+        stamp = now_iso()
+        for key, street in streets.items():
+            self.connection.execute(
+                """
+                INSERT INTO parking_street_prices(city, street_key, price_text, ambiguous, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(city, street_key) DO UPDATE SET
+                    price_text = excluded.price_text,
+                    ambiguous = excluded.ambiguous,
+                    updated_at = excluded.updated_at
+                """,
+                (city, key, street.price_text, 1 if street.ambiguous else 0, stamp),
+            )
+        self.connection.commit()
+        return len(streets)
+
+    def count(self, city: str) -> int:
+        row = self.connection.execute(
+            "SELECT COUNT(*) AS n FROM parking_street_prices WHERE city = ?", (city,)
+        ).fetchone()
+        return int(row["n"]) if row else 0

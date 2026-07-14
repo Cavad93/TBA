@@ -1,0 +1,45 @@
+name: Обновление зон парковки
+
+# Расписание живёт ЗДЕСЬ, а не в /etc/cron.d на сервере, и это осознанно.
+#
+# Невидимый файл в /etc/cron.d — это код, который будет исполняться на боевом сервере
+# годами, а в репозитории его нет: он не попадёт ни в код-ревью, ни в историю изменений.
+# И если он упадёт, никто не узнает — вывод cron уходит в лог, который никто не читает.
+#
+# Здесь наоборот: расписание видно в диффе, у каждого запуска есть лог, а падение
+# приходит уведомлением. Зоны и цены меняются постановлениями города; если обновление
+# тихо сломается, через полгода мы будем предупреждать о плате там, где её отменили.
+
+on:
+  schedule:
+    # 3-го числа каждого второго месяца, 04:15 UTC. Чаще не нужно: зоны меняются
+    # постановлениями, а не каждый день.
+    - cron: "15 4 3 */2 *"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ключ доступа к серверам
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.MAPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -H ${{ secrets.APP_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Сервер карт — пересобрать артефакт зон из выгрузки OSM
+        run: |
+          ssh -o BatchMode=yes root@${{ secrets.MAPS_HOST }} '/opt/parking/build.sh'
+
+      - name: Сервер приложения — загрузить зоны и обновить тарифы Москвы
+        run: |
+          ssh -o BatchMode=yes root@${{ secrets.APP_HOST }} \
+            'cd /opt/tba/home_visit_profit_bot && \
+             sudo -u homevisit .venv/bin/python -m scripts.update_parking_zones'
+
+      - name: Проверить, что приложение живо
+        run: |
+          ssh -o BatchMode=yes root@${{ secrets.APP_HOST }} \
+            'curl -sf http://127.0.0.1:8088/api/health'
