@@ -348,7 +348,39 @@ data class ServerRouteSnapshot(
     val order: List<Int> = emptyList(),
     /** Работы на точке, к которым по текущему порядку Ленты уже не успеваем. */
     val lateWarnings: List<LateWarning> = emptyList(),
+    /** Готовая ссылка «Поехали» по каждому заказу — приходит с сервера вместе с маршрутом,
+     *  поэтому кнопка работает и без сети. Ключ — серверный id заказа. */
+    val navTargets: Map<Int, NavTarget> = emptyMap(),
+    /** Сколько заказ приносит чистыми, по нашему расчёту. Ключ — серверный id заказа. */
+    val netByVisitId: Map<Int, Double> = emptyMap(),
+    val navigation: NavigationPrefs = NavigationPrefs(),
     val fromCache: Boolean = false,
+) {
+    fun legFor(visitId: Int?): ServerRouteLeg? =
+        if (visitId == null) null else legs.firstOrNull { it.visitId == visitId }
+}
+
+/**
+ * Ссылка «Поехали» по одному заказу.
+ *
+ * Собрана и подписана сервером: приватный ключ Яндекса в приложении не хранится.
+ * Телефону остаётся только открыть её.
+ */
+data class NavTarget(
+    val url: String,
+    val fallbackUrl: String,
+    val app: String,
+    val packageName: String,
+    val signed: Boolean,
+)
+
+/** Настройки навигатора: чем ехать и что приложение делает само. */
+data class NavigationPrefs(
+    val app: String = "yandex_navi",
+    val autoOpen: Boolean = false,
+    val autoOpenDelaySeconds: Int = 7,
+    val autoClose: Boolean = false,
+    val signed: Boolean = false,
 )
 
 /** «К приёму на Ленина, 40 в 9:00 не успеваете: приедете к 10:15». */

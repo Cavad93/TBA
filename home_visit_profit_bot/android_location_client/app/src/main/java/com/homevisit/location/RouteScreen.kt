@@ -183,6 +183,10 @@ import com.homevisit.location.ui.SyncUiState
 import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
+import com.homevisit.location.domain.NavTarget
+import com.homevisit.location.domain.NavigationPrefs
+import com.homevisit.location.domain.ServerRouteLeg
+import kotlinx.coroutines.delay
 
 @Composable
 internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, settingsState: GpsSettingsState) {
@@ -193,7 +197,67 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
     val templates = uiState.appSettings.addressTemplates()
     val orders = uiState.routeVisits
 
+    val context = LocalContext.current
+    val snapshot = uiState.serverRoute.snapshot
+    val activeServerId = uiState.activeVisit?.serverId
+    val navTarget = activeServerId?.let { snapshot?.navTargets?.get(it) }
+    val navigation = snapshot?.navigation ?: NavigationPrefs()
+    val pendingNav = uiState.serverRoute.pendingNav
+    val autoClosed = uiState.serverRoute.autoClosed
+
+    val go: (NavTarget) -> Unit = { target ->
+        when (NavLauncher.open(context, target)) {
+            NavLauncher.Result.NothingInstalled ->
+                Toast.makeText(
+                    context,
+                    "Не нашёл, чем открыть маршрут. Установите Яндекс.Карты или Навигатор.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            else -> Unit
+        }
+    }
+
+    // Отсчёт дошёл до нуля — открываем навигатор. Именно здесь, а не во ViewModel:
+    // Intent нужен Context, а он есть только у экрана.
+    LaunchedEffect(pendingNav?.secondsLeft) {
+        val pending = pendingNav ?: return@LaunchedEffect
+        if (pending.secondsLeft <= 0) {
+            workActions.onCancelPendingNav()
+            go(pending.target)
+        }
+    }
+
+    // Опрос GPS ради автозакрытия. Работает, пока экран открыт: человек заканчивает
+    // заказ, берёт телефон — и заказ закрывается сам, а следом стартует отсчёт до
+    // навигатора на следующий адрес.
+    LaunchedEffect(navigation.autoClose, activeServerId) {
+        if (!navigation.autoClose || activeServerId == null) return@LaunchedEffect
+        while (true) {
+            workActions.onCheckAutoClose()
+            delay(60_000)
+        }
+    }
+
     ScreenColumn {
+        if (autoClosed != null) {
+            UndoAutoCloseCard(
+                address = autoClosed.address,
+                onUndo = workActions.onUndoAutoClose,
+                onDismiss = workActions.onDismissAutoClose,
+            )
+        }
+        if (pendingNav != null) {
+            AutoOpenCountdownCard(
+                address = pendingNav.address,
+                secondsLeft = pendingNav.secondsLeft,
+                totalSeconds = pendingNav.totalSeconds,
+                onGoNow = {
+                    workActions.onCancelPendingNav()
+                    go(pendingNav.target)
+                },
+                onCancel = workActions.onCancelPendingNav,
+            )
+        }
         RouteAnchor(
             title = "Старт",
             icon = Icons.Filled.PlayArrow,
@@ -210,7 +274,11 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
             FocusOrderCard(
                 active = uiState.activeVisit,
                 gpsHint = uiState.gpsHint,
+                navTarget = navTarget,
+                leg = snapshot?.legFor(activeServerId),
+                net = activeServerId?.let { snapshot?.netByVisitId?.get(it) },
                 onRefreshGpsHint = workActions.onRefreshGpsHint,
+                onGo = { navTarget?.let(go) },
                 onComplete = workActions.onCompleteCurrentVisit,
                 onCancel = workActions.onCancelCurrentVisit,
             )
@@ -438,15 +506,29 @@ internal fun RouteAnchor(
     }
 }
 
-/** Крупная карточка текущего заказа: «Готово»/«Отмена» и «Закрыть по GPS». */
+/**
+ * Крупная карточка текущего заказа.
+ *
+ * Главная кнопка меняется по обстановке. Пока человек в дороге — это «Поехали»:
+ * ничего другого он сейчас сделать не может. Когда GPS видит его у адреса, главной
+ * становится «Готово». Так за рулём не надо читать кнопки, чтобы их различить, —
+ * а «Поехали» и «Готово» рядом одинакового вида означали бы, что промах закрывает
+ * заказ вместо построения маршрута.
+ */
 @Composable
 internal fun FocusOrderCard(
     active: RouteVisitUi?,
     gpsHint: GpsHintUiState,
+    navTarget: NavTarget?,
+    leg: ServerRouteLeg?,
+    net: Double?,
     onRefreshGpsHint: () -> Unit,
+    onGo: () -> Unit,
     onComplete: () -> Unit,
     onCancel: () -> Unit,
 ) {
+    // GPS зафиксировал стоянку у этого адреса — значит человек доехал.
+    val arrived = gpsHint.hint != null
     Card(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
@@ -475,15 +557,29 @@ internal fun FocusOrderCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 AnchorTimeLabel(active)
+                // Километры, минуты и деньги — наши, из OSRM. Человек видит, за что едет,
+                // до того как экран сменится на чужой.
+                NavFacts(leg = leg, net = net)
+                GoButton(target = navTarget, primary = !arrived, onGo = onGo)
                 GpsHintBlock(gpsHint = gpsHint, onRefresh = onRefreshGpsHint, onComplete = onComplete)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(
-                        modifier = Modifier.weight(1f),
-                        enabled = active.serverId != null,
-                        onClick = onComplete,
-                        colors = ButtonDefaults.buttonColors(containerColor = VerdictColors.go, contentColor = Color.White),
-                    ) {
-                        Text("Готово")
+                    if (arrived) {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            enabled = active.serverId != null,
+                            onClick = onComplete,
+                            colors = ButtonDefaults.buttonColors(containerColor = VerdictColors.go, contentColor = Color.White),
+                        ) {
+                            Text("Готово")
+                        }
+                    } else {
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f),
+                            enabled = active.serverId != null,
+                            onClick = onComplete,
+                        ) {
+                            Text("Готово")
+                        }
                     }
                     OutlinedButton(modifier = Modifier.weight(1f), enabled = active.serverId != null, onClick = onCancel) {
                         Text("Отмена")

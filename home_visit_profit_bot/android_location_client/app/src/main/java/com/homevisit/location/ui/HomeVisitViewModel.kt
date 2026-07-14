@@ -21,6 +21,7 @@ import com.homevisit.location.domain.ProfileSnapshot
 import com.homevisit.location.domain.ShiftSnapshot
 import com.homevisit.location.domain.ReportPeriod
 import com.homevisit.location.domain.ReportSnapshot
+import com.homevisit.location.domain.NavTarget
 import com.homevisit.location.domain.ServerRouteSnapshot
 import com.homevisit.location.domain.StopLabel
 import com.homevisit.location.domain.SyncConflict
@@ -30,6 +31,8 @@ import com.homevisit.location.domain.VisitKind
 import com.homevisit.location.domain.VisitStatus
 import com.homevisit.location.domain.WorkDayStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -45,6 +48,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     private val repository = HomeVisitRepository.create(application)
     private val candidateState = MutableStateFlow(CandidateUiState())
     private val routeState = MutableStateFlow(RouteUiState())
+    private var navCountdownJob: Job? = null
     private val gpsEstimateState = MutableStateFlow(GpsEstimateUiState())
     private val endShiftState = MutableStateFlow(EndShiftUiState())
     private val gpsHintState = MutableStateFlow(GpsHintUiState())
@@ -360,8 +364,113 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 repository.markVisitStatus(activeVisit.localId, VisitStatus.Completed)
                 gpsHintState.value = GpsHintUiState(message = "Адрес закрыт")
                 refreshRouteInternal(serverUrl, apiKey)
+                startAutoOpenIfEnabled()
             }
         }
+    }
+
+    /**
+     * Закрыть заказ самому: человек долго простоял у адреса.
+     *
+     * Отличается от обычного «Готово» ровно одним — тем, что человек об этом не просил.
+     * Поэтому закрытие показывается ему и откатывается одной кнопкой: простоять он мог
+     * и в кафе напротив, а «долго простоял» — всего лишь догадка.
+     */
+    private fun autoCloseCurrentVisit(serverUrl: String, apiKey: String) {
+        viewModelScope.launch {
+            val activeVisit = uiState.value.activeVisit ?: return@launch
+            val serverId = activeVisit.serverId ?: return@launch
+            val ok = repository.completeVisit(serverUrl, apiKey, serverId)
+            if (!ok) return@launch
+            repository.markVisitStatus(activeVisit.localId, VisitStatus.Completed)
+            gpsHintState.value = GpsHintUiState()
+            routeState.update {
+                it.copy(autoClosed = AutoClosed(visitId = serverId, address = activeVisit.address))
+            }
+            refreshRouteInternal(serverUrl, apiKey)
+            startAutoOpenIfEnabled()
+        }
+    }
+
+    /** Проверить, не пора ли закрыть заказ самому. Вызывается опросом с экрана Ленты. */
+    fun checkAutoClose(serverUrl: String, apiKey: String) {
+        val snapshot = routeState.value.snapshot ?: return
+        if (!snapshot.navigation.autoClose) return
+        if (routeState.value.autoClosed != null) return
+        viewModelScope.launch {
+            if (serverUrl.isBlank() || apiKey.isBlank()) return@launch
+            val hint = repository.fetchCurrentGpsHint(serverUrl, apiKey) ?: return@launch
+            gpsHintState.value = GpsHintUiState(hint = hint)
+            if (hint.readyToComplete) {
+                autoCloseCurrentVisit(serverUrl, apiKey)
+            }
+        }
+    }
+
+    /** Вернуть заказ, который приложение закрыло само. */
+    fun undoAutoClose(serverUrl: String, apiKey: String) {
+        val closed = routeState.value.autoClosed ?: return
+        viewModelScope.launch {
+            cancelPendingNav()
+            val ok = repository.reopenVisit(serverUrl, apiKey, closed.visitId)
+            routeState.update {
+                it.copy(
+                    autoClosed = null,
+                    message = if (ok) "Заказ вернул в работу" else "Не удалось вернуть заказ",
+                )
+            }
+            if (ok) {
+                repository.markVisitStatus("server-${closed.visitId}", VisitStatus.Accepted)
+                refreshRouteInternal(serverUrl, apiKey)
+            }
+        }
+    }
+
+    fun dismissAutoClose() {
+        routeState.update { it.copy(autoClosed = null) }
+    }
+
+    /**
+     * Отсчёт до автоматического запуска навигатора на следующий адрес.
+     *
+     * Приложение вот-вот заберёт экран себе — поэтому не «через мгновение», а с
+     * видимым счётчиком и кнопкой «Не надо». Задержка берётся из настроек.
+     */
+    private fun startAutoOpenIfEnabled() {
+        val snapshot = routeState.value.snapshot ?: return
+        if (!snapshot.navigation.autoOpen) return
+        val next = uiState.value.activeVisit ?: return
+        val serverId = next.serverId ?: return
+        val target = snapshot.navTargets[serverId] ?: return
+        val seconds = snapshot.navigation.autoOpenDelaySeconds.coerceIn(3, 30)
+
+        navCountdownJob?.cancel()
+        routeState.update {
+            it.copy(
+                pendingNav = PendingNav(
+                    target = target,
+                    address = next.address,
+                    secondsLeft = seconds,
+                    totalSeconds = seconds,
+                ),
+            )
+        }
+        navCountdownJob = viewModelScope.launch {
+            var left = seconds
+            while (left > 0) {
+                delay(1_000)
+                left -= 1
+                val pending = routeState.value.pendingNav ?: return@launch
+                routeState.update { it.copy(pendingNav = pending.copy(secondsLeft = left)) }
+            }
+            // Дошли до нуля. Сам Intent запускает экран — у него есть Context.
+        }
+    }
+
+    fun cancelPendingNav() {
+        navCountdownJob?.cancel()
+        navCountdownJob = null
+        routeState.update { it.copy(pendingNav = null) }
     }
 
     fun cancelCurrentVisit(serverUrl: String, apiKey: String) {
@@ -954,6 +1063,24 @@ data class RouteUiState(
     val isLoading: Boolean = false,
     val snapshot: ServerRouteSnapshot? = null,
     val message: String = "",
+    /** Идёт отсчёт до автоматического запуска навигатора. */
+    val pendingNav: PendingNav? = null,
+    /** Заказ закрылся сам по GPS — пока это здесь, закрытие можно откатить. */
+    val autoClosed: AutoClosed? = null,
+)
+
+/** Отсчёт до автозапуска навигатора на следующий адрес. */
+data class PendingNav(
+    val target: NavTarget,
+    val address: String,
+    val secondsLeft: Int,
+    val totalSeconds: Int,
+)
+
+/** Заказ, который приложение закрыло само. Держим id, чтобы вернуть его обратно. */
+data class AutoClosed(
+    val visitId: Int,
+    val address: String,
 )
 
 data class GpsEstimateUiState(

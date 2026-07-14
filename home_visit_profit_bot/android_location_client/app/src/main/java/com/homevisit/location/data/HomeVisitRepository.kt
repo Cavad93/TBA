@@ -38,6 +38,8 @@ import com.homevisit.location.domain.HomeRecommendation
 import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.LateWarning
+import com.homevisit.location.domain.NavTarget
+import com.homevisit.location.domain.NavigationPrefs
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
 import com.homevisit.location.domain.DrivingWithinDay
@@ -728,7 +730,20 @@ class HomeVisitRepository private constructor(
     suspend fun fetchActiveRoute(serverUrl: String, apiKey: String): ServerRouteSnapshot? = withContext(Dispatchers.IO) {
         val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/route/active"), apiKey, "cache_route_active")
             ?: return@withContext null
-        parseServerRoute(response.optJSONObject("route"))?.copy(fromCache = response.optBoolean("_from_cache", false))
+        parseServerRoute(response)?.copy(fromCache = response.optBoolean("_from_cache", false))
+    }
+
+    /**
+     * Вернуть закрытый заказ обратно в работу — отмена автозакрытия по GPS.
+     *
+     * Приложение закрывает заказ само, если человек долго простоял у адреса. Но
+     * «долго простоял» — это догадка: он мог зайти в кафе напротив. Значит закрытие
+     * обязано отменяться.
+     */
+    suspend fun reopenVisit(serverUrl: String, apiKey: String, visitId: Int): Boolean = withContext(Dispatchers.IO) {
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/visits/$visitId/reopen"), apiKey, JSONObject())
+            ?: return@withContext false
+        response.optBoolean("ok", false)
     }
 
     suspend fun fetchGpsDayEstimate(serverUrl: String, apiKey: String): GpsDayEstimate? = withContext(Dispatchers.IO) {
@@ -1357,10 +1372,8 @@ class HomeVisitRepository private constructor(
         )
     }
 
-    private fun parseServerRoute(route: JSONObject?): ServerRouteSnapshot? {
-        if (route == null) {
-            return null
-        }
+    private fun parseServerRoute(response: JSONObject?): ServerRouteSnapshot? {
+        val route = response?.optJSONObject("route") ?: return null
         val legsJson = route.optJSONArray("legs") ?: JSONArray()
         val legs = buildList {
             for (index in 0 until legsJson.length()) {
@@ -1398,6 +1411,40 @@ class HomeVisitRepository private constructor(
                 )
             }
         }
+        // Ссылки «Поехали» и деньги по заказу приезжают вместе с маршрутом. Ответ
+        // целиком лежит в кеше, поэтому кнопка работает и без сети — в подземном
+        // паркинге она нужна ровно так же, как на открытой улице.
+        val visitsJson = response.optJSONArray("visits") ?: JSONArray()
+        val navTargets = mutableMapOf<Int, NavTarget>()
+        val netByVisitId = mutableMapOf<Int, Double>()
+        for (index in 0 until visitsJson.length()) {
+            val visit = visitsJson.optJSONObject(index) ?: continue
+            val visitId = visit.optInt("id", 0)
+            if (visitId == 0) continue
+            if (!visit.isNull("estimated_marginal_profit")) {
+                netByVisitId[visitId] = visit.optDouble("estimated_marginal_profit", 0.0)
+            }
+            val nav = visit.optJSONObject("nav") ?: continue
+            navTargets[visitId] = NavTarget(
+                url = nav.optString("url"),
+                fallbackUrl = nav.optString("fallback_url"),
+                app = nav.optString("app"),
+                packageName = nav.optString("package"),
+                signed = nav.optBoolean("signed", false),
+            )
+        }
+        val navJson = response.optJSONObject("navigation")
+        val navigation = if (navJson == null) {
+            NavigationPrefs()
+        } else {
+            NavigationPrefs(
+                app = navJson.optString("app", "yandex_navi"),
+                autoOpen = navJson.optBoolean("auto_open", false),
+                autoOpenDelaySeconds = navJson.optDouble("auto_open_delay_seconds", 7.0).toInt(),
+                autoClose = navJson.optBoolean("auto_close", false),
+                signed = navJson.optBoolean("signed", false),
+            )
+        }
         return ServerRouteSnapshot(
             order = order,
             visitsCount = route.optInt("visits_count", 0),
@@ -1405,6 +1452,9 @@ class HomeVisitRepository private constructor(
             totalMinutes = route.optDouble("total_minutes", 0.0),
             legs = legs,
             lateWarnings = lateWarnings,
+            navTargets = navTargets,
+            netByVisitId = netByVisitId,
+            navigation = navigation,
         )
     }
 

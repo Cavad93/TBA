@@ -243,6 +243,12 @@ object VerdictColors {
     val skip = Color(0xFFD93B3B)
     val skipContainer = Color(0xFFFDECEC)
     val onSkipContainer = Color(0xFF9C2020)
+
+    // Синий — это дорога, а не вердикт. Кнопка «Поехали» намеренно не зелёная:
+    // зелёный в приложении значит «стоит ехать», и путать его с «поехали» нельзя.
+    val route = Color(0xFF2F6FE0)
+    val routeContainer = Color(0xFFEAF1FD)
+    val onRouteContainer = Color(0xFF18449B)
 }
 
 @Composable

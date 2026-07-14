@@ -8,6 +8,20 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+        Начиная с Android 11 приложение не видит чужие пакеты без объявления. Без этого
+        блока проверка «а установлен ли Яндекс?» всегда отвечала бы «нет», и кнопка
+        «Поехали» молча уходила бы в запасной вариант.
+    -->
+    <queries>
+        <package android:name="ru.yandex.yandexnavi" />
+        <package android:name="ru.yandex.yandexmaps" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
