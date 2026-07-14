@@ -853,7 +853,6 @@ internal fun TelemedInputCard(clinics: List<String>, onSubmit: (Double, Double, 
  * усталость считалась на сервере, доезжала до телефона и нигде не показывалась —
  * то есть не влияла ни на что.
  */
-@Composable
 /**
  * «Адрес в зоне платной парковки».
  *
