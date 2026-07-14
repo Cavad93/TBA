@@ -30,6 +30,7 @@ from app.services.profitability_service import (
 )
 from app.services.routing_service import RoutingError
 from app.services.settings_service import allowed_clinics
+from app.services.visit_navigation import attach_navigation, navigation_settings
 
 
 # Допустимые клиники читаются из настроек (allowed_clinics), не из константы.
@@ -155,6 +156,22 @@ class MobileVisitService:
         if completed is None:
             raise ValueError("visit is not accepted")
         return self._route_response(day.id, "completed", visit_id)
+
+    def reopen_visit(self, visit_id: int) -> dict[str, Any]:
+        """Вернуть закрытый заказ в работу — отмена автозакрытия по GPS.
+
+        Приложение закрывает заказ само, если человек долго простоял у адреса. Но
+        «долго простоял» — это догадка: он мог заехать в кафе напротив. Поэтому
+        закрытие обязано отменяться, и именно здесь это происходит.
+        """
+        day = self._require_active_day()
+        visit = self.visits.get(visit_id)
+        if visit.work_day_id != day.id:
+            raise ValueError("visit belongs to another day")
+        reopened = self.visits.reopen_visit(visit_id)
+        if reopened is None:
+            raise ValueError("visit is not completed")
+        return self._route_response(day.id, "reopened", visit_id)
 
     def cancel_visit(self, visit_id: int) -> dict[str, Any]:
         day = self._require_active_day()
@@ -383,12 +400,16 @@ class MobileVisitService:
             warning.as_dict()
             for warning in late_warnings(day, all_visits, _with_order(route, payload["order"]))
         ]
+        visits_payload = [visit_payload(visit) for visit in all_visits]
+        # Ссылка «Поехали» едет вместе с заказом — чтобы кнопка работала и без сети.
+        attach_navigation([item for item in visits_payload if item is not None], self.settings)
         return {
             "ok": True,
             "reason": reason,
             "visit_id": visit_id,
             "route": payload,
-            "visits": [visit_payload(visit) for visit in all_visits],
+            "visits": visits_payload,
+            "navigation": navigation_settings(self.settings),
         }
 
     def reorder_route(self, payload: dict[str, Any]) -> dict[str, Any]:

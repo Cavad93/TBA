@@ -17,6 +17,7 @@ from app.repositories import SettingsRepository
 from app.services.base_zones_service import parse_base_zones, serialize_base_zones
 from app.services.income_service import INCOME_MODELS
 from app.services.mileage_service import MILEAGE_POLICIES
+from app.services.navigation_service import DEFAULT_NAV_APP, NAV_APPS
 from app.services.vehicle_service import COST_MODES, PAYERS, SERVICE_TIERS, TRANSPORT_TYPES, WEAR_CLASSES
 
 
@@ -56,6 +57,7 @@ SECTION_TITLES: dict[str, str] = {
     "clinics": "Компании",
     "districts": "Зоны обслуживания",
     "routing": "Маршрут и время",
+    "navigation": "Навигатор",
     "gps": "GPS",
     "fatigue": "Нагрузка",
 }
@@ -238,6 +240,34 @@ SETTINGS_CATALOG: list[SettingField] = [
         "default_telemed_minutes", "routing", "Удалённый заказ, мин", "number", 3.0, min=0,
         hint="Сколько занимает один удалённый заказ — подставляется по умолчанию.",
     ),
+    # Навигатор. Мы не считаем по Яндексу — километры, минуты и деньги остаются наши,
+    # из OSRM. Яндекс здесь только водит машину.
+    SettingField(
+        "navigator_app", "navigation", "Чем ехать", "choice", DEFAULT_NAV_APP,
+        options=tuple(NAV_APPS.items()),
+        hint=(
+            "Куда отдавать маршрут по кнопке «Поехали». Навигатор ведёт только на машине — "
+            "если вы ходите пешком или ездите на велосипеде, маршрут уйдёт в Карты."
+        ),
+    ),
+    SettingField(
+        "auto_open_navigator", "navigation", "Открывать навигатор сам", "bool", False,
+        hint=(
+            "После закрытия заказа приложение само откроет навигатор на следующий адрес. "
+            "Перед этим показывает отсчёт — успеете отменить."
+        ),
+    ),
+    SettingField(
+        "auto_open_delay_seconds", "navigation", "Отсчёт до запуска, сек", "number", 7.0, min=3, max=30,
+        hint="Сколько секунд у вас есть, чтобы передумать.",
+    ),
+    SettingField(
+        "auto_close_visit", "navigation", "Закрывать заказ самому", "bool", False,
+        hint=(
+            "Если вы простояли у адреса дольше, чем указано в «Долгая остановка», заказ "
+            "закроется без вашего участия. Закрытие можно отменить."
+        ),
+    ),
     # GPS
     SettingField(
         "location_geofence_radius_m", "gps", "Радиус адреса, м", "number", 120.0, min=0,
@@ -245,7 +275,7 @@ SETTINGS_CATALOG: list[SettingField] = [
     ),
     SettingField(
         "location_dwell_minutes", "gps", "Долгая остановка, мин", "number", 12.0, min=0,
-        hint="Сколько простоять у адреса, чтобы пришло уведомление «закрыть заказ».",
+        hint="Сколько простоять у адреса, чтобы приложение сочло заказ выполненным.",
     ),
     SettingField(
         "location_notification_cooldown_minutes", "gps", "Пауза между уведомлениями, мин", "number", 60.0, min=0,

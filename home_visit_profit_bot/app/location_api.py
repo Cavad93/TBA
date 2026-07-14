@@ -172,7 +172,7 @@ def _handler_factory(config: AppConfig):
             if stop_label_action:
                 self._handle_visit_stop_label(int(stop_label_action.group(1)))
                 return
-            visit_action = re.fullmatch(r"/api/visits/(\d+)/(accept|reject|complete|cancel)", path)
+            visit_action = re.fullmatch(r"/api/visits/(\d+)/(accept|reject|complete|cancel|reopen)", path)
             if visit_action:
                 self._handle_visit_action(int(visit_action.group(1)), visit_action.group(2))
                 return
@@ -542,6 +542,8 @@ def _handler_factory(config: AppConfig):
                         payload = service.reject_candidate(visit_id)
                     elif action == "cancel":
                         payload = service.cancel_visit(visit_id)
+                    elif action == "reopen":
+                        payload = service.reopen_visit(visit_id)
                     else:
                         payload = service.complete_visit(visit_id)
             except (KeyError, ValueError) as error:

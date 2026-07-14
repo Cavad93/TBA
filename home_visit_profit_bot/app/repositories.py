@@ -528,6 +528,27 @@ class VisitRepository:
         self.connection.commit()
         return self.get(visit.id)
 
+    def reopen_visit(self, visit_id: int) -> Visit | None:
+        """Вернуть выполненный заказ обратно в работу.
+
+        Нужно для отмены автозакрытия по GPS: приложение закрыло заказ само, а человек
+        на самом деле ещё на адресе. Заказ встаёт первым в очередь (order_number = 0) —
+        оптимизатор пересчитает порядок сразу же, на ближайшем ответе маршрута.
+        """
+        row = self.connection.execute(
+            "SELECT * FROM visits WHERE id = ? AND status = 'completed'",
+            (visit_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        visit = _visit_from_row(row)
+        self.connection.execute(
+            "UPDATE visits SET status = 'accepted', order_number = 0, completed_at = NULL WHERE id = ?",
+            (visit.id,),
+        )
+        self.connection.commit()
+        return self.get(visit.id)
+
     def update_estimates(self, visit_id: int, marginal_profit: float, marginal_hourly: float, before_hourly: float, after_hourly: float) -> None:
         self.connection.execute(
             """

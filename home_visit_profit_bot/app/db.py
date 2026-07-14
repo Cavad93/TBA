@@ -770,6 +770,12 @@ def seed_default_settings(db: Database, config: AppConfig) -> None:
         "location_geofence_radius_m": str(config.location_api.geofence_radius_m),
         "location_dwell_minutes": str(config.location_api.dwell_minutes),
         "location_notification_cooldown_minutes": str(config.location_api.notification_cooldown_minutes),
+        # Навигатор. Обе автоматические функции выключены по умолчанию: приложение,
+        # которое само перехватывает экран, надо сначала разрешить, а не отключать.
+        "navigator_app": "yandex_navi",
+        "auto_open_navigator": "false",
+        "auto_open_delay_seconds": "7",
+        "auto_close_visit": "false",
     }
     db.executemany(
         "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(user_id, key) DO NOTHING",
