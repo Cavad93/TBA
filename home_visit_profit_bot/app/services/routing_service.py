@@ -139,8 +139,18 @@ def _get_json(url: str, timeout_seconds: float) -> dict:
     try:
         with httpx.Client(timeout=timeout_seconds, headers={"User-Agent": "home-visit-profit-bot/1.0"}) as client:
             response = client.get(url)
-            response.raise_for_status()
-            return response.json()
+            # ВНИМАНИЕ: raise_for_status() здесь звать нельзя. На «дороги рядом нет» OSRM
+            # отвечает кодом HTTP 400 — и это не сбой связи, а осмысленный ответ:
+            # {"code": "NoSegment"}. Упав на статусе, тела мы не прочитаем и не отличим
+            # «человек вне покрытия» от «сервер недоступен». Первое надо сказать человеку
+            # словами, второе — молча пересчитать по прямой. Это разные вещи.
+            if response.status_code >= 500:
+                response.raise_for_status()
+            try:
+                return response.json()
+            except ValueError:
+                response.raise_for_status()
+                raise RoutingError("OSRM вернул не JSON")
     except httpx.HTTPError as error:
         raise RoutingError(f"Не удалось обратиться к OSRM: {error}") from error
 

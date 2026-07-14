@@ -34,6 +34,8 @@ NIZHNY = Point(label="Нижний Новгород", lat=56.3269, lon=43.9432)
 
 
 class FakeResponse:
+    status_code = 200
+
     def __init__(self, payload):
         self._payload = payload
 
@@ -139,3 +141,35 @@ def test_unconfigured_walk_router_falls_back_to_the_car_one(monkeypatch) -> None
     monkeypatch.setenv("OSRM_URL", "http://car:5000")
     monkeypatch.delenv("OSRM_URL_FOOT", raising=False)
     assert server_settings.osrm_url("foot") == "http://car:5000"
+
+
+class FakeErrorResponse(FakeResponse):
+    """OSRM отвечает на «дороги рядом нет» кодом HTTP 400 — но с осмысленным телом."""
+
+    status_code = 400
+
+    def raise_for_status(self):
+        import httpx
+
+        raise httpx.HTTPStatusError("400", request=None, response=None)  # type: ignore[arg-type]
+
+
+class FakeErrorClient(FakeClient):
+    def get(self, url):
+        FakeClient.last_url = url
+        return FakeErrorResponse(self._payload)
+
+
+def test_http_400_from_osrm_is_read_not_swallowed(monkeypatch) -> None:
+    """Упав на статусе 400, тела мы не прочитаем и не отличим «вне покрытия» от
+    «сервер недоступен». Первое надо сказать человеку словами, второе — пересчитать.
+    """
+    import app.services.routing_service as routing
+
+    monkeypatch.setattr(
+        routing.httpx,
+        "Client",
+        FakeErrorClient({"code": "NoSegment", "message": "Could not find a matching segment"}),
+    )
+    with pytest.raises(OutsideCoverageError):
+        get_route(MOSCOW, NIZHNY, osrm_url="http://osrm", timeout_seconds=5)
