@@ -35,29 +35,36 @@ def _timestamp_ms_to_datetime(value: object) -> datetime | None:
     return datetime.fromtimestamp(timestamp_ms / 1000)
 
 
-@router.post("/location")
-def location(body: bytes = Depends(raw_body), auth: Authed = Depends(authed)) -> dict:
-    payload = parse_json(body, {"error": "bad_request"})
-    try:
-        lat = float(payload["lat"])
-        lon = float(payload["lon"])
-        accuracy_m = float(payload.get("accuracy_m") or 0)
-        provider = str(payload.get("provider") or "")
-        captured_at = _timestamp_ms_to_datetime(payload.get("timestamp_ms"))
-    except (ValueError, KeyError, TypeError):
-        raise ApiError(400, {"error": "bad_request"})
+def _repos(db):
+    return {
+        "settings": SettingsRepository(db),
+        "days": WorkDayRepository(db),
+        "visits": VisitRepository(db),
+        "events": LocationEventRepository(db),
+        "samples": LocationSampleRepository(db),
+        "location_state": WorkDayLocationRepository(db),
+    }
 
-    db = auth.db
-    settings = SettingsRepository(db)
-    days = WorkDayRepository(db)
-    visits = VisitRepository(db)
-    events = LocationEventRepository(db)
-    samples = LocationSampleRepository(db)
-    location_state = WorkDayLocationRepository(db)
+
+def _process_one(payload: dict, db, repos: dict) -> dict:
+    """Обработать ОДНУ точку тем же конвейером, что и одиночный /location.
+
+    Общий код для /location и /api/location/batch: батч не должен обрабатывать точки
+    иначе, чем одиночный приём, иначе визиты и парковка разъедутся между версиями APK.
+    """
+    lat = float(payload["lat"])
+    lon = float(payload["lon"])
+    accuracy_m = float(payload.get("accuracy_m") or 0)
+    provider = str(payload.get("provider") or "")
+    captured_at = _timestamp_ms_to_datetime(payload.get("timestamp_ms"))
+
+    settings = repos["settings"]
+    days = repos["days"]
+    visits = repos["visits"]
     result = process_location_update(
         lat=lat, lon=lon, accuracy_m=accuracy_m, provider=provider, captured_at=captured_at,
-        days=days, visits=visits, events=events, samples=samples,
-        location_state=location_state, settings=settings,
+        days=days, visits=visits, events=repos["events"], samples=repos["samples"],
+        location_state=repos["location_state"], settings=settings,
     )
     active_day = days.active()
     segment_index = (
@@ -83,3 +90,46 @@ def location(body: bytes = Depends(raw_body), auth: Authed = Depends(authed)) ->
         "segment_index": segment_index,
         "parking_alert": parking_alert,
     }
+
+
+@router.post("/location")
+def location(body: bytes = Depends(raw_body), auth: Authed = Depends(authed)) -> dict:
+    payload = parse_json(body, {"error": "bad_request"})
+    try:
+        return _process_one(payload, auth.db, _repos(auth.db))
+    except (ValueError, KeyError, TypeError):
+        raise ApiError(400, {"error": "bad_request"})
+
+
+@router.post("/api/location/batch")
+def location_batch(body: bytes = Depends(raw_body), auth: Authed = Depends(authed)) -> dict:
+    """Пачка GPS-точек за раз (Фаза 3.7): телефон копит точки и шлёт их реже.
+
+    Точки обрабатываются СТРОГО по порядку тем же конвейером, что и одиночный приём —
+    порядок и segment_index визитов сохраняются. Живой ответ (ready_to_complete,
+    парковка) берётся с ПОСЛЕДНЕЙ точки: по ней человеку может понадобиться алерт
+    прямо сейчас, а промежуточные точки — история. Старый /location остаётся для
+    старых APK.
+    """
+    payload = parse_json(body, {"error": "bad_request"}, with_detail=True)
+    points = payload.get("points")
+    if not isinstance(points, list) or not points:
+        raise ApiError(400, {"error": "bad_request", "detail": "нужен непустой список points"})
+
+    repos = _repos(auth.db)
+    processed = 0
+    last: dict | None = None
+    for point in points:
+        if not isinstance(point, dict):
+            continue
+        try:
+            last = _process_one(point, auth.db, repos)
+        except (ValueError, KeyError, TypeError):
+            # Одна кривая точка не должна ронять всю пачку — пропускаем её.
+            continue
+        processed += 1
+
+    if last is None:
+        raise ApiError(400, {"error": "bad_request", "detail": "ни одной валидной точки"})
+    # Ответ = результат последней точки + сколько обработали. Живые алерты — по ней.
+    return {**last, "processed": processed}
