@@ -88,6 +88,8 @@ class Visit:
     order_source: str | None = None
     # Цена отклика (платный лид) — расход заказа, входит в маржу.
     response_cost: float = 0.0
+    # Отмена в пути (Ф11.3): деньги потерь по уже проеханному сегменту.
+    cancel_loss: float = 0.0
 
     @property
     def is_anchor(self) -> bool:

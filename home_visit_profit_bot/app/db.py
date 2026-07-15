@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS visits (
     planned_end_at TEXT,
     order_source TEXT,
     response_cost REAL DEFAULT 0,
+    cancel_loss REAL DEFAULT 0,
     created_at TEXT NOT NULL,
     FOREIGN KEY(work_day_id) REFERENCES work_days(id)
 );
@@ -814,6 +815,8 @@ def _ensure_columns(db: Database) -> None:
     # Цена отклика (платный лид) входит в расчёт выгодности как расход заказа.
     _ensure_column(db, "visits", "order_source", "TEXT")
     _ensure_column(db, "visits", "response_cost", "REAL DEFAULT 0")
+    # Отмена в пути (Ф11.3): деньги потерь по уже проеханному сегменту.
+    _ensure_column(db, "visits", "cancel_loss", "REAL DEFAULT 0")
     # Походка по отрезкам пути: таблица уже создана на боевом сервере, поэтому колонки
     # добавляются миграцией, а не только через DDL.
     # Расходы на машину (ремонт, ТО, шины, страховка) — из них считается настоящий

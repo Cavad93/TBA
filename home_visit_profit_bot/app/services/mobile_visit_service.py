@@ -32,6 +32,7 @@ from app.services.profitability_service import (
     calculate_remaining_route_summary,
     decision_to_verdict,
     profitability_score,
+    vehicle_km_cost,
 )
 from app.services.matrix_service import build_matrix_response
 from app.services.routing_service import OutsideCoverageError, RoutingError
@@ -231,6 +232,35 @@ class MobileVisitService:
         if cancelled is None:
             raise ValueError("visit is not accepted")
         return self._route_response(day.id, "cancelled", visit_id)
+
+    def cancel_in_route(self, visit_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        """Клиент отменил, когда уже ехали (Ф11.3): фиксируем реальные потери деньгами.
+
+        Проеханные км/мин считает телефон по GPS-треку и шлёт сюда; сервер оценивает их
+        в деньгах (км×себестоимость + время×личная норма ₽/час). Если клиент их не
+        прислал — берём плановый подъезд заказа как честную оценку «что уже вложено».
+        """
+        day = self._require_active_day()
+        visit = self.visits.get(visit_id)
+        if visit.work_day_id != day.id:
+            raise ValueError("visit belongs to another day")
+
+        cost = vehicle_km_cost(self.settings, self.stats, route_time_factor=day.planned_route_time_factor)
+        min_hourly = self.settings.get_float("min_hourly_income", 600)
+        driven_km = _optional_non_negative_float(payload.get("driven_km"))
+        driven_minutes = _optional_non_negative_float(payload.get("driven_minutes"))
+        if driven_km is None:
+            driven_km = max(0.0, visit.estimated_extra_km)
+        if driven_minutes is None:
+            driven_minutes = max(0.0, visit.estimated_extra_minutes)
+        loss = driven_km * cost.total + driven_minutes / 60.0 * min_hourly
+
+        cancelled = self.visits.cancel_in_route(visit_id, loss)
+        if cancelled is None:
+            raise ValueError("visit is not accepted")
+        response = self._route_response(day.id, "cancelled_in_route", visit_id)
+        response["cancel_loss"] = round(loss, 2)
+        return response
 
     def active_route(self) -> dict[str, Any]:
         # Чтение маршрута НЕ переоптимизирует: иначе обновление экрана затирало бы

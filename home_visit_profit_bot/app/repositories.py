@@ -84,6 +84,7 @@ def _visit_from_row(row: Any) -> Visit:
         planned_end_at=_row_value(row, "planned_end_at"),
         order_source=_row_value(row, "order_source"),
         response_cost=float(_row_value(row, "response_cost") or 0),
+        cancel_loss=float(_row_value(row, "cancel_loss") or 0),
     )
 
 
@@ -487,6 +488,21 @@ class VisitRepository:
         )
         self.connection.commit()
         return self.get(visit.id)
+
+    def cancel_in_route(self, visit_id: int, loss: float) -> Visit | None:
+        """Отмена в пути (Ф11.3): клиент отменил, когда уже ехали. Фиксируем потери."""
+        row = self.connection.execute(
+            "SELECT * FROM visits WHERE id = ? AND status = 'accepted'",
+            (visit_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        self.connection.execute(
+            "UPDATE visits SET status = 'cancelled_in_route', cancel_loss = ?, order_number = NULL WHERE id = ?",
+            (max(0.0, loss), visit_id),
+        )
+        self.connection.commit()
+        return self.get(visit_id)
 
     def cancel_order(self, day_id: int, order_number: int) -> Visit | None:
         row = self.connection.execute(

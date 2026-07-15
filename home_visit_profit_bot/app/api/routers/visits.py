@@ -52,6 +52,16 @@ def visit_stop_label(visit_id: int, body: bytes = Depends(raw_body), auth: Authe
         raise ApiError(400, {"error": "bad_request", "detail": str(error)})
 
 
+@router.post("/api/visits/{visit_id}/cancel-in-route")
+def visit_cancel_in_route(visit_id: int, body: bytes = Depends(raw_body), auth: Authed = Depends(authed)) -> dict:
+    """Клиент отменил в пути (Ф11.3): тело с driven_km/driven_minutes (по GPS) — опционально."""
+    payload = parse_json(body, {"error": "bad_request"}, with_detail=True) if body else {}
+    try:
+        return MobileVisitService(auth.db).cancel_in_route(visit_id, payload)
+    except (KeyError, ValueError, TypeError) as error:
+        raise ApiError(400, {"error": "bad_request", "detail": str(error)})
+
+
 @router.post("/api/visits/{visit_id}/{action}")
 def visit_action(visit_id: int, action: str, auth: Authed = Depends(authed)) -> dict:
     if action not in _ACTIONS:
