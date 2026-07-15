@@ -17,6 +17,7 @@ from app.repositories import (
     VisitRepository,
     WorkDayRepository,
 )
+from app.services.cancel_stats_service import cancel_lead_stats
 from app.services.clinic_report_service import ClinicBreakdown, build_active_clinic_breakdown, build_period_clinic_breakdown
 from app.services.profitability_service import fuel_cost_per_km as settings_fuel_cost_per_km
 from app.services.workload_service import estimate_active_day_workload
@@ -158,6 +159,14 @@ class MobileReportService:
             "end_date": bounds.end_date,
             "summary": _summary_payload(aggregate),
             "clinic_breakdown": _clinic_breakdown_payload(clinic_breakdown),
+            # Отмены в пути и пустые отклики (Фаза 11.4): правда о том, что съедает доход.
+            "cancellations": cancel_lead_stats(
+                self.connection,
+                bounds.start_date,
+                bounds.end_date,
+                total_income=float(aggregate.get("total_income") or 0),
+                threshold=self.settings.get_float("cancel_loss_advice_threshold", 0.10),
+            ),
         }
         return _apply_clinic_filter(payload, clinic_breakdown, clinic)
 
