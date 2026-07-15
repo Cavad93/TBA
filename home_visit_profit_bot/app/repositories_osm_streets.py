@@ -40,30 +40,38 @@ class OsmStreetRepository:
         self,
         query: str,
         *,
+        lat: float | None = None,
+        lon: float | None = None,
         city: str | None = None,
         limit: int = 3,
         threshold: float = 0.3,
     ) -> list[StreetCandidate]:
-        """Похожие улицы по триграммам (pg_trgm).
+        """Похожие улицы по триграммам (pg_trgm), ближайшие — первыми.
 
-        Запрос нормализуем той же функцией, что и содержимое таблицы. Порог отсекает
-        случайные совпадения: 0.3 у pg_trgm — «похоже, но не точно», как раз уровень
-        опечатки. Если pg_trgm в базе нет (расширение не поставилось — см.
-        _ensure_osm_streets_index), молча падаем на ILIKE: медленнее и грубее, но
-        человек всё равно получит кандидатов, а не пустоту.
+        Запрос нормализуем той же функцией, что и содержимое таблицы. Порог 0.3 —
+        уровень опечатки. Город метка в OSM ненадёжна (улицу привязывает к ближайшему
+        мелкому нас. пункту — «Озеро Долгое» вместо «Санкт-Петербург»), поэтому по
+        городу НЕ фильтруем: сортируем совпадения по близости к точке пользователя
+        (lat/lon), если она есть. Координаты улиц верные — этого хватает, чтобы из
+        одноимённых улиц по стране взять ту, что рядом с человеком. Без GPS — по
+        похожести имени. Нет pg_trgm — падаем на ILIKE.
+
+        city оставлен как опциональный жёсткий фильтр для тестов на чистых данных;
+        оркестратор его не использует.
         """
         query_norm = normalize_street(query)
         if not query_norm:
             return []
         try:
-            return self._search_trgm(query_norm, city, limit, threshold)
+            return self._search_trgm(query_norm, lat, lon, city, limit, threshold)
         except Exception:  # noqa: BLE001 — pg_trgm может быть недоступен
             # Откатываем только неудавшийся запрос, не всю транзакцию хендлера.
             self.connection.rollback()
             return self._search_ilike(query_norm, city, limit)
 
     def _search_trgm(
-        self, query_norm: str, city: str | None, limit: int, threshold: float
+        self, query_norm: str, lat: float | None, lon: float | None,
+        city: str | None, limit: int, threshold: float
     ) -> list[StreetCandidate]:
         # `street_norm OPERATOR(public.%) ?` — оператор похожести pg_trgm: использует
         # GIN-индекс и отбирает строки с похожестью выше порога similarity_threshold.
@@ -75,9 +83,20 @@ class OsmStreetRepository:
         # ?::real обязателен: set_limit принимает real (float4), а psycopg шлёт
         # Python-float как double precision (float8) — без каста «функция не найдена».
         self.connection.execute("SELECT public.set_limit(?::real)", (threshold,))
-        # Порядок ? в запросе: similarity() в SELECT, оператор % в WHERE,
-        # (опционально) city, LIMIT.
-        params: list[object] = [query_norm, query_norm]
+        has_gps = lat is not None and lon is not None
+        # Порядок ? строго по тексту запроса: similarity() в SELECT, (dist в SELECT),
+        # оператор % в WHERE, (city), LIMIT.
+        params: list[object] = [query_norm]
+        dist_select = ""
+        order = "sim DESC"
+        if has_gps:
+            # Планарная квадратичная дистанция — для сортировки ближайших этого хватает,
+            # тригонометрия ради ранжирования соседних точек не нужна. Сначала похожесть
+            # имени (все прошли порог), потом близость: одноимённые — ближайшую первой.
+            dist_select = ", ((lat - ?) * (lat - ?) + (lon - ?) * (lon - ?)) AS dist"
+            params.extend([lat, lat, lon, lon])
+            order = "sim DESC, dist ASC"
+        params.append(query_norm)  # оператор % в WHERE
         city_clause = ""
         if city:
             city_clause = "AND city = ?"
@@ -85,10 +104,10 @@ class OsmStreetRepository:
         params.append(limit)
         rows = self.connection.execute(
             f"""
-            SELECT city, street, lat, lon, public.similarity(street_norm, ?) AS sim
+            SELECT city, street, lat, lon, public.similarity(street_norm, ?) AS sim {dist_select}
             FROM osm_streets
             WHERE street_norm OPERATOR(public.%) ? {city_clause}
-            ORDER BY sim DESC
+            ORDER BY {order}
             LIMIT ?
             """,
             params,

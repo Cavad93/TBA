@@ -692,8 +692,16 @@ class HomeVisitRepository private constructor(
         serverUrl: String,
         apiKey: String,
         query: String,
+        lat: Double? = null,
+        lon: Double? = null,
     ): AddressSuggestResult = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("query", query.trim())
+        // Текущая точка GPS, если есть: по ней сервер понимает город и разрешает
+        // неоднозначные адреса по близости, не спрашивая город руками.
+        if (lat != null && lon != null) {
+            payload.put("lat", lat)
+            payload.put("lon", lon)
+        }
         val response = postJson(normalizeApiUrl(serverUrl, "/api/address/suggest"), apiKey, payload)
             ?: return@withContext AddressSuggestResult()
         val resolvedJson = response.optJSONObject("resolved")

@@ -84,7 +84,7 @@ def suggest(query: str, connection, settings: SettingsRepository, user_id: int,
                                       source="nominatim", city=city, district=geo.district)}
 
     # 3. Офлайн pg_trgm + слабый Nominatim → кандидаты.
-    candidates = _try_osm_streets(text, connection, city)
+    candidates = _try_osm_streets(text, connection, lat, lon)
     if nominatim_hit and nominatim_hit.lat is not None:
         candidates.append(_candidate(
             label=nominatim_hit.normalized_address or text,
@@ -192,8 +192,10 @@ def _is_confident(text: str, geo) -> bool:
     return has_house and importance >= CONFIDENT_IMPORTANCE
 
 
-def _try_osm_streets(text: str, connection, city: str) -> list[dict]:
-    rows = OsmStreetRepository(connection).search(text, city=city, limit=MAX_CANDIDATES)
+def _try_osm_streets(text: str, connection, lat: float | None, lon: float | None) -> list[dict]:
+    # По городу не фильтруем — метка города в osm_streets ненадёжна; ближайшую к
+    # человеку улицу выбираем по координатам (они верные). Без GPS — по похожести имени.
+    rows = OsmStreetRepository(connection).search(text, lat=lat, lon=lon, limit=MAX_CANDIDATES)
     return [
         _candidate(label=f"{row.street}, {row.city}", lat=row.lat, lon=row.lon,
                    source="osm", city=row.city)

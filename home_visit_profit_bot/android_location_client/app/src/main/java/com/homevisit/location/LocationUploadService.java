@@ -232,6 +232,14 @@ public class LocationUploadService extends Service implements LocationListener, 
 
     private void sendLocation(Location location) {
         SharedPreferences prefs = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE);
+        // Кешируем последнюю точку: оценка заказа шлёт её в подсказки адреса, чтобы сервер
+        // понимал, в каком городе человек, и не спрашивал город руками (Фаза 2). Храним
+        // строкой — у SharedPreferences нет double, а putFloat терял бы точность координат.
+        prefs.edit()
+            .putString(MainActivity.KEY_LAST_GPS_LAT, String.valueOf(location.getLatitude()))
+            .putString(MainActivity.KEY_LAST_GPS_LON, String.valueOf(location.getLongitude()))
+            .putLong(MainActivity.KEY_LAST_GPS_AT, System.currentTimeMillis())
+            .apply();
         String serverUrl = normalizeLocationUrl(prefs.getString(MainActivity.KEY_SERVER_URL, ""));
         String apiKey = prefs.getString(MainActivity.KEY_API_KEY, "");
         if (serverUrl.isEmpty() || apiKey.isEmpty()) {

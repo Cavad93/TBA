@@ -404,6 +404,11 @@ class MainActivity : ComponentActivity() {
         const val KEY_SESSION_TOKEN = "session_token"
         const val KEY_USER_EMAIL = "user_email"
         const val KEY_USER_NICKNAME = "user_nickname"
+        // Последняя точка GPS — её шлём в подсказки адреса, чтобы сервер понимал город
+        // по местоположению (Фаза 2). Пишет LocationUploadService на каждом фиксе.
+        const val KEY_LAST_GPS_LAT = "last_gps_lat"
+        const val KEY_LAST_GPS_LON = "last_gps_lon"
+        const val KEY_LAST_GPS_AT = "last_gps_at"
         const val DEFAULT_SERVER_URL = "https://api.vizitorkrut.ru"
         private const val PERMISSION_REQUEST = 1001
     }

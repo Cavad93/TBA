@@ -1,6 +1,8 @@
 package com.homevisit.location.ui
 
 import android.app.Application
+import android.content.Context
+import com.homevisit.location.MainActivity
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.homevisit.location.OrderSource
@@ -307,7 +309,10 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             // тут только помешают: считаем сразу. Иначе спрашиваем слои геокодинга.
             val hasManualRoute = routeKm != null && routeMinutes != null
             if (!hasManualRoute) {
-                val suggestion = repository.suggestAddress(serverUrl, apiKey, address)
+                val gps = lastKnownGps()
+                val suggestion = repository.suggestAddress(
+                    serverUrl, apiKey, address, lat = gps?.first, lon = gps?.second,
+                )
                 if (suggestion.resolved == null && suggestion.candidates.size >= 2) {
                     // Не уверены — пусть выберет человек. Расчёт откладываем.
                     pendingCandidate = PendingCandidate(serverUrl, apiKey, address, income, clinic)
@@ -328,6 +333,21 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             }
             runCandidate(serverUrl, apiKey, address, income, clinic, routeKm, routeMinutes, null, null)
         }
+    }
+
+    /**
+     * Последняя известная точка GPS (пишет LocationUploadService на каждом фиксе).
+     * Шлём её в подсказки адреса, чтобы сервер понимал город по местоположению и не
+     * заставлял указывать его руками. Старше часа не берём — человек мог уехать.
+     */
+    private fun lastKnownGps(): Pair<Double, Double>? {
+        val prefs = getApplication<Application>()
+            .getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE)
+        val at = prefs.getLong(MainActivity.KEY_LAST_GPS_AT, 0L)
+        if (at == 0L || System.currentTimeMillis() - at > 60 * 60 * 1000L) return null
+        val lat = prefs.getString(MainActivity.KEY_LAST_GPS_LAT, null)?.toDoubleOrNull() ?: return null
+        val lon = prefs.getString(MainActivity.KEY_LAST_GPS_LON, null)?.toDoubleOrNull() ?: return null
+        return lat to lon
     }
 
     /**

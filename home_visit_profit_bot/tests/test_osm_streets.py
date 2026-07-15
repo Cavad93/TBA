@@ -155,3 +155,20 @@ def test_empty_csv_raises(config, tmp_path):
             assert False, "ожидали OsmStreetsImportError на пустом CSV"
         except OsmStreetsImportError:
             pass
+
+
+def test_search_ranks_by_gps_nearest(config):
+    """Одноимённые улицы в разных городах: с GPS первой идёт ближайшая (город не фильтр)."""
+    streets = [
+        {"city": "Москва", "street": "улица Ленина", "lat": 55.75, "lon": 37.61},
+        {"city": "Санкт-Петербург", "street": "улица Ленина", "lat": 59.96, "lon": 30.30},
+    ]
+    with connect(config) as conn:
+        OsmStreetRepository(conn).replace_all(streets)
+    with connect(config) as conn:
+        # Пользователь в Петербурге — ждём петербургскую первой, без фильтра по городу.
+        res = OsmStreetRepository(conn).search("Ленина", lat=59.95, lon=30.31, limit=2)
+    assert res and res[0].city == "Санкт-Петербург"
+    with connect(config) as conn:
+        res_msk = OsmStreetRepository(conn).search("Ленина", lat=55.76, lon=37.60, limit=2)
+    assert res_msk and res_msk[0].city == "Москва"
