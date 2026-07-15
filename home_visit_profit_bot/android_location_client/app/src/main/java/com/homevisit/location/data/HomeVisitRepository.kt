@@ -42,6 +42,8 @@ import com.homevisit.location.domain.HomeRecommendation
 import com.homevisit.location.domain.HomeOsago
 import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
+import com.homevisit.location.domain.ArrivalWindow
+import com.homevisit.location.domain.FixTimePrice
 import com.homevisit.location.domain.LateWarning
 import com.homevisit.location.domain.NavTarget
 import com.homevisit.location.domain.ParkingHint
@@ -1584,6 +1586,35 @@ class HomeVisitRepository private constructor(
                 )
             }
         }
+        // Окно прибытия (Ф4.2) и цена фикс-времени (Ф4.3/4.4) — текст уже готов на сервере.
+        val windowsJson = route.optJSONArray("arrival_windows") ?: JSONArray()
+        val arrivalWindows = buildList {
+            for (index in 0 until windowsJson.length()) {
+                val w = windowsJson.optJSONObject(index) ?: continue
+                add(
+                    ArrivalWindow(
+                        visitId = w.optInt("visit_id"),
+                        address = w.optString("address"),
+                        text = w.optString("text"),
+                    ),
+                )
+            }
+        }
+        val fixJson = route.optJSONArray("fix_time_prices") ?: JSONArray()
+        val fixTimePrices = buildList {
+            for (index in 0 until fixJson.length()) {
+                val f = fixJson.optJSONObject(index) ?: continue
+                add(
+                    FixTimePrice(
+                        anchorVisitId = f.optInt("anchor_visit_id"),
+                        idleMinutes = f.optInt("idle_minutes"),
+                        deltaHourly = f.optInt("delta_hourly"),
+                        suggestedSurcharge = f.optInt("suggested_surcharge"),
+                        text = f.optString("text"),
+                    ),
+                )
+            }
+        }
         // Ссылки «Поехали» и деньги по заказу приезжают вместе с маршрутом. Ответ
         // целиком лежит в кеше, поэтому кнопка работает и без сети — в подземном
         // паркинге она нужна ровно так же, как на открытой улице.
@@ -1626,6 +1657,8 @@ class HomeVisitRepository private constructor(
             totalMinutes = route.optDouble("total_minutes", 0.0),
             legs = legs,
             lateWarnings = lateWarnings,
+            arrivalWindows = arrivalWindows,
+            fixTimePrices = fixTimePrices,
             navTargets = navTargets,
             netByVisitId = netByVisitId,
             navigation = navigation,

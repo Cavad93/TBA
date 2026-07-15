@@ -152,6 +152,8 @@ import com.homevisit.location.domain.WorkloadTrendReport
 import com.homevisit.location.domain.HomeRecommendation
 import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
+import com.homevisit.location.domain.ArrivalWindow
+import com.homevisit.location.domain.FixTimePrice
 import com.homevisit.location.domain.LateWarning
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
@@ -296,6 +298,8 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
             onSave = workActions.onUpdateStart,
         )
         LateWarningsCard(uiState.serverRoute.snapshot?.lateWarnings.orEmpty())
+        FixTimePricesCard(uiState.serverRoute.snapshot?.fixTimePrices.orEmpty())
+        ArrivalWindowsCard(uiState.serverRoute.snapshot?.arrivalWindows.orEmpty())
         if (reordering) {
             ReorderCard(orders = orders, onReorder = workActions.onReorderRoute)
         } else {
@@ -709,6 +713,64 @@ internal fun LateWarningsCard(warnings: List<LateWarning>) {
                 style = MaterialTheme.typography.labelMedium,
                 color = VerdictColors.onEdgeContainer,
             )
+        }
+    }
+}
+
+/**
+ * Окно прибытия по цепочке дня (Фаза 4.2): честное «примерно 14:00–16:00», а не
+ * фейково-точный ETA. Клиенту такое можно назвать по телефону, не соврав.
+ */
+@Composable
+internal fun ArrivalWindowsCard(windows: List<ArrivalWindow>) {
+    if (windows.isEmpty()) return
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                "Когда вас ждать",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            windows.forEach { window ->
+                Text(
+                    "${window.address}: ${window.text}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Цена фикс-времени (Фаза 4.3/4.4): во что обходится «клиенту удобно в 15:00» —
+ * простой + крюк в ₽/час дня и подсказка наценки. Текст готов на сервере.
+ */
+@Composable
+internal fun FixTimePricesCard(prices: List<FixTimePrice>) {
+    val meaningful = prices.filter { it.deltaHourly > 0 || it.suggestedSurcharge > 0 }
+    if (meaningful.isEmpty()) return
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = VerdictColors.edgeContainer),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                "Цена фиксированного времени",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = VerdictColors.onEdgeContainer,
+            )
+            meaningful.forEach { price ->
+                Text(
+                    price.text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = VerdictColors.onEdgeContainer,
+                )
+            }
         }
     }
 }

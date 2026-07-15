@@ -387,6 +387,10 @@ data class ServerRouteSnapshot(
     val order: List<Int> = emptyList(),
     /** Работы на точке, к которым по текущему порядку Ленты уже не успеваем. */
     val lateWarnings: List<LateWarning> = emptyList(),
+    /** Окно прибытия по каждому запланированному визиту (Фаза 4.2): «примерно 14:00–16:00». */
+    val arrivalWindows: List<ArrivalWindow> = emptyList(),
+    /** Цена фикс-времени у заказов-якорей (Фаза 4.3/4.4): простой + крюк в ₽/час и наценка. */
+    val fixTimePrices: List<FixTimePrice> = emptyList(),
     /** Готовая ссылка «Поехали» по каждому заказу — приходит с сервера вместе с маршрутом,
      *  поэтому кнопка работает и без сети. Ключ — серверный id заказа. */
     val navTargets: Map<Int, NavTarget> = emptyMap(),
@@ -444,6 +448,28 @@ data class LateWarning(
     val plannedStartAt: String,
     val etaAt: String,
     val lateMinutes: Int,
+)
+
+/**
+ * Окно прибытия по цепочке дня (Фаза 4.2): честное «примерно 14:00–16:00», а не
+ * фейково-точный ETA. Неопределённость копится к концу дня — текст готов на сервере.
+ */
+data class ArrivalWindow(
+    val visitId: Int,
+    val address: String,
+    val text: String,
+)
+
+/**
+ * Цена фикс-времени у заказа-якоря (Фаза 4.3/4.4): во что обходится «клиенту удобно
+ * в 15:00» — простой + крюк в ₽/час дня и подсказка наценки. Текст готов на сервере.
+ */
+data class FixTimePrice(
+    val anchorVisitId: Int,
+    val idleMinutes: Int,
+    val deltaHourly: Int,
+    val suggestedSurcharge: Int,
+    val text: String,
 )
 
 data class ServerRouteLeg(

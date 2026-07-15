@@ -1080,15 +1080,15 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
         routeState.value = routeState.value.copy(isLoading = true, message = "Обновляю маршрут...")
         val route = repository.fetchActiveRoute(serverUrl, apiKey)
-        // Прогреваем кеш матрицы дня для офлайн-вердикта (Ф3.4/3.5), пока сеть есть.
-        // Best-effort: набор точек дня меняется на принял/выполнил/удалил — этот вызов
-        // едет на каждом обновлении Ленты и держит кеш свежим.
-        repository.warmDayMatrix(serverUrl, apiKey)
         routeState.value = if (route == null) {
             RouteUiState(message = "Не удалось получить маршрут с сервера")
         } else {
             RouteUiState(snapshot = route, message = "Маршрут обновлён")
         }
+        // Прогреваем кеш матрицы дня для офлайн-вердикта (Ф3.4/3.5) — ПОСЛЕ показа Ленты,
+        // чтобы сетевой запрос не задерживал UI. Best-effort: набор точек дня меняется на
+        // принял/выполнил/удалил, этот вызов едет на каждом обновлении и держит кеш свежим.
+        repository.warmDayMatrix(serverUrl, apiKey)
     }
 
     private suspend fun ensureActiveDay(): String {
