@@ -4,6 +4,7 @@ package com.homevisit.location
 
 import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
@@ -134,6 +135,7 @@ import com.homevisit.location.domain.WorkloadSnapshot
 import com.homevisit.location.domain.WorkloadTrendPoint
 import com.homevisit.location.domain.WorkloadTrendReport
 import com.homevisit.location.domain.HomeRecommendation
+import com.homevisit.location.domain.HomeOsago
 import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.HomeStartPrompt
@@ -268,6 +270,8 @@ internal fun HomeDashboard(
 
             snapshot.recovery?.let { RecoveryHeroCard(it, snapshot.debtVsPrev, snapshot.greenStreak) }
 
+            snapshot.osago?.let { OsagoCard(it) }
+
             MoneySection(snapshot, onOpenReports)
 
             if (snapshot.recommendations.isNotEmpty()) {
@@ -371,6 +375,53 @@ internal fun RecoveryHeroCard(recovery: HomeOverwork, debtVsPrev: Double?, strea
             )
             if (streak >= 3) {
                 Text("🟢 $streak ${dayWord(streak)} подряд в зелёной зоне", style = MaterialTheme.typography.bodyMedium, color = style.onContainer, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
+/**
+ * Карточка отсчёта ОСАГО (Фаза 5). Тон заботы, без паники: за 14 дней — напоминание,
+ * после истечения — прямее (езда без полиса это штрафы, уже про деньги). Кнопка
+ * «Продлить» появляется, только если сервер прислал партнёрскую ссылку.
+ */
+@Composable
+internal fun OsagoCard(osago: HomeOsago) {
+    val context = LocalContext.current
+    val accent = if (osago.expired) VerdictColors.skip else VerdictColors.edge
+    val title = when {
+        osago.expired -> "Полис ОСАГО истёк"
+        osago.daysLeft == 0 -> "ОСАГО истекает сегодня"
+        else -> "ОСАГО истекает через ${osago.daysLeft} ${dayWord(osago.daysLeft)}"
+    }
+    val subtitle = if (osago.expired) {
+        "Без действующего полиса штрафуют. Стоит продлить как можно скорее."
+    } else {
+        "Полис действует до ${osago.expiresAt}. Напомним заранее — можно продлить спокойно."
+    }
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = 0.10f)),
+        border = BorderStroke(1.5.dp, accent),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("ОСАГО", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            osago.partnerUrl?.let { url ->
+                Button(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = accent),
+                ) {
+                    Text("Продлить со скидкой", color = Color.White)
+                }
             }
         }
     }

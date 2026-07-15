@@ -37,6 +37,7 @@ import com.homevisit.location.domain.GpsVisitHint
 import com.homevisit.location.domain.DrivingRating
 import com.homevisit.location.domain.HomeMoney
 import com.homevisit.location.domain.HomeRecommendation
+import com.homevisit.location.domain.HomeOsago
 import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.LateWarning
@@ -1008,7 +1009,7 @@ class HomeVisitRepository private constructor(
                         type = type,
                         textValue = when (type) {
                             SettingType.Number -> formatSettingNumber(fieldJson.optDouble("value", 0.0))
-                            SettingType.Text, SettingType.Zones -> fieldJson.optString("value")
+                            SettingType.Text, SettingType.Zones, SettingType.Date -> fieldJson.optString("value")
                             else -> ""
                         },
                         boolValue = type == SettingType.Bool && fieldJson.optBoolean("value", false),
@@ -1676,7 +1677,20 @@ class HomeVisitRepository private constructor(
             debtVsPrev = if (trends.isNull("debt_vs_prev")) null else trends.optDouble("debt_vs_prev"),
             greenStreak = response.optInt("green_streak", 0),
             recommendations = recommendations,
+            osago = parseHomeOsago(response.optJSONObject("osago")),
             fromCache = response.optBoolean("_from_cache", false),
+        )
+    }
+
+    private fun parseHomeOsago(osago: JSONObject?): HomeOsago? {
+        if (osago == null) {
+            return null
+        }
+        return HomeOsago(
+            expiresAt = osago.optString("expires_at"),
+            daysLeft = osago.optInt("days_left", 0),
+            expired = osago.optBoolean("expired", false),
+            partnerUrl = osago.optString("partner_url").takeIf { it.isNotBlank() },
         )
     }
 

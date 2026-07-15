@@ -78,6 +78,7 @@ data class HomeSnapshot(
     val debtVsPrev: Double?,
     val greenStreak: Int,
     val recommendations: List<HomeRecommendation>,
+    val osago: HomeOsago? = null,
     val fromCache: Boolean = false,
 )
 
@@ -123,6 +124,15 @@ data class HomeRecommendation(
     val tone: String,
     val title: String,
     val text: String,
+)
+
+/** ОСАГО: отсчёт до конца полиса (Фаза 5). null — полис не заведён или срок ещё далеко. */
+data class HomeOsago(
+    val expiresAt: String,
+    val daysLeft: Int,
+    val expired: Boolean,
+    /** Партнёрская ссылка на продление (Пампаду). null — кнопки нет, только напоминание. */
+    val partnerUrl: String?,
 )
 
 // --- Экран «Смена» (GET /api/shift) ---
@@ -708,6 +718,8 @@ enum class SettingType(val wire: String) {
     Zones("zones"),
     /** Выбор из вариантов: тип транспорта, режим расчёта километра, кто платит. */
     Choice("choice"),
+    /** Дата в формате ГГГГ-ММ-ДД (срок ОСАГО). Хранится и правится как текст. */
+    Date("date"),
     Unknown("");
 
     companion object {
