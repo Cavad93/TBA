@@ -105,19 +105,56 @@ def best_order(durations, visits_count, anchors):
     return two_opt(durations, nn, finish)
 
 
+# --- зеркало RouteOptimizer.summarize/candidateExtra ---
+def zero_tiny(v, eps):
+    return 0.0 if abs(v) < eps else v
+
+
+def summarize_totals(distances, durations, visits_count, anchors):
+    order = best_order(durations, visits_count, anchors)
+    finish = visits_count + 1
+    path = [0] + list(order) + [finish]
+    tk = sum(distances[a][b] for a, b in zip(path, path[1:]))
+    tm = sum(durations[a][b] for a, b in zip(path, path[1:]))
+    return tk, tm
+
+
+def drop_index(matrix, index):
+    return [[v for j, v in enumerate(row) if j != index]
+            for i, row in enumerate(matrix) if i != index]
+
+
+def candidate_extra(distances, durations, existing_count, anchors):
+    candidate_index = existing_count + 1
+    after_km, after_min = summarize_totals(distances, durations, existing_count + 1, anchors)
+    bd, bdur = drop_index(distances, candidate_index), drop_index(durations, candidate_index)
+    anchors_before = [a for a in anchors if a != candidate_index]
+    before_km, before_min = summarize_totals(bd, bdur, existing_count, anchors_before)
+    return zero_tiny(after_km - before_km, 0.05), zero_tiny(after_min - before_min, 0.5)
+
+
 def main():
     root = os.path.join(os.path.dirname(__file__), "..")
-    path = os.path.abspath(os.path.join(root, "tests", "golden", "route_vectors.json"))
-    vectors = json.load(open(path, encoding="utf-8"))
     ok = True
-    for vec in vectors:
+    path = os.path.abspath(os.path.join(root, "tests", "golden", "route_vectors.json"))
+    for vec in json.load(open(path, encoding="utf-8")):
         inp = vec["inputs"]
         got = best_order(inp["durations_minutes"], inp["visits_count"], inp["anchors"])
         exp = vec["expected"]["order"]
-        mark = "OK" if got == exp else "MISMATCH"
         if got != exp:
             ok = False
-        print(f"{mark:9} {vec['name']}: kotlin-port={got} expected={exp}")
+        print(f"{'OK' if got == exp else 'MISMATCH':9} order/{vec['name']}: {got} vs {exp}")
+
+    cpath = os.path.abspath(os.path.join(root, "tests", "golden", "route_candidate_vectors.json"))
+    for vec in json.load(open(cpath, encoding="utf-8")):
+        inp = vec["inputs"]
+        ek, em = candidate_extra(inp["distances_km"], inp["durations_minutes"], inp["existing_count"], inp["anchors"])
+        exp = vec["expected"]
+        match = abs(ek - exp["extra_km"]) < 1e-6 and abs(em - exp["extra_drive_minutes"]) < 1e-6
+        if not match:
+            ok = False
+        print(f"{'OK' if match else 'MISMATCH':9} extra/{vec['name']}: km={ek:.4f}/{exp['extra_km']:.4f} min={em:.4f}/{exp['extra_drive_minutes']:.4f}")
+
     print("ALL MATCH" if ok else "PORT DIVERGES")
     return 0 if ok else 1
 

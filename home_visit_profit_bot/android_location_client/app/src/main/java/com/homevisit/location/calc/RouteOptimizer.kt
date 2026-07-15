@@ -35,6 +35,56 @@ object RouteOptimizer {
         return twoOpt(durations, nn, finishIndex)
     }
 
+    data class CandidateExtra(
+        val extraKm: Double,       // лишние км ради заказа (после отсечки дребезга)
+        val extraDriveMinutes: Double,
+        val beforeKm: Double,
+        val afterKm: Double,
+        val beforeMinutes: Double,
+        val afterMinutes: Double,
+    )
+
+    /**
+     * Лишние км/минуты ради кандидата — как серверный calculate_candidate_impact: разница
+     * оптимального маршрута дня С заказом и БЕЗ. Точки — [старт(0), заказы(1..K),
+     * кандидат(K+1), финиш(K+2)]; кандидат всегда предпоследний (сервер добавляет его
+     * последним визитом перед финишем). before считается на подматрице без кандидата.
+     * anchors — индексы onsite-якорей в ПОЛНОЙ индексации (кандидат якорем не бывает).
+     *
+     * Отсечки дребезга (0.05 км, 0.5 мин) — те же, что candidate_pure/_zero_tiny, иначе
+     * подъезд к соседнему дому считался бы дорогой. extra_km/min идут в ProfitabilityCalculator.
+     */
+    fun candidateExtra(
+        distances: List<List<Double>>,
+        durations: List<List<Double>>,
+        existingCount: Int,
+        anchors: List<Int> = emptyList(),
+    ): CandidateExtra {
+        val candidateIndex = existingCount + 1
+        val after = summarize(distances, durations, existingCount + 1, anchors)
+        val beforeDist = dropIndex(distances, candidateIndex)
+        val beforeDur = dropIndex(durations, candidateIndex)
+        val anchorsBefore = anchors.filter { it != candidateIndex } // индексы 1..K не сдвигаются
+        val before = summarize(beforeDist, beforeDur, existingCount, anchorsBefore)
+        return CandidateExtra(
+            extraKm = zeroTiny(after.totalKm - before.totalKm, 0.05),
+            extraDriveMinutes = zeroTiny(after.totalMinutes - before.totalMinutes, 0.5),
+            beforeKm = before.totalKm,
+            afterKm = after.totalKm,
+            beforeMinutes = before.totalMinutes,
+            afterMinutes = after.totalMinutes,
+        )
+    }
+
+    /** Отсечка дребезга — как candidate_pure._zero_tiny. */
+    private fun zeroTiny(value: Double, epsilon: Double): Double =
+        if (kotlin.math.abs(value) < epsilon) 0.0 else value
+
+    /** Матрица без строки и столбца index (сброс кандидата для расчёта «до»). */
+    private fun dropIndex(matrix: List<List<Double>>, index: Int): List<List<Double>> =
+        matrix.filterIndexed { i, _ -> i != index }
+            .map { row -> row.filterIndexed { j, _ -> j != index } }
+
     /** Полный путь: суммарные км/минуты по 0 → order → finish (как _summary_from_order). */
     fun summarize(
         distances: List<List<Double>>,

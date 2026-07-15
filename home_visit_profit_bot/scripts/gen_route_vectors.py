@@ -118,13 +118,81 @@ def build() -> list[dict]:
     return vectors
 
 
-def main() -> int:
-    vectors = build()
+# Кейсы дельты кандидата: точки [старт, заказы…, кандидат(предпоследний), финиш].
+# Ожидаемые extra_km/extra_minutes считаются как на сервере (маршрут дня С заказом минус
+# БЕЗ), с той же отсечкой дребезга — их проверяет RouteOptimizer.candidateExtra.
+CANDIDATE_CASES: list[dict] = [
+    {
+        "name": "candidate_two_existing",
+        "coords": [(0, 0), (3, 1), (5, 4), (2, 5), (7, 6)],  # start, 2 existing, candidate, finish
+        "anchors": [],
+    },
+    {
+        "name": "candidate_no_existing",
+        "coords": [(0, 0), (4, 3), (6, 6)],  # start, candidate, finish (existingCount=0)
+        "anchors": [],
+    },
+    {
+        "name": "candidate_with_anchor",
+        "coords": [(0, 0), (2, 0), (5, 2), (3, 5), (8, 4)],  # start, existing1(якорь), existing2, candidate, finish
+        "anchors": [1],
+    },
+]
+
+_KM_EPS, _MIN_EPS = 0.05, 0.5
+
+
+def _zero_tiny(v: float, eps: float) -> float:
+    return 0.0 if abs(v) < eps else v
+
+
+def _drop_index(matrix: list[list[float]], index: int) -> list[list[float]]:
+    return [[v for j, v in enumerate(row) if j != index]
+            for i, row in enumerate(matrix) if i != index]
+
+
+def build_candidates() -> list[dict]:
+    vectors = []
+    for case in CANDIDATE_CASES:
+        distances, durations = _matrix_from_coords([tuple(map(float, c)) for c in case["coords"]])
+        existing = len(case["coords"]) - 3  # без старта, кандидата, финиша
+        candidate_index = existing + 1
+        anchors = case["anchors"]
+        # after: полный маршрут дня с кандидатом
+        after_matrix = DistanceMatrix(distances_km=distances, durations_minutes=durations)
+        after_order = _best_order(after_matrix, existing + 1, anchors or None)
+        after_km, after_min = _totals(distances, durations, list(after_order), existing + 2)
+        # before: подматрица без кандидата
+        bd, bdur = _drop_index(distances, candidate_index), _drop_index(durations, candidate_index)
+        before_matrix = DistanceMatrix(distances_km=bd, durations_minutes=bdur)
+        anchors_before = [a for a in anchors if a != candidate_index]
+        before_order = _best_order(before_matrix, existing, anchors_before or None) if existing else []
+        before_km, before_min = _totals(bd, bdur, list(before_order), existing + 1)
+        vectors.append({
+            "name": case["name"],
+            "inputs": {
+                "distances_km": distances,
+                "durations_minutes": durations,
+                "existing_count": existing,
+                "anchors": anchors,
+            },
+            "expected": {
+                "extra_km": round(_zero_tiny(after_km - before_km, _KM_EPS), 6),
+                "extra_drive_minutes": round(_zero_tiny(after_min - before_min, _MIN_EPS), 6),
+                "before_km": round(before_km, 6),
+                "after_km": round(after_km, 6),
+                "before_minutes": round(before_min, 6),
+                "after_minutes": round(after_min, 6),
+            },
+        })
+    return vectors
+
+
+def _write(vectors: list[dict], name: str) -> None:
     root = os.path.join(os.path.dirname(__file__), "..")
     targets = [
-        os.path.join(root, "tests", "golden", "route_vectors.json"),
-        os.path.join(root, "android_location_client", "app", "src", "test",
-                     "resources", "route_vectors.json"),
+        os.path.join(root, "tests", "golden", name),
+        os.path.join(root, "android_location_client", "app", "src", "test", "resources", name),
     ]
     for path in targets:
         path = os.path.abspath(path)
@@ -132,7 +200,12 @@ def main() -> int:
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(vectors, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
-        print(f"векторов маршрута: {len(vectors)} → {path}")
+        print(f"{name}: {len(vectors)} -> {path}")
+
+
+def main() -> int:
+    _write(build(), "route_vectors.json")
+    _write(build_candidates(), "route_candidate_vectors.json")
     return 0
 
 

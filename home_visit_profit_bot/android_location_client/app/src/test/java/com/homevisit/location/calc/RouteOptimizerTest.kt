@@ -29,6 +29,34 @@ class RouteOptimizerTest {
     private fun intList(j: JSONArray): List<Int> =
         (0 until j.length()).map { j.getInt(it) }
 
+    private fun loadCandidateVectors(): JSONArray {
+        val stream = javaClass.classLoader!!.getResourceAsStream("route_candidate_vectors.json")
+            ?: error("route_candidate_vectors.json не найден в test/resources")
+        return JSONArray(stream.bufferedReader().use { it.readText() })
+    }
+
+    @Test
+    fun matchesCandidateDeltaVectors() {
+        val vectors = loadCandidateVectors()
+        assertTrue("векторов мало", vectors.length() >= 3)
+        for (i in 0 until vectors.length()) {
+            val vec = vectors.getJSONObject(i)
+            val name = vec.getString("name")
+            val inputs = vec.getJSONObject("inputs")
+            val distances = matrix(inputs.getJSONArray("distances_km"))
+            val durations = matrix(inputs.getJSONArray("durations_minutes"))
+            val existingCount = inputs.getInt("existing_count")
+            val anchors = intList(inputs.getJSONArray("anchors"))
+            val exp = vec.getJSONObject("expected")
+
+            val extra = RouteOptimizer.candidateExtra(distances, durations, existingCount, anchors)
+            assertEquals("$name extra_km", exp.getDouble("extra_km"), extra.extraKm, 1e-6)
+            assertEquals("$name extra_drive_minutes", exp.getDouble("extra_drive_minutes"), extra.extraDriveMinutes, 1e-6)
+            assertEquals("$name before_km", exp.getDouble("before_km"), extra.beforeKm, 1e-6)
+            assertEquals("$name after_km", exp.getDouble("after_km"), extra.afterKm, 1e-6)
+        }
+    }
+
     @Test
     fun matchesGoldenVectors() {
         val vectors = loadVectors()
