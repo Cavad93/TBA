@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""PreToolUse-хук: не пропускать Edit/Write, ломающие синтаксис файла.
+"""PreToolUse-хук: не пропускать Edit/Write/Bash, ломающие или запускающие битый код.
 
-Строит содержимое файла, каким оно станет ПОСЛЕ правки, и проверяет:
+Edit/Write: строит содержимое файла, каким оно станет ПОСЛЕ правки, и проверяет:
   .py        — ast.parse (точная проверка интерпретатором);
   .json      — json.loads;
   .kt/.kts   — баланс скобок сканером, понимающим строки ("...", \"\"\"...\"\"\"),
                шаблоны ${...}, символьные литералы и комментарии (// и /* */,
                вложенные — как в Kotlin).
+
+Bash: если команда скармливает Python'у heredoc (`python - <<'PY' … PY`),
+тело heredoc проверяется ast.parse ДО запуска — оборванный или лишённый
+отступов скрипт не выполнится. Проверяются только heredoc с кавычками у
+маркера (<<'PY') — в них шелл ничего не подставляет, значит тело и есть
+финальный Python; и только когда stdin читает сам python (`python -`),
+а не скрипт с данными (`python script.py <<DATA`).
 
 Философия fail-open: хук блокирует только УВЕРЕННО битую правку. Любая
 внутренняя ошибка самого хука, неизвестное расширение, не найденный
@@ -19,9 +26,51 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import sys
 
 CODE_SUFFIXES = (".py", ".json", ".kt", ".kts")
+
+# `… python[3] -` в конце строки вызова: stdin — это программа, а не данные
+PYTHON_STDIN_RE = re.compile(r"python[\w.]*\s+-?\s*$")
+HEREDOC_RE = re.compile(r"<<(-?)\s*(['\"])(\w+)\2")
+
+
+def extract_python_heredocs(command: str) -> list[tuple[str, int]]:
+    """Найти тела heredoc, которые исполняет Python: [(тело, строка_начала)].
+
+    Маркер `<<'TAG'`, встретившийся ВНУТРИ тела другого heredoc, — это просто
+    текст (шелл его не видит), поэтому вложенные совпадения пропускаются:
+    двигаемся по команде слева направо и перескакиваем через уже съеденные тела.
+    """
+    found = []
+    consumed_until = 0  # позиция, до которой команда уже «съедена» телами heredoc
+    for match in HEREDOC_RE.finditer(command):
+        if match.start() < consumed_until:
+            continue  # маркер внутри тела предыдущего heredoc — не шелл-уровень
+        strip_tabs, tag = match.group(1) == "-", match.group(3)
+        line_start = command.rfind("\n", 0, match.start()) + 1
+        invocation = command[line_start:match.start()]
+        body_start = command.find("\n", match.end())
+        if body_start == -1:
+            continue
+        body_start += 1
+        terminator = re.search(
+            rf"^\t*{re.escape(tag)}\s*$", command[body_start:], re.MULTILINE
+        )
+        if terminator:
+            body = command[body_start: body_start + terminator.start()]
+            consumed_until = body_start + terminator.end()
+        else:
+            body = command[body_start:]
+            consumed_until = len(command)
+        if not PYTHON_STDIN_RE.search(invocation.strip()):
+            continue  # heredoc не для python (или это данные) — тело уже съедено
+        if strip_tabs:  # <<- : шелл срежет ведущие табы
+            body = "\n".join(line.lstrip("\t") for line in body.split("\n"))
+        heredoc_line = command.count("\n", 0, body_start) + 1
+        found.append((body, heredoc_line))
+    return found
 
 
 def build_new_content(tool_name: str, tool_input: dict) -> tuple[str | None, str | None]:
@@ -192,10 +241,37 @@ def deny(path: str, reason: str) -> None:
     }, ensure_ascii=False))
 
 
+def deny_bash(reason: str) -> None:
+    message = (
+        f"КОМАНДА ЗАБЛОКИРОВАНА: Python в heredoc не парсится — {reason}. "
+        f"Похоже на обрыв или потерянные отступы. Не чини heredoc: запиши скрипт "
+        f"в файл .py через Write (его проверит этот же хук) и запусти короткой "
+        f"командой `python3 путь/к/файлу.py` — так требует CLAUDE.md."
+    )
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": message,
+        },
+        "systemMessage": f"⛔ Хук-валидатор отклонил Bash: битый Python в heredoc ({reason})",
+    }, ensure_ascii=False))
+
+
 def main() -> None:
     payload = json.load(sys.stdin)
     tool_name = payload.get("tool_name") or ""
     tool_input = payload.get("tool_input") or {}
+
+    if tool_name == "Bash":
+        command = tool_input.get("command") or ""
+        for body, line in extract_python_heredocs(command):
+            problem = check_python(body)
+            if problem:
+                deny_bash(f"heredoc со строки {line} команды: {problem}")
+                return
+        return
+
     path, new_content = build_new_content(tool_name, tool_input)
     if new_content is None:
         return
