@@ -931,3 +931,25 @@ def seed_default_settings(db: Database, config: AppConfig) -> None:
     # конфига сервера (app/services/server_settings.py). Обновлять их здесь бесполезно —
     # на settings включён FORCE ROW LEVEL SECURITY, и UPDATE видит только строки текущего
     # пользователя, а не всех.
+
+
+def _main() -> int:
+    """Миграция схемы одной командой: `python -m app.db`.
+
+    Нужна деплою на uvicorn: ASGI-вход (app.asgi:create_app) init_db НЕ зовёт — только
+    открывает пул. Старый стек мигрировал схему сам (app.main → init_db на старте), а
+    при переезде на uvicorn миграцию надо запускать явно перед переключением. init_db
+    идемпотентна (CREATE TABLE IF NOT EXISTS + IF NOT EXISTS-индексы), гонять её
+    безопасно на каждом деплое; новые таблицы Фазы 2 (osm_streets, dadata_usage)
+    доедут именно так.
+    """
+    from app.config import load_config
+
+    logging.basicConfig(level=logging.INFO)
+    init_db(load_config())
+    logger.info("Схема БД в актуальном состоянии (init_db выполнена).")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
