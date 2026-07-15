@@ -138,6 +138,7 @@ import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.HomeStartPrompt
 import com.homevisit.location.domain.ProfileDriving
 import com.homevisit.location.domain.ProfileWellbeing
+import com.homevisit.location.domain.ReportCancellations
 import com.homevisit.location.domain.ReportPeriod
 import com.homevisit.location.domain.ReportSnapshot
 import com.homevisit.location.domain.ReportSummary
@@ -213,6 +214,7 @@ internal fun ReportsScreen(reportState: ReportUiState, workActions: WorkActions)
         if (snapshot != null) {
             if (snapshot.fromCache) OfflineBadge()
             ReportSummaryCard(snapshot)
+            snapshot.cancellations?.let { CancellationsCard(it) }
             ClinicBreakdownCard(snapshot.clinics)
             ExpenseBreakdownCard(snapshot.summary)
         }
@@ -273,6 +275,30 @@ internal fun ReportSummaryCard(snapshot: ReportSnapshot) {
             ReportLine(
                 "Нагрузка",
                 "${oneDecimal(snapshot.summary.workloadIndex)}/100, долг ${oneDecimal(snapshot.summary.overworkIndex)}",
+            )
+        }
+    }
+}
+
+/**
+ * Потери за период (Фаза 11.4): отмены в пути и пустые отклики — правда о том, что
+ * съедает доход, которую платформы не показывают. Совет о предоплате — при доле выше порога.
+ */
+@Composable
+internal fun CancellationsCard(c: ReportCancellations) {
+    InputCard("Потери: отмены и пустые отклики") {
+        if (c.cancelCount > 0 || c.cancelMoney > 0) {
+            ReportLine("Отмены в пути", "${money(c.cancelMoney)} (${c.cancelCount})")
+        }
+        if (c.emptyLeadsMoney > 0) {
+            ReportLine("Пустые отклики", money(c.emptyLeadsMoney))
+        }
+        c.advice?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = VerdictColors.edge,
+                modifier = Modifier.padding(top = 6.dp),
             )
         }
     }

@@ -67,6 +67,7 @@ import com.homevisit.location.domain.ShiftSnapshot
 import com.homevisit.location.domain.ShiftToday
 import com.homevisit.location.domain.WellbeingGauge
 import com.homevisit.location.domain.ReportPeriod
+import com.homevisit.location.domain.ReportCancellations
 import com.homevisit.location.domain.ReportSnapshot
 import com.homevisit.location.domain.ReportSummary
 import com.homevisit.location.domain.ServerRouteLeg
@@ -1755,7 +1756,26 @@ class HomeVisitRepository private constructor(
                 overworkIndex = summary.optDouble("overwork_index", 0.0),
             ),
             clinics = clinics,
+            cancellations = parseCancellations(response.optJSONObject("cancellations")),
             fromCache = response.optBoolean("_from_cache", false),
+        )
+    }
+
+    private fun parseCancellations(c: JSONObject?): ReportCancellations? {
+        if (c == null) return null
+        val cancels = c.optJSONObject("cancellations") ?: JSONObject()
+        val leads = c.optJSONObject("empty_leads") ?: JSONObject()
+        val cancelCount = cancels.optInt("count", 0)
+        val cancelMoney = cancels.optDouble("money", 0.0)
+        val leadsMoney = leads.optDouble("money", 0.0)
+        val advice = c.optString("advice").ifBlank { null }
+        // Нечего показывать — блок не создаём.
+        if (cancelCount == 0 && cancelMoney == 0.0 && leadsMoney == 0.0) return null
+        return ReportCancellations(
+            cancelCount = cancelCount,
+            cancelMoney = cancelMoney,
+            emptyLeadsMoney = leadsMoney,
+            advice = advice,
         )
     }
 

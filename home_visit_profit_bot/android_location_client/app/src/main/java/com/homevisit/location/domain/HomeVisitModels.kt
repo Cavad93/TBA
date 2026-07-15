@@ -589,7 +589,19 @@ data class ReportSnapshot(
     val endDate: String,
     val summary: ReportSummary,
     val clinics: List<ClinicReportRow>,
+    val cancellations: ReportCancellations? = null,
     val fromCache: Boolean = false,
+)
+
+/**
+ * Отмены в пути и пустые отклики за период (Фаза 11.4): правда о том, что съедает
+ * доход. advice — деликатный совет о предоплате, если доля потерь выше порога.
+ */
+data class ReportCancellations(
+    val cancelCount: Int,
+    val cancelMoney: Double,
+    val emptyLeadsMoney: Double,
+    val advice: String?,
 )
 
 data class ReportSummary(
