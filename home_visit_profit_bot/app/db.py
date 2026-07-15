@@ -343,6 +343,18 @@ CREATE TABLE IF NOT EXISTS location_samples (
     FOREIGN KEY(work_day_id) REFERENCES work_days(id)
 );
 
+-- Личный пробег вне смены (Фаза 6, opt-in). Точки вне смены НЕ привязаны к work_day:
+-- они идут только в километраж/износ авто, не создают заказов и не участвуют в парковке.
+-- Ретеншн 14 дней, как весь GPS (чистит cleanup_service). user_id добавит RLS.
+CREATE TABLE IF NOT EXISTS personal_mileage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lat REAL NOT NULL,
+    lon REAL NOT NULL,
+    km REAL DEFAULT 0,
+    captured_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS work_day_location_state (
     work_day_id INTEGER PRIMARY KEY,
     gps_started_at TEXT,
@@ -579,6 +591,7 @@ ISOLATED_TABLES = [
     "driving_behavior_segments", "day_metrics", "user_baselines",
     "workload_feedback", "mobile_client_entities", "mobile_sync_events",
     "mobile_sync_conflicts", "parking_state", "formula_discrepancies",
+    "personal_mileage",
     # Кэш геокодера тоже персональный: ключ — сырой текст адреса, а город у каждого
     # свой. Общий кэш отдавал бы «Ленина 40» из чужого города — и заказ считался бы
     # по чужим координатам.

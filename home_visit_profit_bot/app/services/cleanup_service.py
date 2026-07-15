@@ -44,6 +44,7 @@ class CleanupReport:
     day_metrics: int = 0
     sync_events: int = 0
     sync_conflicts: int = 0
+    personal_mileage: int = 0
 
     @property
     def total(self) -> int:
@@ -54,6 +55,7 @@ class CleanupReport:
             + self.day_metrics
             + self.sync_events
             + self.sync_conflicts
+            + self.personal_mileage
         )
 
 
@@ -79,6 +81,9 @@ def cleanup(connection: Database, *, today: date | None = None) -> CleanupReport
         day_metrics=_delete_by_date(connection, "day_metrics", metrics_before),
         sync_events=_delete_by_column(connection, "mobile_sync_events", "received_at", sync_before),
         sync_conflicts=_delete_by_column(connection, "mobile_sync_conflicts", "created_at", sync_before),
+        # Личный пробег вне смены (Фаза 6): те же 14 дней, что весь GPS. Не привязан
+        # к work_day — чистим по captured_at.
+        personal_mileage=_delete_by_column(connection, "personal_mileage", "captured_at", gps_before),
     )
     connection.commit()
 

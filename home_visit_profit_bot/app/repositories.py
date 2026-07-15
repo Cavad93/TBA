@@ -702,6 +702,31 @@ class LocationEventRepository:
         self.connection.commit()
 
 
+class PersonalMileageRepository:
+    """Личный пробег вне смены (Фаза 6). RLS сам подставляет user_id по DEFAULT."""
+
+    def __init__(self, connection: Database):
+        self.connection = connection
+
+    def last_point(self) -> Any | None:
+        return self.connection.execute(
+            "SELECT lat, lon, captured_at FROM personal_mileage ORDER BY captured_at DESC, id DESC LIMIT 1"
+        ).fetchone()
+
+    def record(self, *, lat: float, lon: float, km: float, captured_at: str) -> None:
+        self.connection.execute(
+            "INSERT INTO personal_mileage(lat, lon, km, captured_at, created_at) VALUES (?, ?, ?, ?, ?)",
+            (lat, lon, km, captured_at, now_iso()),
+        )
+
+    def total_km_since(self, since_iso: str) -> float:
+        row = self.connection.execute(
+            "SELECT COALESCE(SUM(km), 0) AS total FROM personal_mileage WHERE captured_at >= ?",
+            (since_iso,),
+        ).fetchone()
+        return float(row["total"]) if row and row["total"] is not None else 0.0
+
+
 class LocationSampleRepository:
     def __init__(self, connection: Database):
         self.connection = connection

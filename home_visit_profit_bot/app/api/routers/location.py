@@ -14,6 +14,7 @@ from app.api.deps import ApiError, Authed, authed, parse_json, raw_body
 from app.repositories import (
     LocationEventRepository,
     LocationSampleRepository,
+    PersonalMileageRepository,
     SettingsRepository,
     VisitRepository,
     WorkDayLocationRepository,
@@ -21,6 +22,7 @@ from app.repositories import (
 )
 from app.services.location_service import process_location_update
 from app.services.parking_alert_service import check as parking_check
+from app.services.personal_mileage_service import record_personal_point
 
 router = APIRouter()
 
@@ -43,6 +45,7 @@ def _repos(db):
         "events": LocationEventRepository(db),
         "samples": LocationSampleRepository(db),
         "location_state": WorkDayLocationRepository(db),
+        "personal": PersonalMileageRepository(db),
     }
 
 
@@ -61,6 +64,22 @@ def _process_one(payload: dict, db, repos: dict) -> dict:
     settings = repos["settings"]
     days = repos["days"]
     visits = repos["visits"]
+
+    # Личная поездка вне смены (Фаза 6): ТОЛЬКО километраж. Не запускаем обнаружение
+    # визитов и парковку — точка не должна порождать заказы/алерты. Если опция
+    # выключена, точку даже не храним (минимизация данных).
+    if str(payload.get("scope") or "work") == "personal":
+        if not settings.get_bool("count_personal_trips", False):
+            return {"ok": True, "reason": "personal_disabled", "scope": "personal"}
+        moment = captured_at or datetime.now()
+        km = record_personal_point(repos["personal"], lat=lat, lon=lon, captured_at=moment.isoformat())
+        return {
+            "ok": True,
+            "reason": "personal_recorded",
+            "scope": "personal",
+            "personal_km_added": round(km, 3),
+        }
+
     result = process_location_update(
         lat=lat, lon=lon, accuracy_m=accuracy_m, provider=provider, captured_at=captured_at,
         days=days, visits=visits, events=repos["events"], samples=repos["samples"],
