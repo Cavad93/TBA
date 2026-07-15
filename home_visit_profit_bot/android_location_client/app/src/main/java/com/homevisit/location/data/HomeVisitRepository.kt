@@ -39,6 +39,7 @@ import com.homevisit.location.domain.GpsVisitHint
 import com.homevisit.location.domain.DrivingRating
 import com.homevisit.location.domain.HomeMoney
 import com.homevisit.location.domain.HomeRecommendation
+import com.homevisit.location.domain.HomeBreakeven
 import com.homevisit.location.domain.HomeOsago
 import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
@@ -1809,6 +1810,7 @@ class HomeVisitRepository private constructor(
             greenStreak = response.optInt("green_streak", 0),
             recommendations = recommendations,
             osago = parseHomeOsago(response.optJSONObject("osago")),
+            breakeven = parseHomeBreakeven(response.optJSONObject("breakeven")),
             fromCache = response.optBoolean("_from_cache", false),
         )
     }
@@ -1822,6 +1824,18 @@ class HomeVisitRepository private constructor(
             daysLeft = osago.optInt("days_left", 0),
             expired = osago.optBoolean("expired", false),
             partnerUrl = osago.optString("partner_url").takeIf { it.isNotBlank() },
+        )
+    }
+
+    private fun parseHomeBreakeven(breakeven: JSONObject?): HomeBreakeven? {
+        if (breakeven == null) {
+            return null
+        }
+        return HomeBreakeven(
+            fixedCosts = breakeven.optDouble("fixed_costs", 0.0),
+            accumulatedNet = breakeven.optDouble("accumulated_net", 0.0),
+            isPaidOff = breakeven.optBoolean("is_paid_off", false),
+            remainingToBreakeven = breakeven.optDouble("remaining_to_breakeven", 0.0),
         )
     }
 

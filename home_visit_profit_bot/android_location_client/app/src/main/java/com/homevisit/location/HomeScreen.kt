@@ -135,6 +135,7 @@ import com.homevisit.location.domain.WorkloadSnapshot
 import com.homevisit.location.domain.WorkloadTrendPoint
 import com.homevisit.location.domain.WorkloadTrendReport
 import com.homevisit.location.domain.HomeRecommendation
+import com.homevisit.location.domain.HomeBreakeven
 import com.homevisit.location.domain.HomeOsago
 import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
@@ -271,6 +272,8 @@ internal fun HomeDashboard(
             snapshot.recovery?.let { RecoveryHeroCard(it, snapshot.debtVsPrev, snapshot.greenStreak) }
 
             snapshot.osago?.let { OsagoCard(it) }
+
+            snapshot.breakeven?.let { BreakevenCard(it) }
 
             MoneySection(snapshot, onOpenReports)
 
@@ -423,6 +426,50 @@ internal fun OsagoCard(osago: HomeOsago) {
                     Text("Продлить со скидкой", color = Color.White)
                 }
             }
+        }
+    }
+}
+
+/**
+ * Точка безубыточности смены (Фаза 10.2): арендник видит момент «смена отбита» без
+ * лишнего тапа. Пока обязательные расходы не покрыты — сколько ещё до нуля; как
+ * покрыты — «в плюс». Блока нет, если аренда/фикс-расходы не заданы (у своего авто — 0).
+ */
+@Composable
+internal fun BreakevenCard(breakeven: HomeBreakeven) {
+    val accent = if (breakeven.isPaidOff) VerdictColors.go else VerdictColors.edge
+    val title = if (breakeven.isPaidOff) {
+        "Смена отбита — дальше в плюс"
+    } else {
+        "До нуля осталось ${money(breakeven.remainingToBreakeven)}"
+    }
+    val subtitle = if (breakeven.isPaidOff) {
+        "Обязательные расходы смены (${money(breakeven.fixedCosts)}) покрыты. Всё сверху — чистая прибыль."
+    } else {
+        "Обязательные расходы ${money(breakeven.fixedCosts)}, уже покрыто ${money(breakeven.accumulatedNet)}."
+    }
+    val progress = if (breakeven.fixedCosts > 0) {
+        (breakeven.accumulatedNet / breakeven.fixedCosts).coerceIn(0.0, 1.0).toFloat()
+    } else {
+        1f
+    }
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = 0.10f)),
+        border = BorderStroke(1.5.dp, accent),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Безубыточность смены", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth(),
+                color = accent,
+            )
+            Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

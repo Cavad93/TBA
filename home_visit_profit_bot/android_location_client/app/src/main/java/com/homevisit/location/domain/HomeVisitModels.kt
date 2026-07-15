@@ -79,6 +79,7 @@ data class HomeSnapshot(
     val greenStreak: Int,
     val recommendations: List<HomeRecommendation>,
     val osago: HomeOsago? = null,
+    val breakeven: HomeBreakeven? = null,
     val fromCache: Boolean = false,
 )
 
@@ -133,6 +134,17 @@ data class HomeOsago(
     val expired: Boolean,
     /** Партнёрская ссылка на продление (Пампаду). null — кнопки нет, только напоминание. */
     val partnerUrl: String?,
+)
+
+/**
+ * Точка безубыточности смены (Фаза 10.2): отбиты ли обязательные расходы (аренда авто +
+ * прочее) накопленным чистым доходом. null (блока нет), если фикс-расходы не заданы.
+ */
+data class HomeBreakeven(
+    val fixedCosts: Double,
+    val accumulatedNet: Double,
+    val isPaidOff: Boolean,
+    val remainingToBreakeven: Double,
 )
 
 // --- Экран «Смена» (GET /api/shift) ---
