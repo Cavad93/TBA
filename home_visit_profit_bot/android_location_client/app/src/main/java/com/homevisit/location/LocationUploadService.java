@@ -21,6 +21,8 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 
+import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -64,6 +66,17 @@ public class LocationUploadService extends Service implements LocationListener, 
     private long lastSpeedTimeMs = 0L;
     // Номер отрезка пути = сколько адресов уже закрыто. Присылает сервер.
     private int segmentIndex = 0;
+
+    // Батчинг GPS по состоянию движения (Фаза 3.7). Экономия батареи — на 90% точек
+    // смены, которые снимаются В ДВИЖЕНИИ, когда живой ответ (парковка/ready_to_complete)
+    // не нужен по определению. Правило: не в движении → флаш немедленно (встал/визит —
+    // алерт должен успеть); в движении → копим и шлём пачкой. Очередь трогается только
+    // на потоке колбэка LocationListener (main looper), отправка — в executor по снимку.
+    private static final float MOVING_SPEED_KMH = 8f;   // ниже — «стою/иду к двери», выше — «еду»
+    private static final int BATCH_MAX_POINTS = 10;
+    private static final long BATCH_MAX_INTERVAL_MS = 5 * 60 * 1000L;
+    private final java.util.ArrayList<JSONObject> pendingPoints = new java.util.ArrayList<>();
+    private long lastFlushMs = 0L;
     // Время в пути пешком — логистика. Манера ходьбы не измеряется: у неё нет
     // операционного смысла, кроме вывода о состоянии, а это спецкатегория ПДн.
     // Поэтому и частота датчика остаётся экономной — 50 Гц больше не нужны.
@@ -111,7 +124,12 @@ public class LocationUploadService extends Service implements LocationListener, 
         stopLocationUpdates();
         stopSensorUpdates();
         persistAggregate();
-        executor.shutdownNow();
+        // Досылаем накопленные точки движения перед выключением (Ф3.7). shutdown() (а не
+        // shutdownNow) даёт этой финальной пачке уйти в фоне, не блокируя main-поток.
+        if (!pendingPoints.isEmpty()) {
+            flush(getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE));
+        }
+        executor.shutdown();
         super.onDestroy();
     }
 
@@ -164,7 +182,23 @@ public class LocationUploadService extends Service implements LocationListener, 
     @Override
     public void onLocationChanged(Location location) {
         updateSpeedAggregate(location);
-        sendLocation(location);
+        enqueueAndMaybeFlush(location);
+    }
+
+    /**
+     * Решение о флаше очереди (Фаза 3.7) — чистое, поэтому проверяется unit-тестом.
+     * Не в движении (встал/визит) → шлём немедленно: по этой точке человеку может
+     * прямо сейчас понадобиться парковочный алерт или подсказка «пора закрыть заказ».
+     * В движении копим — экономим батарею, живой ответ там не нужен.
+     */
+    static boolean shouldFlush(boolean moving, int queueSize, long msSinceFlush) {
+        if (queueSize <= 0) {
+            return false;
+        }
+        if (!moving) {
+            return true;
+        }
+        return queueSize >= BATCH_MAX_POINTS || msSinceFlush >= BATCH_MAX_INTERVAL_MS;
     }
 
     @Override
@@ -230,67 +264,122 @@ public class LocationUploadService extends Service implements LocationListener, 
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
     }
 
-    private void sendLocation(Location location) {
+    /**
+     * Кладёт точку в очередь и, если пора, шлёт накопленное (Фаза 3.7). Кеш последней
+     * точки для подсказок адреса (Ф2) обновляем на КАЖДОЙ точке — он нужен всегда,
+     * независимо от батчинга. Очередь трогается только здесь и во flush(), оба — на
+     * потоке колбэка LocationListener, поэтому синхронизация не нужна.
+     */
+    private void enqueueAndMaybeFlush(Location location) {
         SharedPreferences prefs = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE);
-        // Кешируем последнюю точку: оценка заказа шлёт её в подсказки адреса, чтобы сервер
-        // понимал, в каком городе человек, и не спрашивал город руками (Фаза 2). Храним
-        // строкой — у SharedPreferences нет double, а putFloat терял бы точность координат.
+        // Строкой: у SharedPreferences нет double, а putFloat терял бы точность координат.
         prefs.edit()
             .putString(MainActivity.KEY_LAST_GPS_LAT, String.valueOf(location.getLatitude()))
             .putString(MainActivity.KEY_LAST_GPS_LON, String.valueOf(location.getLongitude()))
             .putLong(MainActivity.KEY_LAST_GPS_AT, System.currentTimeMillis())
             .apply();
+        try {
+            JSONObject point = new JSONObject();
+            point.put("lat", location.getLatitude());
+            point.put("lon", location.getLongitude());
+            point.put("accuracy_m", location.hasAccuracy() ? location.getAccuracy() : 0);
+            point.put("provider", location.getProvider());
+            point.put("timestamp_ms", location.getTime());
+            pendingPoints.add(point);
+        } catch (JSONException ignored) {
+            return;
+        }
+        if (lastFlushMs == 0L) {
+            lastFlushMs = System.currentTimeMillis();
+        }
+        boolean moving = lastSpeedKmh >= MOVING_SPEED_KMH;
+        long sinceFlush = System.currentTimeMillis() - lastFlushMs;
+        if (shouldFlush(moving, pendingPoints.size(), sinceFlush)) {
+            flush(prefs);
+        }
+    }
+
+    /** Снимок очереди в executor: одиночная точка → /location (как раньше), пачка → /api/location/batch. */
+    private void flush(SharedPreferences prefs) {
+        if (pendingPoints.isEmpty()) {
+            return;
+        }
         String serverUrl = normalizeLocationUrl(prefs.getString(MainActivity.KEY_SERVER_URL, ""));
         String apiKey = prefs.getString(MainActivity.KEY_API_KEY, "");
         if (serverUrl.isEmpty() || apiKey.isEmpty()) {
+            // Отправить некуда — очередь не растим бесконечно (как и раньше без кредов).
+            pendingPoints.clear();
             return;
         }
+        final java.util.ArrayList<JSONObject> batch = new java.util.ArrayList<>(pendingPoints);
+        pendingPoints.clear();
+        lastFlushMs = System.currentTimeMillis();
+        executor.submit(() -> sendBatch(batch, serverUrl, apiKey));
+    }
 
-        executor.submit(() -> {
-            HttpURLConnection connection = null;
-            try {
+    private void sendBatch(java.util.List<JSONObject> points, String locationUrl, String apiKey) {
+        if (points.isEmpty()) {
+            return;
+        }
+        boolean single = points.size() == 1;
+        HttpURLConnection connection = null;
+        try {
+            String url;
+            byte[] body;
+            if (single) {
+                url = locationUrl;
+                body = points.get(0).toString().getBytes(StandardCharsets.UTF_8);
+            } else {
+                url = batchUrl(locationUrl);
                 JSONObject payload = new JSONObject();
-                payload.put("lat", location.getLatitude());
-                payload.put("lon", location.getLongitude());
-                payload.put("accuracy_m", location.hasAccuracy() ? location.getAccuracy() : 0);
-                payload.put("provider", location.getProvider());
-                payload.put("timestamp_ms", location.getTime());
-
-                byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-                URL url = new URL(serverUrl);
-                connection = (HttpURLConnection) url.openConnection();
-                connection.setRequestMethod("POST");
-                connection.setConnectTimeout(10000);
-                connection.setReadTimeout(10000);
-                connection.setDoOutput(true);
-                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                connection.setRequestProperty("Authorization", "Bearer " + apiKey);
-
-                try (OutputStream outputStream = connection.getOutputStream()) {
-                    outputStream.write(body);
+                JSONArray arr = new JSONArray();
+                for (JSONObject p : points) {
+                    arr.put(p);
                 }
-                int code = connection.getResponseCode();
-                int serverSegment = segmentIndex;
-                if (code >= 200 && code < 300) {
-                    String responseText = readResponse(connection);
-                    handleLocationResponse(responseText);
-                    showParkingAlert(responseText);
-                    serverSegment = readSegmentIndex(responseText, segmentIndex);
-                }
-                // Сначала досылаем то, что накопили на прошлом отрезке, и только потом
-                // переключаемся: иначе телеметрия последнего куска дороги к адресу
-                // потерялась бы вместе со счётчиками.
-                sendDrivingAggregateSync(serverUrl, apiKey);
-                if (serverSegment != segmentIndex) {
-                    startSegment(serverSegment);
-                }
-            } catch (Exception ignored) {
-            } finally {
-                if (connection != null) {
-                    connection.disconnect();
-                }
+                payload.put("points", arr);
+                body = payload.toString().getBytes(StandardCharsets.UTF_8);
             }
-        });
+            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(10000);
+            connection.setReadTimeout(15000);
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            connection.setRequestProperty("Authorization", "Bearer " + apiKey);
+
+            try (OutputStream outputStream = connection.getOutputStream()) {
+                outputStream.write(body);
+            }
+            int code = connection.getResponseCode();
+            int serverSegment = segmentIndex;
+            if (code >= 200 && code < 300) {
+                // Живой ответ берётся с ПОСЛЕДНЕЙ точки — и /location, и batch отдают один
+                // формат (ready_to_complete, parking_alert, segment_index). Хендлеры те же.
+                String responseText = readResponse(connection);
+                handleLocationResponse(responseText);
+                showParkingAlert(responseText);
+                serverSegment = readSegmentIndex(responseText, segmentIndex);
+            }
+            // Сначала досылаем телеметрию текущего отрезка, потом переключаем номер:
+            // иначе счётчики последнего куска дороги к адресу потерялись бы.
+            sendDrivingAggregateSync(locationUrl, apiKey);
+            if (serverSegment != segmentIndex) {
+                startSegment(serverSegment);
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    /** URL пачки из URL одиночной точки: …/location → …/api/location/batch. */
+    private String batchUrl(String locationUrl) {
+        if (locationUrl.endsWith("/location")) {
+            return locationUrl.substring(0, locationUrl.length() - "/location".length()) + "/api/location/batch";
+        }
+        return locationUrl;
     }
 
     private void updateSpeedAggregate(Location location) {
