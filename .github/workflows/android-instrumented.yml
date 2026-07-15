@@ -1,0 +1,128 @@
+name: Android instrumented tests
+
+# Инструментальные тесты клиента на живом Android — без физического устройства:
+#  1) эмулятор прямо в GitHub Actions (KVM) — автономно, без внешних кредов;
+#  2) Firebase Test Lab — живые телефоны Google (краши, UI, скриншоты, видео),
+#     включается при наличии секрета GCP_SA_KEY, иначе job мягко пропускается.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "home_visit_profit_bot/android_location_client/**"
+      - ".github/workflows/android-instrumented.yml"
+  pull_request:
+    paths:
+      - "home_visit_profit_bot/android_location_client/**"
+      - ".github/workflows/android-instrumented.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  emulator:
+    name: Эмулятор в CI (без кредов)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      # Аппаратное ускорение эмулятора (иначе x86_64-образ не стартует на раннере).
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Инструментальные тесты на эмуляторе
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          working-directory: home_visit_profit_bot/android_location_client
+          script: gradle :app:connectedDebugAndroidTest --no-daemon
+
+      - name: Отчёт тестов (артефакт)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instrumented-test-report
+          path: home_visit_profit_bot/android_location_client/app/build/reports/androidTests/
+          if-no-files-found: ignore
+
+  firebase-test-lab:
+    name: Firebase Test Lab (живые телефоны)
+    runs-on: ubuntu-latest
+    env:
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+    steps:
+      # Секреты нельзя читать в job-level if — поэтому решаем на шаге и гейтим остальное.
+      - name: Есть ли креды Firebase?
+        id: gate
+        run: |
+          if [ -z "$GCP_SA_KEY" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Секрет GCP_SA_KEY не задан — Firebase Test Lab пропущен. Инструментальные тесты идут на эмуляторе (job emulator). Чтобы включить живые телефоны, добавьте секреты GCP_SA_KEY (service-account JSON в base64) и GCP_PROJECT."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        if: steps.gate.outputs.run == 'true'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Сборка APK приложения и тестов
+        if: steps.gate.outputs.run == 'true'
+        working-directory: home_visit_profit_bot/android_location_client
+        run: gradle :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
+
+      - name: Авторизация в Google Cloud
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          printf '%s' "$GCP_SA_KEY" | base64 -d > "$RUNNER_TEMP/gcp-key.json"
+          gcloud auth activate-service-account --key-file="$RUNNER_TEMP/gcp-key.json"
+          gcloud config set project "$GCP_PROJECT"
+
+      - name: Прогон на живых телефонах Firebase Test Lab
+        if: steps.gate.outputs.run == 'true'
+        working-directory: home_visit_profit_bot/android_location_client
+        run: |
+          gcloud firebase test android run \
+            --type instrumentation \
+            --app app/build/outputs/apk/debug/app-debug.apk \
+            --test app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            --device model=MediumPhone.arm,version=33,locale=ru,orientation=portrait \
+            --timeout 8m \
+            --num-flaky-test-attempts 1
+
+      - name: Удаление ключа
+        if: always()
+        run: rm -f "$RUNNER_TEMP/gcp-key.json"

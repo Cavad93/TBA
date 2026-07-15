@@ -18,6 +18,9 @@ android {
         val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
         versionCode = buildNumber
         versionName = "1.0.$buildNumber"
+        // Инструментальные тесты (androidTest) гоняются на эмуляторе в CI и на живых
+        // телефонах Firebase Test Lab — это проверка клиента без физического устройства.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildFeatures {
@@ -84,4 +87,14 @@ dependencies {
     // `gradlew testReleaseUnitTest`. org.json — та же реализация, что в Android рантайме.
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+
+    // Инструментальные тесты: краши, UI-сценарии, share-target. Гоняются на эмуляторе
+    // в GitHub Actions (без внешних кредов) и на живых телефонах Firebase Test Lab.
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    // Пустой манифест для createAndroidComposeRule — обязателен, иначе тест не поднимет Activity.
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
