@@ -16,6 +16,7 @@ from app.repositories import (
 from app.services.address_resolver import expand_template
 from app.services.schedule_service import late_warnings
 from app.services.arrival_window_service import arrival_windows
+from app.services.fix_time_service import fix_time_price
 from app.services.geocoding_service import (
     GeocodingError,
     detect_base_district_by_location,
@@ -444,6 +445,17 @@ class MobileVisitService:
             window.as_dict()
             for window in arrival_windows(day, all_visits, _with_order(route, payload["order"]))
         ]
+        # Цена фикс-времени (Фаза 4.3–4.4): для каждого заказа-якоря — во что обходится
+        # жёсткое время (простой + крюк) в ₽/час дня и подсказка наценки. Пересчёт дня
+        # с якорем vs как свободным заказом; матрица OSRM кешируется (Ф1.5), поэтому
+        # два-три якоря не бьют по латентности.
+        fix_prices = []
+        for visit in all_visits:
+            if visit.kind == "onsite" and visit.planned_start_at and visit.status == "accepted":
+                price = fix_time_price(day, all_visits, self.settings, visit.id)
+                if price is not None:
+                    fix_prices.append(price.as_dict())
+        payload["fix_time_prices"] = fix_prices
         visits_payload = [visit_payload(visit) for visit in all_visits]
         # Ссылка «Поехали» едет вместе с заказом — чтобы кнопка работала и без сети.
         attach_navigation([item for item in visits_payload if item is not None], self.settings)
