@@ -24,13 +24,18 @@ from app.services.osrm_cache import cached_distance_matrix
 from app.services.server_settings import osrm_url as server_osrm_url, request_timeout_seconds
 
 
-def _snapshot_version(cost, min_hourly: float, service_minutes: float, straight_line_factor: float) -> str:
+def snapshot_version(cost, min_hourly: float, service_minutes: float, straight_line_factor: float) -> str:
     """Короткая версия снимка коэффициентов: телефон и сервер сверяют, что считают одним.
 
     Меняется любой коэффициент — меняется строка. Клиент кладёт её рядом с расчётом;
-    расхождение версий в логе синка объясняет расхождение чисел без гадания.
+    расхождение версий в логе синка (Ф3.6) объясняет расхождение чисел без гадания.
+    Публичная — её же зовёт `formula_parity_service`, чтобы формат снимка был один.
     """
     return f"km{cost.fuel_per_km:.2f}_{cost.maintenance_per_km:.2f}|mh{min_hourly:.0f}|sm{service_minutes:.0f}|f{straight_line_factor:.2f}"
+
+
+# Старое имя оставлено как псевдоним: на него мог ссылаться внешний код/тесты.
+_snapshot_version = snapshot_version
 
 
 def build_matrix_response(
@@ -96,5 +101,5 @@ def build_matrix_response(
             "avg_speed_kmh": avg_speed,
             "straight_line_factor": straight_line_factor,
         },
-        "snapshot_version": _snapshot_version(cost, min_hourly, service_minutes, straight_line_factor),
+        "snapshot_version": snapshot_version(cost, min_hourly, service_minutes, straight_line_factor),
     }

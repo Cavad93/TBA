@@ -532,6 +532,18 @@ CREATE TABLE IF NOT EXISTS password_resets (
     created_at TEXT NOT NULL,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS formula_discrepancies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    visit_id INTEGER,
+    client_marginal_profit REAL,
+    server_marginal_profit REAL,
+    delta_rub REAL NOT NULL,
+    client_snapshot_version TEXT,
+    server_snapshot_version TEXT,
+    details TEXT,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -566,7 +578,7 @@ ISOLATED_TABLES = [
     "work_day_location_state", "workload_surveys", "driving_behavior_daily",
     "driving_behavior_segments", "day_metrics", "user_baselines",
     "workload_feedback", "mobile_client_entities", "mobile_sync_events",
-    "mobile_sync_conflicts", "parking_state",
+    "mobile_sync_conflicts", "parking_state", "formula_discrepancies",
     # Кэш геокодера тоже персональный: ключ — сырой текст адреса, а город у каждого
     # свой. Общий кэш отдавал бы «Ленина 40» из чужого города — и заказ считался бы
     # по чужим координатам.

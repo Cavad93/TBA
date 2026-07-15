@@ -27,6 +27,7 @@ from app.services.settings_service import (
 from app.services.address_resolver import resolve_address
 from app.services.day_summary_service import reconcile_end_day_data
 from app.services.rest_service import rest_facts
+from app.services.formula_parity_service import check_visit_parity
 from app.services.stats_service import finalize_day
 from app.services.server_settings import nominatim_url as server_nominatim_url, request_timeout_seconds as server_timeout
 
@@ -328,6 +329,19 @@ class MobileApiService:
         )
         self.visits.accept(visit.id)
         self._map(client_entity_id, "visit", visit.id)
+        # Ф3.6: сервер — источник правды. Если телефон прислал свой расчёт маржи —
+        # сверяем со своим и логируем расхождение >1 ₽ (сигнал разъезда формул).
+        client_marginal = payload.get("client_marginal_profit")
+        check_visit_parity(
+            self.connection,
+            self.settings,
+            self.stats,
+            visit_id=visit.id,
+            income=_non_negative_float(payload.get("income")),
+            extra_km=_non_negative_float(payload.get("estimated_extra_km"), default=0.0),
+            client_marginal_profit=float(client_marginal) if client_marginal is not None else None,
+            client_snapshot_version=_optional_str(payload.get("client_snapshot_version")),
+        )
         return visit.id
 
     def _save_office(self, client_entity_id: str, payload: dict[str, Any]) -> int:

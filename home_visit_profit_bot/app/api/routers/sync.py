@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 
 from app.api.deps import ApiError, Authed, authed, parse_json, raw_body
+from app.services.formula_parity_service import recent_discrepancies
 from app.services.mobile_api_service import MobileApiService
 
 router = APIRouter()
@@ -35,3 +36,13 @@ def sync_conflicts(request: Request, auth: Authed = Depends(authed)) -> dict:
     except ValueError:
         raise ApiError(400, {"error": "bad_request", "detail": "limit must be an integer"})
     return {"ok": True, "conflicts": MobileApiService(auth.db).conflicts(limit)}
+
+
+@router.get("/api/sync/discrepancies")
+def sync_discrepancies(request: Request, auth: Authed = Depends(authed)) -> dict:
+    """Лог расхождений расчёта телефон↔сервер (Ф3.6) — для разбора «разъезда формул»."""
+    try:
+        limit = int(request.query_params.get("limit", "20"))
+    except ValueError:
+        raise ApiError(400, {"error": "bad_request", "detail": "limit must be an integer"})
+    return {"ok": True, "discrepancies": recent_discrepancies(auth.db, limit)}
