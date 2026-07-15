@@ -418,6 +418,18 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             lat = lat,
             lon = lon,
         )
+        // Нет сети, но есть координаты кандидата и прогретый кеш матрицы дня —
+        // мгновенный офлайн-вердикт по кешу (Фаза 3.4/3.5), сервер уточнит при связи.
+        if (!result.ok && result.reason == "network_error" && lat != null && lon != null) {
+            val offline = repository.offlineCandidateEstimate(lat, lon, income, address, clinic)
+            if (offline != null) {
+                candidateState.value = CandidateUiState(
+                    estimate = offline,
+                    message = "Нет сети — офлайн-оценка по кешу. Сервер уточнит при связи.",
+                )
+                return
+            }
+        }
         candidateState.value = when {
             result.ok && result.estimate != null -> CandidateUiState(
                 estimate = result.estimate,
@@ -1068,6 +1080,10 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
         routeState.value = routeState.value.copy(isLoading = true, message = "Обновляю маршрут...")
         val route = repository.fetchActiveRoute(serverUrl, apiKey)
+        // Прогреваем кеш матрицы дня для офлайн-вердикта (Ф3.4/3.5), пока сеть есть.
+        // Best-effort: набор точек дня меняется на принял/выполнил/удалил — этот вызов
+        // едет на каждом обновлении Ленты и держит кеш свежим.
+        repository.warmDayMatrix(serverUrl, apiKey)
         routeState.value = if (route == null) {
             RouteUiState(message = "Не удалось получить маршрут с сервера")
         } else {

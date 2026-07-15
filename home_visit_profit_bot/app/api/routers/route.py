@@ -43,6 +43,20 @@ def route_matrix(body: bytes = Depends(raw_body), auth: Authed = Depends(authed)
     )
 
 
+@router.get("/api/route/matrix/day")
+def route_matrix_day(auth: Authed = Depends(authed)) -> dict:
+    """Матрица активного дня + координаты точек и доходы заказов — для офлайн-вердикта.
+
+    Клиент координат заказов не хранит, поэтому точки (старт/принятые/финиш) собирает
+    сервер и возвращает их координаты в порядке матрицы — телефон кеширует и в
+    самолётном режиме достраивает новый адрес по прямой (Фаза 3.4/3.5).
+    """
+    try:
+        return MobileVisitService(auth.db).day_matrix()
+    except ValueError as error:
+        raise ApiError(400, {"error": "bad_request", "detail": str(error)})
+
+
 @router.get("/api/route/active")
 def active_route(auth: Authed = Depends(authed)) -> dict:
     try:

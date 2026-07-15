@@ -16,6 +16,7 @@ import com.homevisit.location.domain.AddressSuggestResult
 import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.AuthOutcome
 import com.homevisit.location.domain.AuthUser
+import com.homevisit.location.calc.OfflineEstimateMapper
 import com.homevisit.location.domain.CandidateEstimate
 import com.homevisit.location.domain.CandidateRequestResult
 import com.homevisit.location.domain.MatrixSnapshot
@@ -858,6 +859,39 @@ class HomeVisitRepository private constructor(
             rows.add(row)
         }
         return rows
+    }
+
+    /**
+     * Прогреть кеш матрицы дня для офлайн-вердикта (Фаза 3.4/3.5): сервер собирает точки
+     * дня (старт/принятые/финиш) и отдаёт их координаты + матрицу OSRM + доходы. Клиент
+     * координат заказов не хранит, поэтому берём их с сервера, пока сеть есть. Best-effort:
+     * зовём при обновлении маршрута, молча пропускаем при сбое.
+     */
+    suspend fun warmDayMatrix(serverUrl: String, apiKey: String): Boolean = withContext(Dispatchers.IO) {
+        val response = getJson(normalizeApiUrl(serverUrl, "/api/route/matrix/day"), apiKey)
+        if (response != null && response.has("distances_km")) {
+            dao.saveSetting(SettingEntity(key = "cache_route_matrix_day", value = response.toString(), updatedAtEpochMillis = now()))
+            true
+        } else {
+            false
+        }
+    }
+
+    /**
+     * Мгновенный офлайн-вердикт нового адреса по кешу дня (Фаза 3.4/3.5) — fallback при
+     * недоступной сети. Нужны координаты кандидата (из подсказки/ручной точки/недавнего
+     * адреса) и прогретый кеш `cache_route_matrix_day`; иначе null и обычный ручной путь.
+     */
+    suspend fun offlineCandidateEstimate(
+        candidateLat: Double,
+        candidateLon: Double,
+        income: Double,
+        address: String,
+        clinic: String,
+    ): CandidateEstimate? = withContext(Dispatchers.Default) {
+        val cached = dao.getSetting("cache_route_matrix_day")?.value ?: return@withContext null
+        val json = try { JSONObject(cached) } catch (_: Exception) { return@withContext null }
+        OfflineEstimateMapper.fromDayMatrix(json, candidateLat, candidateLon, income, address, clinic)
     }
 
     /**

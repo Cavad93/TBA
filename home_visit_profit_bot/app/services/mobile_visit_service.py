@@ -4,7 +4,7 @@ from app.database import Database
 
 from dataclasses import dataclass, replace
 
-from app.models import CandidateCalculation, RouteSummary, Visit
+from app.models import CandidateCalculation, Point, RouteSummary, Visit
 from app.repositories import (
     AddressCacheRepository,
     DailyStatsRepository,
@@ -25,11 +25,15 @@ from app.services.geocoding_service import (
     manual_geocoding_result,
 )
 from app.services.profitability_service import (
+    _current_point,
+    _finish_point,
+    _start_point,
     calculate_candidate_impact,
     calculate_remaining_route_summary,
     decision_to_verdict,
     profitability_score,
 )
+from app.services.matrix_service import build_matrix_response
 from app.services.routing_service import OutsideCoverageError, RoutingError
 from app.services.settings_service import allowed_clinics
 from app.services.visit_navigation import attach_navigation, navigation_settings
@@ -227,6 +231,51 @@ class MobileVisitService:
         # ручную перестановку пользователя.
         day = self._require_active_day()
         return self._route_response(day.id, "active_route", 0, optimize=False)
+
+    def day_matrix(self) -> dict[str, Any]:
+        """Матрица активного дня + КООРДИНАТЫ точек — для офлайн-вердикта (Фаза 3.4/3.5).
+
+        Клиент сам координат заказов не хранит, поэтому точки собирает сервер: старт
+        (или последняя завершённая точка) + принятые заказы в порядке Ленты + финиш
+        (или старт, если финиша нет — возврат домой, Ф9.2). Возвращаем матрицу OSRM
+        (с кешем Ф1.5), координаты точек в том же порядке и доходы принятых заказов —
+        этого телефону хватает, чтобы в самолётном режиме достроить новый адрес по
+        прямой и выдать вердикт мгновенно, не разъезжаясь с сервером по коэффициентам.
+        """
+        day = self._require_active_day()
+        completed = self.visits.list_for_day(day.id, ("completed",))
+        accepted = self.visits.list_for_day(day.id, ("accepted",))
+        start = _current_point(day, completed) or _start_point(day)
+        finish = _finish_point(day) or _start_point(day)
+        ordered = sorted(
+            [v for v in accepted if v.lat is not None and v.lon is not None],
+            key=lambda v: (v.order_number or v.id, v.id),
+        )
+
+        points: list[Point] = []
+        if start is not None:
+            points.append(Point(label="старт", lat=start.lat, lon=start.lon))
+        for visit in ordered:
+            points.append(Point(label=visit.address, lat=float(visit.lat), lon=float(visit.lon), visit_id=visit.id))
+        if finish is not None:
+            points.append(Point(label="финиш", lat=finish.lat, lon=finish.lon))
+
+        profile = osrm_profile(self.settings)
+        response = build_matrix_response(
+            points,
+            self.settings,
+            self.stats,
+            profile=profile,
+            route_time_factor=day.planned_route_time_factor,
+            service_minutes=day.planned_service_minutes,
+        )
+        response["points"] = [
+            {"lat": p.lat, "lon": p.lon, "label": p.label, "visit_id": p.visit_id}
+            for p in points
+        ]
+        # Доходы принятых заказов в том же порядке, что точки-заказы (индексы 1..K).
+        response["incomes"] = [visit.income for visit in ordered]
+        return response
 
     def update_finish(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Сменить финиш активного дня среди смены и пересчитать маршрут."""

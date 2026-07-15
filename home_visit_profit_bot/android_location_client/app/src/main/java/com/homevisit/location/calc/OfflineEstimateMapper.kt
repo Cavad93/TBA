@@ -1,0 +1,116 @@
+package com.homevisit.location.calc
+
+import com.homevisit.location.domain.CandidateEstimate
+import org.json.JSONObject
+
+/**
+ * Сборка офлайн-вердикта кандидата из кеша /api/route/matrix/day (Фаза 3.4/3.5).
+ *
+ * Чистая функция: кеш дня (точки с координатами + матрица OSRM + коэффициенты +
+ * доходы принятых заказов) + координаты нового адреса → CandidateEstimate. Логику
+ * достройки плеч по прямой и расчёта вердикта делает уже сверенный с сервером
+ * OfflineCandidateEstimator/ProfitabilityCalculator — здесь только парсинг кеша и
+ * маппинг результата в модель экрана. Тестируется JVM-тестом без эмулятора.
+ *
+ * Числа маржи (marginalHourly/perKm, extraCarCost) паритетны серверу — их и сверяет
+ * лог расхождений Ф3.6 при возврате сети. Поля, которых у офлайн-ядра нет
+ * (before/after hourly, надбавки), оставляем нулями: это мгновенная оценка, сервер
+ * уточнит при связи.
+ */
+object OfflineEstimateMapper {
+
+    fun fromDayMatrix(
+        cache: JSONObject,
+        candidateLat: Double,
+        candidateLon: Double,
+        income: Double,
+        address: String,
+        clinic: String,
+    ): CandidateEstimate? {
+        val points = parsePoints(cache.optJSONArray("points")) ?: return null
+        val distances = parseMatrix(cache.optJSONArray("distances_km")) ?: return null
+        val durations = parseMatrix(cache.optJSONArray("durations_minutes")) ?: return null
+        if (points.size < 2 || distances.size != points.size || durations.size != points.size) return null
+        val incomes = parseDoubles(cache.optJSONArray("incomes"))
+        val c = cache.optJSONObject("coefficients") ?: JSONObject()
+
+        val coeff = OfflineCandidateEstimator.Coefficients(
+            straightLineFactor = c.optDouble("straight_line_factor", 1.35),
+            avgSpeedKmh = c.optDouble("avg_speed_kmh", 30.0),
+            serviceMinutes = c.optDouble("service_minutes", 20.0),
+            fuelPerKm = c.optDouble("fuel_per_km", 0.0),
+            maintenancePerKm = c.optDouble("maintenance_per_km", 0.0),
+            minHourly = c.optDouble("min_hourly_income", 600.0),
+            minMarginalHourly = c.optDouble("min_marginal_hourly_income", 600.0),
+            outsideMinHourly = c.optDouble("outside_zone_min_hourly_income", 600.0),
+            outsideMinExtra = c.optDouble("outside_zone_min_extra_payment", 0.0),
+        )
+
+        val result = OfflineCandidateEstimator.estimate(
+            cachedPoints = points,
+            cachedDistances = distances,
+            cachedDurations = durations,
+            candidate = OfflineCandidateEstimator.LatLon(candidateLat, candidateLon),
+            candidateIncome = income,
+            existingIncomes = incomes,
+            coeff = coeff,
+        )
+
+        val costPerKm = coeff.fuelPerKm + coeff.maintenancePerKm
+        val extraKm = if (costPerKm > 0) result.extraCarCost / costPerKm else 0.0
+        val extraDrive = (result.extraTotalMinutes - coeff.serviceMinutes).coerceAtLeast(0.0)
+
+        return CandidateEstimate(
+            visitId = 0,   // офлайн-превью ещё не заказ на сервере
+            address = address,
+            income = income,
+            clinic = clinic,
+            decision = result.decision,
+            reason = "Оценка офлайн по кешу — сервер уточнит при связи",
+            score = result.score,
+            requiredExtraPayment = 0.0,
+            requiredCandidateIncome = 0.0,
+            beforeHourly = 0.0,
+            afterHourly = 0.0,
+            marginalHourly = result.marginalHourly,
+            marginalPerKm = result.marginalPerKm,
+            costPerKm = costPerKm,
+            extraKm = extraKm,
+            extraDriveMinutes = extraDrive,
+            workloadLevel = "",
+            baseMinHourly = coeff.minHourly,
+            effectiveMinHourly = coeff.minHourly,
+            overworkMarkupPercent = 0,
+            overworkBlocksOutsideZone = false,
+        )
+    }
+
+    private fun parsePoints(array: org.json.JSONArray?): List<OfflineCandidateEstimator.LatLon>? {
+        if (array == null) return null
+        val out = ArrayList<OfflineCandidateEstimator.LatLon>(array.length())
+        for (i in 0 until array.length()) {
+            val o = array.optJSONObject(i) ?: return null
+            out.add(OfflineCandidateEstimator.LatLon(o.optDouble("lat"), o.optDouble("lon")))
+        }
+        return out
+    }
+
+    private fun parseMatrix(array: org.json.JSONArray?): List<List<Double>>? {
+        if (array == null) return null
+        val rows = ArrayList<List<Double>>(array.length())
+        for (i in 0 until array.length()) {
+            val rowArray = array.optJSONArray(i) ?: return null
+            val row = ArrayList<Double>(rowArray.length())
+            for (j in 0 until rowArray.length()) row.add(rowArray.optDouble(j, 0.0))
+            rows.add(row)
+        }
+        return rows
+    }
+
+    private fun parseDoubles(array: org.json.JSONArray?): List<Double> {
+        if (array == null) return emptyList()
+        val out = ArrayList<Double>(array.length())
+        for (i in 0 until array.length()) out.add(array.optDouble(i, 0.0))
+        return out
+    }
+}
