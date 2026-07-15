@@ -31,6 +31,9 @@ class DadataSuggestion:
     lon: float | None
     city: str | None
     street: str | None
+    # Номер дома, если DaData дошла до дома. Его наличие — признак ТОЧНОГО адреса
+    # (точка, а не улица): такой можно резолвить без выбора, а не тащить в кандидаты.
+    house: str | None = None
 
 
 class DadataError(RuntimeError):
@@ -102,6 +105,7 @@ def _suggestion(item: dict) -> DadataSuggestion:
         lon=_as_float(data.get("geo_lon")),
         city=(data.get("city") or data.get("settlement") or None),
         street=(data.get("street_with_type") or data.get("street") or None),
+        house=(data.get("house") or None),
     )
 
 

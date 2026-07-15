@@ -21,7 +21,20 @@ def suggest_address(body: bytes = Depends(raw_body), auth: Authed = Depends(auth
     query = str(payload.get("query") or "").strip()
     if not query:
         raise ApiError(400, {"error": "bad_request", "detail": "пустой запрос"})
+    # Текущее местоположение (по GPS), если клиент прислал: им разрешаем неоднозначные
+    # адреса по близости — «понять, где человек», не спрашивая город.
+    lat = _optional_float(payload.get("lat"))
+    lon = _optional_float(payload.get("lon"))
     try:
-        return suggest(query, auth.db, SettingsRepository(auth.db), auth.user_id)
+        return suggest(query, auth.db, SettingsRepository(auth.db), auth.user_id, lat=lat, lon=lon)
     except (ValueError, TypeError) as error:
         raise ApiError(400, {"error": "bad_request", "detail": str(error)})
+
+
+def _optional_float(value) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

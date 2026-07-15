@@ -1,15 +1,24 @@
 """Оркестратор слоёв геокодинга: уверенный адрес или список кандидатов (Фаза 2).
 
-Главный принцип фазы: неточный ввод перестаёт быть тупиком, но НИКОГДА не
-подставляется молча. При любой неуверенности человек выбирает из 2–3 кандидатов
-одним тапом — «убираем труд, но не убираем контроль».
+Главный принцип: неточный ввод перестаёт быть тупиком, но НИКОГДА не подставляется
+молча, когда есть НЕОПРЕДЕЛЁННОСТЬ. Точный адрес с номером дома — это НЕ
+неопределённость: его резолвим сразу, не заставляя человека что-то выбирать или
+вводить километраж руками. Неоднозначность (одна улица в разных городах, только
+улица без дома) — вот тогда 2–3 кандидата на выбор одним тапом.
 
-Порядок слоёв:
-    координаты в тексте        → resolved сразу
-    Nominatim, точное+весомое  → resolved
-    DaData «Подсказки»         → кандидаты (прощает опечатки и раскладку)
-    pg_trgm по osm_streets     → кандидаты (офлайн, когда DaData недоступна/исчерпана)
-    Nominatim, слабое          → тоже в кандидаты, а не молча в resolved
+Порядок:
+    координаты в тексте        → resolved
+    DaData «Подсказки»         → точный дом = resolved; неоднозначно = кандидаты
+    Nominatim (точное+весомое) → resolved
+    pg_trgm по osm_streets     → кандидаты (офлайн, когда DaData недоступна)
+    слабый Nominatim           → в кандидаты
+
+Город и GPS. Жёстко фильтровать DaData по городу из настроек нельзя: у пользователя
+там может стоять не тот город — и точный адрес молча обнулится (ровно этот баг ловили
+на «Авиаконструкторов 33» в СПб). Поэтому город из настроек — лишь подсказка с
+фолбэком: не нашли с городом — ищем без него. А если клиент прислал текущие
+координаты (lat/lon), именно они разрешают неоднозначность — «понять по GPS, где
+человек», как и требует продукт: из нескольких «Ленина, 40» берём ближайшую.
 
 Ответ всегда одной из двух форм:
     {"resolved":   {...}}                — уверены, координаты готовы
@@ -17,6 +26,8 @@
 """
 
 from __future__ import annotations
+
+import math
 
 from app.repositories import AddressCacheRepository, SettingsRepository
 from app.repositories_dadata_usage import DadataUsageRepository
@@ -31,52 +42,127 @@ from app.services.server_settings import (
     request_timeout_seconds as server_timeout,
 )
 
-# Уверенность Nominatim: importance выше порога И во вводе есть номер дома. Ниже —
-# отдаём кандидатом, а не молчаливым resolved. Порог намеренно высокий: Nominatim
-# силён на точном вводе, а на всё остальное лучше показать выбор.
 CONFIDENT_IMPORTANCE = 0.5
 MAX_CANDIDATES = 3
+# DaData возвращает и вариант-дом, и его литеры/квартиры с ОДНОЙ координатой. Округляем
+# до ~100 м, чтобы такие схлопнулись в одну «точку», а разные города — остались разными.
+_DISTINCT_PRECISION = 3
+DADATA_COUNT = 7
 
 
-def suggest(query: str, connection, settings: SettingsRepository, user_id: int) -> dict:
-    """Разобрать адрес слоями. Возвращает {"resolved": ...} или {"candidates": [...]}."""
+def suggest(query: str, connection, settings: SettingsRepository, user_id: int,
+            lat: float | None = None, lon: float | None = None) -> dict:
+    """Разобрать адрес слоями. Возвращает {"resolved": ...} или {"candidates": [...]}.
+
+    lat/lon — текущее местоположение пользователя (по GPS), если клиент его прислал.
+    Оно разрешает неоднозначные названия улиц по близости, не заставляя указывать город.
+    """
     text = (query or "").strip()
     if not text:
         return {"candidates": []}
 
-    # 0. Координаты прямо в тексте — здесь и решать нечего.
+    # 0. Координаты прямо в тексте — решать нечего.
     coordinates = parse_coordinates(text)
     if coordinates:
-        lat, lon = coordinates
-        return {"resolved": _resolved(text, lat, lon, source="manual_coordinates")}
+        clat, clon = coordinates
+        return {"resolved": _resolved(text, clat, clon, source="manual_coordinates")}
 
     city = settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург"
     region = settings.get("default_region", "Ленинградская область") or "Ленинградская область"
 
-    # 1. Nominatim. Уверенное совпадение — сразу resolved; слабое — придержим в кандидаты.
+    # 1. DaData — сильнейший слой на грязном вводе (опечатки, раскладка, сокращения).
+    suggestions = _fetch_dadata(text, connection, city, user_id)
+    decision = _decide_from_dadata(suggestions, lat, lon, city)
+    if decision is not None:
+        return decision
+
+    # 2. Nominatim: уверенное совпадение — resolved; слабое — придержим в кандидаты.
     nominatim_hit = _try_nominatim(text, connection, settings, city, region)
     if nominatim_hit and _is_confident(text, nominatim_hit):
         geo = nominatim_hit
         return {"resolved": _resolved(geo.normalized_address or text, geo.lat, geo.lon,
                                       source="nominatim", city=city, district=geo.district)}
 
-    candidates: list[dict] = []
-
-    # 2. DaData — если есть ключ и не исчерпан суточный лимит пользователя.
-    candidates.extend(_try_dadata(text, connection, city, user_id))
-
-    # 3. pg_trgm по улицам из OSM — офлайн-слой, работает всегда.
-    if len(candidates) < MAX_CANDIDATES:
-        candidates.extend(_try_osm_streets(text, connection, city))
-
-    # 4. Слабый ответ Nominatim — тоже кандидат (лучше показать, чем потерять).
+    # 3. Офлайн pg_trgm + слабый Nominatim → кандидаты.
+    candidates = _try_osm_streets(text, connection, city)
     if nominatim_hit and nominatim_hit.lat is not None:
         candidates.append(_candidate(
             label=nominatim_hit.normalized_address or text,
             lat=nominatim_hit.lat, lon=nominatim_hit.lon, source="nominatim", city=city,
         ))
-
     return {"candidates": _dedup(candidates)[:MAX_CANDIDATES]}
+
+
+def _fetch_dadata(text: str, connection, city: str, user_id: int) -> list:
+    """Подсказки DaData с учётом лимита и с фолбэком без фильтра по городу.
+
+    Сначала спрашиваем с подсказкой города (если у пользователя он верный — точнее
+    ранжирование). Пусто — переспрашиваем без города: чужой город в настройках не
+    должен обнулять реально существующий адрес. Обе неудачи (нет ключа, лимит, сеть)
+    — тихо возвращаем пусто, оркестратор идёт дальше.
+    """
+    token = dadata_token()
+    if not token:
+        return []
+    usage = DadataUsageRepository(connection)
+    if not usage.within_limit(user_id, dadata_daily_limit_per_user()):
+        return []
+    try:
+        found = dadata_service.suggest_addresses(
+            text, token=token, city=city, count=DADATA_COUNT, timeout_seconds=server_timeout(),
+        )
+        if not found:
+            found = dadata_service.suggest_addresses(
+                text, token=token, city=None, count=DADATA_COUNT, timeout_seconds=server_timeout(),
+            )
+    except dadata_service.DadataError:
+        return []
+    usage.increment(user_id)
+    return [s for s in found if s.lat is not None and s.lon is not None]
+
+
+def _decide_from_dadata(suggestions: list, lat: float | None, lon: float | None,
+                        city: str) -> dict | None:
+    """По подсказкам DaData решить: resolved, кандидаты — или пас (None) следующим слоям.
+
+    Точный дом (есть house) и одна точка — resolved. Есть GPS — резолвим ближайшую
+    точку (так «понимаем по GPS», не спрашивая город). Иначе несколько разных точек —
+    кандидаты на выбор. Пусто — None: пусть попробуют Nominatim и pg_trgm.
+    """
+    if not suggestions:
+        return None
+
+    ranked = suggestions
+    if lat is not None and lon is not None:
+        ranked = sorted(suggestions, key=lambda s: _haversine_km(lat, lon, s.lat, s.lon))
+    distinct = _distinct_by_point(ranked)
+    best = ranked[0]
+
+    if best.house:
+        # Точный дом: одна точка — сразу resolved; GPS — резолвим ближайшую; иначе,
+        # если домов в разных местах несколько, пусть выберет человек.
+        if len(distinct) == 1 or (lat is not None and lon is not None):
+            return {"resolved": _resolved(best.value, best.lat, best.lon, source="dadata",
+                                          city=best.city or city)}
+    # Улица без дома или несколько разных мест — отдаём на выбор.
+    candidates = [
+        _candidate(label=s.value, lat=s.lat, lon=s.lon, source="dadata", city=s.city or city)
+        for s in distinct[:MAX_CANDIDATES]
+    ]
+    return {"candidates": candidates}
+
+
+def _distinct_by_point(suggestions: list) -> list:
+    """Убрать дубли-точки (дом и его литеры/квартиры — одна координата)."""
+    seen: set[tuple[float, float]] = set()
+    unique = []
+    for s in suggestions:
+        key = (round(s.lat, _DISTINCT_PRECISION), round(s.lon, _DISTINCT_PRECISION))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(s)
+    return unique
 
 
 def _try_nominatim(text, connection, settings, city, region):
@@ -104,32 +190,6 @@ def _is_confident(text: str, geo) -> bool:
     has_house = any(char.isdigit() for char in text)
     importance = geo.confidence or 0
     return has_house and importance >= CONFIDENT_IMPORTANCE
-
-
-def _try_dadata(text: str, connection, city: str, user_id: int) -> list[dict]:
-    token = dadata_token()
-    if not token:
-        return []
-    usage = DadataUsageRepository(connection)
-    if not usage.within_limit(user_id, dadata_daily_limit_per_user()):
-        return []
-    try:
-        suggestions = dadata_service.suggest_addresses(
-            text, token=token, city=city, count=MAX_CANDIDATES, timeout_seconds=server_timeout(),
-        )
-    except dadata_service.DadataError:
-        # И лимит (403), и сбой сети — тихо уходим к pg_trgm. Счётчик при ошибке не растим.
-        return []
-    usage.increment(user_id)
-    result = []
-    for item in suggestions:
-        if item.lat is None or item.lon is None:
-            continue
-        result.append(_candidate(
-            label=item.value, lat=item.lat, lon=item.lon, source="dadata",
-            city=item.city or city,
-        ))
-    return result
 
 
 def _try_osm_streets(text: str, connection, city: str) -> list[dict]:
@@ -167,3 +227,12 @@ def _dedup(candidates: list[dict]) -> list[dict]:
         seen.add(key)
         unique.append(candidate)
     return unique
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lambda = math.radians(lon2 - lon1)
+    a = math.sin(d_phi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(d_lambda / 2) ** 2
+    return 2 * radius * math.asin(math.sqrt(a))

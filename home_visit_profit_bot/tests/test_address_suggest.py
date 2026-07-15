@@ -196,3 +196,75 @@ def test_suggest_endpoint_empty_query(fresh_db):
         resp = client.post("/api/address/suggest", json={"query": "  "},
                            headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 400
+
+
+# --- точный дом резолвится, неоднозначность — на выбор, GPS разрешает (баг «Авиаконструкторов 33») ---
+
+def _sugg(value, lat, lon, house, city="Санкт-Петербург"):
+    return DadataSuggestion(value=value, lat=lat, lon=lon, city=city, street=None, house=house)
+
+
+def test_dadata_exact_house_resolves(config, monkeypatch):
+    """DaData нашла точный дом — резолвим сразу, без ручного ввода (репорт-баг)."""
+    monkeypatch.setattr(orch, "geocode_address", lambda *a, **k: None)
+    monkeypatch.setattr(orch, "dadata_token", lambda: "k")
+    monkeypatch.setattr(orch, "dadata_daily_limit_per_user", lambda: 300)
+    # DaData отдаёт дом и его литеры — одна точка.
+    monkeypatch.setattr(dadata_service, "suggest_addresses", lambda *a, **k: [
+        _sugg("г Санкт-Петербург, пр-кт Авиаконструкторов, д 33", 60.021055, 30.235708, "33"),
+        _sugg("г Санкт-Петербург, пр-кт Авиаконструкторов, д 33 литера А", 60.021055, 30.235708, "33"),
+    ])
+    result = _suggest(config, "Авиаконструкторов 33")
+    assert "resolved" in result
+    assert result["resolved"]["source"] == "dadata"
+    assert round(result["resolved"]["lat"], 4) == 60.0211
+
+
+def test_dadata_ambiguous_houses_give_candidates(config, monkeypatch):
+    """Один дом в разных городах, GPS нет — не резолвим молча, отдаём на выбор."""
+    monkeypatch.setattr(orch, "geocode_address", lambda *a, **k: None)
+    monkeypatch.setattr(orch, "dadata_token", lambda: "k")
+    monkeypatch.setattr(orch, "dadata_daily_limit_per_user", lambda: 300)
+    monkeypatch.setattr(dadata_service, "suggest_addresses", lambda *a, **k: [
+        _sugg("г Москва, ул Ленина, д 40", 55.75, 37.61, "40", city="Москва"),
+        _sugg("г Санкт-Петербург, ул Ленина, д 40", 59.96, 30.30, "40"),
+    ])
+    result = _suggest(config, "Ленина 40")
+    assert "candidates" in result
+    assert len(result["candidates"]) == 2
+
+
+def test_gps_disambiguates_to_nearest(config, monkeypatch):
+    """Есть GPS — из одинаковых «Ленина 40» берём ближайшую и резолвим (понимаем по GPS)."""
+    monkeypatch.setattr(orch, "geocode_address", lambda *a, **k: None)
+    monkeypatch.setattr(orch, "dadata_token", lambda: "k")
+    monkeypatch.setattr(orch, "dadata_daily_limit_per_user", lambda: 300)
+    monkeypatch.setattr(dadata_service, "suggest_addresses", lambda *a, **k: [
+        _sugg("г Москва, ул Ленина, д 40", 55.75, 37.61, "40", city="Москва"),
+        _sugg("г Санкт-Петербург, ул Ленина, д 40", 59.96, 30.30, "40"),
+    ])
+    with connect(config) as conn:
+        conn.set_user(_uid())
+        # Пользователь физически в Петербурге.
+        result = orch.suggest("Ленина 40", conn, SettingsRepository(conn), _uid(),
+                              lat=59.95, lon=30.31)
+    assert "resolved" in result
+    assert result["resolved"]["city"] == "Санкт-Петербург"
+
+
+def test_dadata_wrong_city_setting_still_resolves(config, monkeypatch):
+    """Город в настройках не тот — фолбэк без фильтра всё равно находит дом."""
+    monkeypatch.setattr(orch, "geocode_address", lambda *a, **k: None)
+    monkeypatch.setattr(orch, "dadata_token", lambda: "k")
+    monkeypatch.setattr(orch, "dadata_daily_limit_per_user", lambda: 300)
+    calls = []
+    def fake(query, *, token, city=None, count=7, timeout_seconds=5.0):
+        calls.append(city)
+        if city:  # с «неправильным» городом DaData ничего не нашла
+            return []
+        return [_sugg("г Санкт-Петербург, пр-кт Авиаконструкторов, д 33", 60.021, 30.235, "33")]
+    monkeypatch.setattr(dadata_service, "suggest_addresses", fake)
+    result = _suggest(config, "Авиаконструкторов 33")
+    assert "resolved" in result
+    # Было два вызова: с городом (пусто) и без города (нашёл).
+    assert calls[0] is not None and calls[-1] is None
