@@ -1,7 +1,10 @@
 package com.homevisit.location.ui
 
+import android.Manifest
 import android.app.Application
 import android.content.Context
+import android.content.pm.PackageManager
+import android.location.LocationManager
 import com.homevisit.location.MainActivity
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -313,8 +316,10 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 val suggestion = repository.suggestAddress(
                     serverUrl, apiKey, address, lat = gps?.first, lon = gps?.second,
                 )
-                if (suggestion.resolved == null && suggestion.candidates.size >= 2) {
-                    // Не уверены — пусть выберет человек. Расчёт откладываем.
+                if (suggestion.resolved == null && suggestion.candidates.isNotEmpty()) {
+                    // Не уверены — пусть выберет человек (даже единственный вариант
+                    // подтверждается одним тапом, а не подставляется молча и не
+                    // теряется). Расчёт откладываем.
                     pendingCandidate = PendingCandidate(serverUrl, apiKey, address, income, clinic)
                     candidateState.value = CandidateUiState(
                         message = "Уточните адрес — выберите вариант",
@@ -328,7 +333,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                         suggestion.resolved.lat, suggestion.resolved.lon)
                     return@launch
                 }
-                // Ноль-один кандидат без resolved — идём обычным путём: сервер сам
+                // Ноль кандидатов без resolved — идём обычным путём: сервер сам
                 // попробует геокодировать по названию.
             }
             runCandidate(serverUrl, apiKey, address, income, clinic, routeKm, routeMinutes, null, null)
@@ -344,10 +349,35 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         val prefs = getApplication<Application>()
             .getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE)
         val at = prefs.getLong(MainActivity.KEY_LAST_GPS_AT, 0L)
-        if (at == 0L || System.currentTimeMillis() - at > 60 * 60 * 1000L) return null
-        val lat = prefs.getString(MainActivity.KEY_LAST_GPS_LAT, null)?.toDoubleOrNull() ?: return null
-        val lon = prefs.getString(MainActivity.KEY_LAST_GPS_LON, null)?.toDoubleOrNull() ?: return null
-        return lat to lon
+        if (at != 0L && System.currentTimeMillis() - at <= 60 * 60 * 1000L) {
+            val lat = prefs.getString(MainActivity.KEY_LAST_GPS_LAT, null)?.toDoubleOrNull()
+            val lon = prefs.getString(MainActivity.KEY_LAST_GPS_LON, null)?.toDoubleOrNull()
+            if (lat != null && lon != null) return lat to lon
+        }
+        return systemLastKnownGps()
+    }
+
+    /**
+     * Вне смены трекинг выключен и prefs пустые — берём последнюю известную точку у
+     * самой системы (мгновенно, без нового замера и без расхода батареи). Возраст
+     * ограничен двумя часами: GPS здесь лишь мягкая подсказка города, но совсем
+     * устаревшая точка из другого города могла бы молча выбрать не тот адрес-дом.
+     */
+    private fun systemLastKnownGps(): Pair<Double, Double>? {
+        val app = getApplication<Application>()
+        if (app.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            return null
+        }
+        val manager = app.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+            ?: return null
+        val fresh = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+            .mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+            .filter { System.currentTimeMillis() - it.time <= 2 * 60 * 60 * 1000L }
+            .maxByOrNull { it.time }
+            ?: return null
+        return fresh.latitude to fresh.longitude
     }
 
     /**
