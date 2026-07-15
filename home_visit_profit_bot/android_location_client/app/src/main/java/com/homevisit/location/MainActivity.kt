@@ -121,6 +121,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.homevisit.location.data.HomeVisitRepository
+import com.homevisit.location.domain.AddressCandidate
 import com.homevisit.location.domain.AuthUser
 import com.homevisit.location.ui.AuthFlow
 import com.homevisit.location.ui.AuthViewModel
@@ -229,6 +230,7 @@ class MainActivity : ComponentActivity() {
                     onPrepareEndShift = viewModel::prepareEndShift,
                     onClearEndShift = viewModel::clearEndShift,
                     onCalculateVisit = viewModel::calculateVisitCandidate,
+                    onPickAddressCandidate = viewModel::pickAddressCandidate,
                     onAcceptCandidate = viewModel::acceptCandidate,
                     onRejectCandidate = viewModel::rejectCandidate,
                     onCompleteCurrentVisit = viewModel::completeCurrentVisit,
@@ -453,6 +455,8 @@ internal data class WorkActions(
     val onPrepareEndShift: () -> Unit,
     val onClearEndShift: () -> Unit,
     val onCalculateVisit: (String, Double, String, Double?, Double?) -> Unit,
+    /** Тап по варианту адреса из кандидатов (Фаза 2): докрутить расчёт по его координатам. */
+    val onPickAddressCandidate: (AddressCandidate) -> Unit,
     val onAcceptCandidate: () -> Unit,
     val onRejectCandidate: () -> Unit,
     val onCompleteCurrentVisit: () -> Unit,
@@ -517,6 +521,7 @@ internal fun HomeVisitApp(
     onPrepareEndShift: (String, String) -> Unit,
     onClearEndShift: () -> Unit,
     onCalculateVisit: (String, String, String, Double, String, Double?, Double?) -> Unit,
+    onPickAddressCandidate: (AddressCandidate) -> Unit,
     onAcceptCandidate: (String, String) -> Unit,
     onRejectCandidate: (String, String) -> Unit,
     onCompleteCurrentVisit: (String, String) -> Unit,
@@ -598,6 +603,7 @@ internal fun HomeVisitApp(
         onCalculateVisit = { address, income, clinic, routeKm, routeMinutes ->
             onCalculateVisit(serverUrl, apiKey, address, income, clinic, routeKm, routeMinutes)
         },
+        onPickAddressCandidate = onPickAddressCandidate,
         onAcceptCandidate = { onAcceptCandidate(serverUrl, apiKey) },
         onRejectCandidate = { onRejectCandidate(serverUrl, apiKey) },
         onCompleteCurrentVisit = { onCompleteCurrentVisit(serverUrl, apiKey) },

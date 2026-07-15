@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.homevisit.location.OrderSource
 import com.homevisit.location.data.HomeVisitRepository
 import com.homevisit.location.domain.AppSettingsSnapshot
+import com.homevisit.location.domain.AddressCandidate
 import com.homevisit.location.domain.CandidateEstimate
 import com.homevisit.location.domain.ClinicOptions
 import com.homevisit.location.domain.EndDayDetails
@@ -283,6 +284,11 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    // Запрос оценки, отложенный до выбора адреса из кандидатов (Фаза 2). Держим здесь
+    // всё, что нужно, чтобы докрутить расчёт после тапа по варианту — без новых
+    // параметров у экранного колбэка.
+    private var pendingCandidate: PendingCandidate? = null
+
     fun calculateVisitCandidate(
         serverUrl: String,
         apiKey: String,
@@ -296,39 +302,95 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             ensureActiveDay()
             candidateState.value = CandidateUiState(isLoading = true)
             repository.syncPending(serverUrl, apiKey)
-            val result = repository.calculateVisitCandidate(
-                serverUrl = serverUrl,
-                apiKey = apiKey,
-                address = address,
-                income = income,
-                clinic = clinic,
-                routeKm = routeKm,
-                routeMinutes = routeMinutes,
-            )
-            candidateState.value = when {
-                result.ok && result.estimate != null -> CandidateUiState(
-                    estimate = result.estimate,
-                    message = "Расчёт готов",
-                    parking = result.parking,
-                )
-                result.outsideCoverage -> CandidateUiState(
-                    // Не «ошибка», а честная граница: карты этого города у нас пока нет.
-                    // Молча подставить ноль километров было бы куда хуже — заказ выглядел
-                    // бы бесконечно выгодным.
-                    message = "Этот адрес пока вне покрытия наших карт. Введите километры и минуты дороги вручную.",
-                    needsManualRoute = true,
-                )
-                result.needsManualRoute -> CandidateUiState(
-                    message = "Нужно ввести километры и минуты дороги вручную.",
-                    needsManualRoute = true,
-                )
-                result.needsCoordinates -> CandidateUiState(
-                    message = "Сервер не нашёл адрес. Введите координаты вместо адреса.",
-                )
-                else -> CandidateUiState(
-                    message = "Не удалось рассчитать адрес: ${result.reason}",
-                )
+
+            // Ручной маршрут — человек уже разбирается с трудным адресом сам, подсказки
+            // тут только помешают: считаем сразу. Иначе спрашиваем слои геокодинга.
+            val hasManualRoute = routeKm != null && routeMinutes != null
+            if (!hasManualRoute) {
+                val suggestion = repository.suggestAddress(serverUrl, apiKey, address)
+                if (suggestion.resolved == null && suggestion.candidates.size >= 2) {
+                    // Не уверены — пусть выберет человек. Расчёт откладываем.
+                    pendingCandidate = PendingCandidate(serverUrl, apiKey, address, income, clinic)
+                    candidateState.value = CandidateUiState(
+                        message = "Уточните адрес — выберите вариант",
+                        addressCandidates = suggestion.candidates,
+                    )
+                    return@launch
+                }
+                if (suggestion.resolved != null) {
+                    // Уверенный resolved — считаем сразу по его координатам.
+                    runCandidate(serverUrl, apiKey, address, income, clinic, null, null,
+                        suggestion.resolved.lat, suggestion.resolved.lon)
+                    return@launch
+                }
+                // Ноль-один кандидат без resolved — идём обычным путём: сервер сам
+                // попробует геокодировать по названию.
             }
+            runCandidate(serverUrl, apiKey, address, income, clinic, routeKm, routeMinutes, null, null)
+        }
+    }
+
+    /**
+     * Человек выбрал адрес из кандидатов — докручиваем отложенный расчёт по координатам
+     * выбранного варианта (уходят как ручная точка).
+     */
+    fun pickAddressCandidate(candidate: AddressCandidate) {
+        val pending = pendingCandidate ?: return
+        pendingCandidate = null
+        viewModelScope.launch {
+            candidateState.value = CandidateUiState(isLoading = true)
+            runCandidate(
+                pending.serverUrl, pending.apiKey, pending.address,
+                pending.income, pending.clinic, null, null, candidate.lat, candidate.lon,
+            )
+        }
+    }
+
+    private suspend fun runCandidate(
+        serverUrl: String,
+        apiKey: String,
+        address: String,
+        income: Double,
+        clinic: String,
+        routeKm: Double?,
+        routeMinutes: Double?,
+        lat: Double?,
+        lon: Double?,
+    ) {
+        val result = repository.calculateVisitCandidate(
+            serverUrl = serverUrl,
+            apiKey = apiKey,
+            address = address,
+            income = income,
+            clinic = clinic,
+            routeKm = routeKm,
+            routeMinutes = routeMinutes,
+            lat = lat,
+            lon = lon,
+        )
+        candidateState.value = when {
+            result.ok && result.estimate != null -> CandidateUiState(
+                estimate = result.estimate,
+                message = "Расчёт готов",
+                parking = result.parking,
+            )
+            result.outsideCoverage -> CandidateUiState(
+                // Не «ошибка», а честная граница: карты этого города у нас пока нет.
+                // Молча подставить ноль километров было бы куда хуже — заказ выглядел
+                // бы бесконечно выгодным.
+                message = "Этот адрес пока вне покрытия наших карт. Введите километры и минуты дороги вручную.",
+                needsManualRoute = true,
+            )
+            result.needsManualRoute -> CandidateUiState(
+                message = "Нужно ввести километры и минуты дороги вручную.",
+                needsManualRoute = true,
+            )
+            result.needsCoordinates -> CandidateUiState(
+                message = "Сервер не нашёл адрес. Введите координаты вместо адреса.",
+            )
+            else -> CandidateUiState(
+                message = "Не удалось рассчитать адрес: ${result.reason}",
+            )
         }
     }
 
@@ -1068,6 +1130,17 @@ data class CandidateUiState(
     val needsManualRoute: Boolean = false,
     /** Адрес в зоне платной парковки. Показываем ДО того, как человек нажал «Принять». */
     val parking: ParkingHint? = null,
+    /** Сервер не уверен в адресе — 2–3 варианта на выбор (Фаза 2). Пусто = выбирать нечего. */
+    val addressCandidates: List<AddressCandidate> = emptyList(),
+)
+
+/** Отложенный до выбора адреса запрос оценки: всё, чтобы докрутить расчёт после тапа. */
+private data class PendingCandidate(
+    val serverUrl: String,
+    val apiKey: String,
+    val address: String,
+    val income: Double,
+    val clinic: String,
 )
 
 data class RouteUiState(

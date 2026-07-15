@@ -124,6 +124,7 @@ import com.homevisit.location.data.HomeVisitRepository
 import com.homevisit.location.domain.AuthUser
 import com.homevisit.location.ui.AuthFlow
 import com.homevisit.location.ui.AuthViewModel
+import com.homevisit.location.domain.AddressCandidate
 import com.homevisit.location.domain.CandidateEstimate
 import com.homevisit.location.domain.ClinicReportRow
 import com.homevisit.location.domain.SettingField
@@ -399,6 +400,7 @@ internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
                 ?: uiState.routeVisits.lastOrNull()?.income,
             templates = uiState.appSettings.addressTemplates(),
             onCalculate = workActions.onCalculateVisit,
+            onPickCandidate = workActions.onPickAddressCandidate,
             onReopenResult = { showResult = true },
         )
         OtherEntriesSection(uiState, workActions)
@@ -432,6 +434,7 @@ internal fun EvaluateForm(
     frequentIncome: Double?,
     templates: List<AddressTemplate>,
     onCalculate: (String, Double, String, Double?, Double?) -> Unit,
+    onPickCandidate: (AddressCandidate) -> Unit,
     onReopenResult: () -> Unit,
 ) {
     var address by rememberSaveable { mutableStateOf("") }
@@ -470,6 +473,11 @@ internal fun EvaluateForm(
             }
         }
         CompanyPicker(clinics = clinics, value = clinic, onValue = { clinic = it })
+        // Сервер не уверен в адресе — предлагаем 2–3 варианта. Тап = подтверждение,
+        // координаты выбранного уходят в расчёт как ручная точка. Молча ничего не берём.
+        if (candidate.addressCandidates.isNotEmpty()) {
+            AddressCandidatesList(candidate.addressCandidates, onPickCandidate)
+        }
         if (candidate.needsManualRoute) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MoneyField(modifier = Modifier.weight(1f), value = routeKmText, onValueChange = { routeKmText = it }, label = "Км вручную")
@@ -504,6 +512,54 @@ internal fun EvaluateForm(
             }
         }
     }
+}
+
+/**
+ * Список 2–3 кандидатов адреса, когда сервер не уверен (Фаза 2). Компактно, одним
+ * тапом: подпись адреса и — мелко — откуда вариант. Выбор координат уходит в расчёт
+ * как ручная точка; сервер молча ничего не подставлял.
+ */
+@Composable
+private fun AddressCandidatesList(
+    candidates: List<AddressCandidate>,
+    onPick: (AddressCandidate) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "Уточните адрес — какой из этих?",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        candidates.forEach { candidate ->
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onPick(candidate) },
+                shape = MaterialTheme.shapes.medium,
+                tonalElevation = 2.dp,
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Text(candidate.label, style = MaterialTheme.typography.bodyLarge)
+                    val hint = addressSourceHint(candidate.source)
+                    if (hint.isNotBlank()) {
+                        Text(
+                            hint,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Человеческая подпись, откуда взялся вариант адреса. */
+private fun addressSourceHint(source: String): String = when (source) {
+    "dadata" -> "по подсказкам"
+    "osm" -> "по карте"
+    "nominatim" -> "по карте"
+    else -> ""
 }
 
 /**

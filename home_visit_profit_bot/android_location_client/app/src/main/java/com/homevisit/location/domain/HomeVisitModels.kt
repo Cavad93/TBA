@@ -344,6 +344,29 @@ data class CandidateRequestResult(
         get() = reason == "needs_coordinates"
 }
 
+/**
+ * Один вариант адреса из слоёв геокодинга (Фаза 2). Сервер отдаёт 2–3 таких, когда не
+ * уверен, и человек выбирает тапом — координаты выбранного уходят в расчёт как ручная
+ * точка. Никакой адрес не подставляется молча.
+ */
+data class AddressCandidate(
+    val label: String,
+    val lat: Double,
+    val lon: Double,
+    val city: String? = null,
+    /** Откуда вариант: "dadata" | "osm" | "nominatim". Для мелкой подписи-источника. */
+    val source: String = "",
+)
+
+/**
+ * Ответ `/api/address/suggest`: либо уверенный адрес (resolved), либо список кандидатов.
+ * Ровно одно из двух непусто — так же, как отвечает сервер.
+ */
+data class AddressSuggestResult(
+    val resolved: AddressCandidate? = null,
+    val candidates: List<AddressCandidate> = emptyList(),
+)
+
 data class ServerRouteSnapshot(
     val visitsCount: Int,
     val totalKm: Double,

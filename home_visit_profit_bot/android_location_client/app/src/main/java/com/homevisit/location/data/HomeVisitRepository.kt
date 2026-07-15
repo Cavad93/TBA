@@ -11,6 +11,8 @@ import com.homevisit.location.data.local.SyncStatus
 import com.homevisit.location.data.local.TelemedEntryEntity
 import com.homevisit.location.data.local.VisitEntity
 import com.homevisit.location.data.local.WorkDayEntity
+import com.homevisit.location.domain.AddressCandidate
+import com.homevisit.location.domain.AddressSuggestResult
 import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.AuthOutcome
 import com.homevisit.location.domain.AuthUser
@@ -658,6 +660,8 @@ class HomeVisitRepository private constructor(
         clinic: String,
         routeKm: Double? = null,
         routeMinutes: Double? = null,
+        lat: Double? = null,
+        lon: Double? = null,
     ): CandidateRequestResult = withContext(Dispatchers.IO) {
         val payload = JSONObject()
             .put("address", address.trim())
@@ -667,9 +671,58 @@ class HomeVisitRepository private constructor(
             payload.put("route_km", routeKm)
             payload.put("route_minutes", routeMinutes)
         }
+        // Координаты выбранного кандидата уходят как ручная точка — сервер тогда не
+        // геокодит заново (manual_geocoding_result), а считает дорогу до неё.
+        if (lat != null && lon != null) {
+            payload.put("lat", lat)
+            payload.put("lon", lon)
+        }
         val response = postJson(normalizeApiUrl(serverUrl, "/api/visits/candidate"), apiKey, payload)
             ?: return@withContext CandidateRequestResult(ok = false, reason = "network_error")
         parseCandidateResult(response)
+    }
+
+    /**
+     * Спросить у сервера подсказки адреса (Фаза 2). Сервер отдаёт либо уверенный
+     * resolved-адрес, либо 0..3 кандидата. Сеть недоступна — возвращаем пустой
+     * результат: поток добавления заказа тогда пойдёт обычным путём (сервер сам
+     * попробует геокодировать по названию).
+     */
+    suspend fun suggestAddress(
+        serverUrl: String,
+        apiKey: String,
+        query: String,
+    ): AddressSuggestResult = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("query", query.trim())
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/address/suggest"), apiKey, payload)
+            ?: return@withContext AddressSuggestResult()
+        val resolvedJson = response.optJSONObject("resolved")
+        val resolved = if (resolvedJson != null) parseAddressCandidate(resolvedJson) else null
+        val candidatesJson = response.optJSONArray("candidates")
+        val candidates = mutableListOf<AddressCandidate>()
+        if (candidatesJson != null) {
+            for (i in 0 until candidatesJson.length()) {
+                val item = candidatesJson.optJSONObject(i) ?: continue
+                parseAddressCandidate(item)?.let { candidates.add(it) }
+            }
+        }
+        AddressSuggestResult(resolved = resolved, candidates = candidates)
+    }
+
+    private fun parseAddressCandidate(json: JSONObject): AddressCandidate? {
+        // resolved несёт поле address, кандидат — label. Координаты обязательны:
+        // без них вариант бесполезен (нечем считать дорогу), молча пропускаем.
+        val label = json.optString("label").ifBlank { json.optString("address") }
+        if (label.isBlank() || json.isNull("lat") || json.isNull("lon")) {
+            return null
+        }
+        return AddressCandidate(
+            label = label,
+            lat = json.optDouble("lat"),
+            lon = json.optDouble("lon"),
+            city = json.optString("city").ifBlank { null },
+            source = json.optString("source"),
+        )
     }
 
     suspend fun acceptCandidate(
