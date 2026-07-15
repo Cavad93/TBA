@@ -1,0 +1,72 @@
+"""Точка безубыточности смены (Фаза 10.2).
+
+Аренда авто и прочие обязательные траты — это «беговая дорожка»: смена начинается в
+минусе на сумму фикс-расходов, и только когда чистый доход завершённых заказов их
+перекрыл, работник начинает зарабатывать себе. Момент «смена отбита» — когда
+накопленный чистый (доходы завершённых визитов − топливо по факту км − износ)
+пересекает сумму фикс-расходов.
+
+Считается и на телефоне (из локальных данных дня), и на сервере при синке — сервер
+источник правды, расхождение ловится тем же логом, что и вердикт (Ф3.6). Здесь —
+серверная сторона: чистая функция над днём и завершёнными визитами.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from app.models import Visit, WorkDay
+from app.repositories import DailyStatsRepository, SettingsRepository
+from app.services.profitability_service import calculate_day_profitability
+
+
+@dataclass(frozen=True)
+class BreakevenStatus:
+    fixed_costs: float          # аренда + прочие обязательные расходы смены, ₽
+    accumulated_net: float      # накопленный чистый доход завершённых визитов, ₽
+    is_paid_off: bool           # смена отбита (чистый ≥ фикс-расходов)
+    remaining_to_breakeven: float  # сколько ещё до нуля, ₽ (0, если уже отбита)
+
+    def payload(self) -> dict:
+        return {
+            "fixed_costs": round(self.fixed_costs, 2),
+            "accumulated_net": round(self.accumulated_net, 2),
+            "is_paid_off": self.is_paid_off,
+            "remaining_to_breakeven": round(self.remaining_to_breakeven, 2),
+        }
+
+
+def shift_fixed_costs(settings_repo: SettingsRepository) -> float:
+    """Сумма обязательных расходов смены: аренда авто + прочее (мойка, связь…)."""
+    rent = max(0.0, settings_repo.get_float("shift_rent_cost", 0.0))
+    other = max(0.0, settings_repo.get_float("shift_fixed_costs", 0.0))
+    return rent + other
+
+
+def shift_breakeven(
+    day: WorkDay,
+    visits: list[Visit],
+    settings_repo: SettingsRepository,
+    stats_repo: DailyStatsRepository | None = None,
+) -> BreakevenStatus | None:
+    """Статус безубыточности или None, если фикс-расходов нет (блок не показываем).
+
+    None при нулевых фикс-расходах: у кого свой авто и нет обязательных трат —
+    безубыточность бессмысленна, смена в плюсе с первого заказа.
+    """
+    fixed = shift_fixed_costs(settings_repo)
+    if fixed <= 0:
+        return None
+
+    completed = [visit for visit in visits if visit.status == "completed"]
+    # Чистый доход завершённых визитов: доходы − топливо по факту км − износ.
+    # calculate_day_profitability со списком только завершённых считает маршрут по ним.
+    net, _, _, _, _ = calculate_day_profitability(day, completed, settings_repo, stats_repo)
+
+    remaining = fixed - net
+    return BreakevenStatus(
+        fixed_costs=fixed,
+        accumulated_net=net,
+        is_paid_off=net >= fixed,
+        remaining_to_breakeven=max(0.0, remaining),
+    )

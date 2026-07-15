@@ -5,13 +5,14 @@ from app.database import Database
 from datetime import date, datetime, timedelta
 
 
-from app.repositories import DailyStatsRepository, SettingsRepository, WorkDayRepository
+from app.repositories import DailyStatsRepository, SettingsRepository, VisitRepository, WorkDayRepository
 from app.services.indices_service import level_for
 from app.services.mobile_workload_service import MobileWorkloadService
 from app.services.mobile_report_service import MobileReportService
 from app.services.rest_service import rest_facts
 from app.services.overwork_pricing_service import OverworkPricing, build_pricing
 from app.services.osago_service import osago_card
+from app.services.breakeven_service import shift_breakeven
 
 
 # Порог «зелёной зоны» восстановления: ниже — отдохнул, ресурс есть.
@@ -94,7 +95,17 @@ class HomeService:
             # ОСАГО: карточка отсчёта появляется за 14 дней до конца полиса (Фаза 5).
             # None — полис не заведён или срок ещё далеко: не отвлекаем.
             "osago": osago_card(self.settings, today=today),
+            # Безубыточность смены (Фаза 10.2): прогресс до момента «смена отбита».
+            # None — фикс-расходов нет (свой авто) или смена не идёт: блок молчит.
+            "breakeven": self._breakeven(active),
         }
+
+    def _breakeven(self, active) -> dict[str, Any] | None:
+        if active is None:
+            return None
+        completed = VisitRepository(self.connection).list_for_day(active.id, ("completed",))
+        status = shift_breakeven(active, completed, self.settings, self.stats)
+        return status.payload() if status else None
 
     # --- сборка блоков ---------------------------------------------------
 
