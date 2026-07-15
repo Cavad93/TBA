@@ -5,7 +5,7 @@ from app.database import Database
 from datetime import date, datetime, timedelta, timezone
 
 
-from app.database import current_user_id
+from app.database import db_user_id
 from app.repositories import (
     DailyStatsRepository,
     DayMetricRepository,
@@ -133,7 +133,7 @@ class ProfileService:
 
     def _user_block(self, nickname: str | None, today: date) -> dict[str, Any]:
         row = None
-        user_id = current_user_id.get()
+        user_id = db_user_id(self.connection)
         if user_id:
             row = self.connection.execute(
                 "SELECT nickname, occupation, created_at FROM users WHERE id = ?",

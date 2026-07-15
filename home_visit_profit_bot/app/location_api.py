@@ -334,6 +334,9 @@ def _handler_factory(config: AppConfig):
                 return
             with connect(config) as connection:
                 settings = SettingsRepository(connection)
+                # ИСПРАВЛЕНО: раньше здесь не было `days`, а ниже он использовался в
+                # break_hours_before — старт смены падал с NameError. Заводим явно.
+                days = WorkDayRepository(connection)
                 # Старт и финиш разворачиваем из шаблонов и геокодируем СРАЗУ. Раньше день
                 # создавался вообще без координат (по умолчанию там строка «Дом»), и
                 # маршрут строить было не от чего — расчёт откатывался на грубую оценку.

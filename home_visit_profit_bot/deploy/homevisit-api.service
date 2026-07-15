@@ -1,16 +1,15 @@
-# systemd-юнит для backend REST API (запуск как постоянная служба).
+# systemd-юнит для backend REST API — на uvicorn/FastAPI (Фаза 1).
 #
-# Установка:
+# Установка / обновление:
 #   sudo cp deploy/homevisit-api.service /etc/systemd/system/
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable --now homevisit-api
-#   systemctl status homevisit-api
+#   sudo systemctl daemon-reload && sudo systemctl restart homevisit-api
 #
-# Пути ниже рассчитаны на разворачивание репозитория в /opt/tba.
-# Поправьте User/WorkingDirectory/пути под свою установку.
+# ОТКАТ на старый ThreadingHTTPServer: раскомментировать ExecStart с app.main,
+# закомментировать uvicorn, daemon-reload + restart. Старый entrypoint (app/main.py)
+# оставлен специально ради отката — он поднимает тот же REST на том же порту.
 
 [Unit]
-Description=Home Visit backend REST API (Android)
+Description=Home Visit backend REST API (FastAPI/uvicorn)
 After=network-online.target
 Wants=network-online.target
 
@@ -18,21 +17,26 @@ Wants=network-online.target
 Type=simple
 User=homevisit
 Group=homevisit
-
-# Каталог, где лежат config.yaml, .env и создаётся data.sqlite3.
 WorkingDirectory=/opt/tba/home_visit_profit_bot
 EnvironmentFile=/opt/tba/home_visit_profit_bot/.env
-ExecStart=/opt/tba/home_visit_profit_bot/.venv/bin/python -m app.main
+
+# Лимиты (Фаза 1.7): воркеров немного (сервер 1 маленький), всплеск гасит
+# --limit-concurrency (сверх лимита — 503, а не рост памяти без предела); короткий
+# keep-alive не даёт простаивающим соединениям копиться. Размер тела режет Caddy.
+Environment=DB_POOL_MIN=2
+Environment=DB_POOL_MAX=20
+ExecStart=/opt/tba/home_visit_profit_bot/.venv/bin/uvicorn app.asgi:app --host 127.0.0.1 --port 8088 --workers 2 --limit-concurrency 64 --timeout-keep-alive 15 --no-access-log
+
+# ОТКАТ (закомментировано):
+# ExecStart=/opt/tba/home_visit_profit_bot/.venv/bin/python -m app.main
 
 Restart=on-failure
 RestartSec=3
 
-# Базовое усиление безопасности процесса.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-# Единственный каталог, куда службе можно писать (SQLite-база, логи).
 ReadWritePaths=/opt/tba/home_visit_profit_bot
 
 [Install]

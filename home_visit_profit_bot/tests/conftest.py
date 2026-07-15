@@ -66,6 +66,16 @@ def _no_email(monkeypatch):
     monkeypatch.setattr(auth, "new_numeric_code", lambda digits=6: "123456")
 
 
+@pytest.fixture(autouse=True)
+def _clear_osrm_cache():
+    """Кеш матриц OSRM живёт в процессе — между тестами его надо чистить, иначе один
+    тест увидит матрицу, посчитанную (или замоканную) в другом."""
+    from app.services.osrm_cache import get_cache
+    get_cache().clear()
+    yield
+    get_cache().clear()
+
+
 def _create_schema() -> str:
     import psycopg
     schema = f"vt_{os.getpid()}_{next(_counter)}"

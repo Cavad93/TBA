@@ -90,6 +90,23 @@ class Database:
         return False
 
 
+def db_user_id(connection: Any) -> int | None:
+    """Кто текущий пользователь запроса — по GUC самой базы, а не по contextvar.
+
+    GUC `app.user_id` ставят оба стека (старый connect() и пул FastAPI), и он живёт
+    внутри соединения. В отличие от питоновского contextvar, он не теряется на границе
+    потоков — FastAPI гоняет синхронные зависимости и хендлеры в разных потоках пула.
+    """
+    row = connection.execute("SELECT current_setting('app.user_id', true) AS u").fetchone()
+    raw = row["u"] if row else None
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def connect(config: AppConfig) -> Database:
     """Открыть соединение с PostgreSQL (DATABASE_URL обязателен)."""
     if not config.database_url:

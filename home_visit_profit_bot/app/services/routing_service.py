@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from math import asin, cos, radians, sin, sqrt
 from urllib.parse import urlencode
@@ -32,6 +33,14 @@ SNAP_RADIUS_M = 2000
 # и Петербург. Здесь запас не нужен: если дороги нет в километре, человек не в зоне.
 SNAP_RADIUS_WALK_M = 1000
 
+# Сетевой сбой при обращении к OSRM пробуем повторить один раз: сервер карт мог
+# моргнуть. Это касается ТОЛЬКО ошибок связи — HTTP 400 (NoSegment) не сбой, его
+# не ретраим (см. _raise_if_outside_coverage).
+NETWORK_RETRIES = 1
+RETRY_BACKOFF_SECONDS = 0.25
+
+_USER_AGENT = "home-visit-profit-bot/1.0"
+
 
 @dataclass(frozen=True)
 class DistanceMatrix:
@@ -49,20 +58,21 @@ def summarize_manual_route(visits: list[Visit]) -> RouteSummary:
     )
 
 
-def get_route(
-    from_point: Point,
-    to_point: Point,
-    *,
-    osrm_url: str,
-    profile: str = "driving",
-    timeout_seconds: float = 10,
-    duration_factor: float = 1.0,
-) -> tuple[float, float]:
+# --- Построение URL и разбор ответа: общие чистые функции ---
+#
+# Синхронный и асинхронный пути ходят по HTTP по-разному, но URL строят и ответ
+# разбирают ОДНИМИ И ТЕМИ ЖЕ функциями. Иначе два пути со временем разъедутся, и
+# «на телефоне одно, на сервере другое» вернётся уже внутри маршрутизатора.
+
+
+def _route_url(from_point: Point, to_point: Point, profile: str, osrm_url: str) -> str:
     coordinates = f"{from_point.lon},{from_point.lat};{to_point.lon},{to_point.lat}"
     radius = snap_radius(profile)
     params = urlencode({"overview": "false", "radiuses": f"{radius};{radius}"})
-    url = f"{osrm_url.rstrip('/')}/route/v1/{profile}/{coordinates}?{params}"
-    payload = _get_json(url, timeout_seconds)
+    return f"{osrm_url.rstrip('/')}/route/v1/{profile}/{coordinates}?{params}"
+
+
+def _parse_route(payload: dict, duration_factor: float) -> tuple[float, float]:
     _raise_if_outside_coverage(payload)
     if payload.get("code") != "Ok" or not payload.get("routes"):
         raise RoutingError(payload.get("message") or "OSRM не вернул маршрут")
@@ -70,24 +80,17 @@ def get_route(
     return float(route["distance"]) / 1000, float(route["duration"]) / 60 * max(duration_factor, 0.1)
 
 
-def get_distance_matrix(
-    points: list[Point],
-    *,
-    osrm_url: str,
-    profile: str = "driving",
-    timeout_seconds: float = 10,
-    duration_factor: float = 1.0,
-) -> DistanceMatrix:
-    if len(points) < 2:
-        return DistanceMatrix(distances_km=[[0.0]], durations_minutes=[[0.0]])
+def _matrix_url(points: list[Point], profile: str, osrm_url: str) -> str:
     coordinates = ";".join(f"{point.lon},{point.lat}" for point in points)
     radius = snap_radius(profile)
     params = urlencode({
         "annotations": "duration,distance",
         "radiuses": ";".join([str(radius)] * len(points)),
     })
-    url = f"{osrm_url.rstrip('/')}/table/v1/{profile}/{coordinates}?{params}"
-    payload = _get_json(url, timeout_seconds)
+    return f"{osrm_url.rstrip('/')}/table/v1/{profile}/{coordinates}?{params}"
+
+
+def _parse_matrix(payload: dict, duration_factor: float) -> DistanceMatrix:
     _raise_if_outside_coverage(payload)
     if payload.get("code") != "Ok":
         raise RoutingError(payload.get("message") or "OSRM не вернул матрицу расстояний")
@@ -102,6 +105,70 @@ def get_distance_matrix(
         distances_km=[[float(value) / 1000 for value in row] for row in distances],
         durations_minutes=[[float(value) / 60 * factor for value in row] for row in durations],
     )
+
+
+# --- Синхронный путь (используется существующим кодом) ---
+
+
+def get_route(
+    from_point: Point,
+    to_point: Point,
+    *,
+    osrm_url: str,
+    profile: str = "driving",
+    timeout_seconds: float = 10,
+    duration_factor: float = 1.0,
+) -> tuple[float, float]:
+    url = _route_url(from_point, to_point, profile, osrm_url)
+    payload = _get_json(url, timeout_seconds)
+    return _parse_route(payload, duration_factor)
+
+
+def get_distance_matrix(
+    points: list[Point],
+    *,
+    osrm_url: str,
+    profile: str = "driving",
+    timeout_seconds: float = 10,
+    duration_factor: float = 1.0,
+) -> DistanceMatrix:
+    if len(points) < 2:
+        return DistanceMatrix(distances_km=[[0.0]], durations_minutes=[[0.0]])
+    url = _matrix_url(points, profile, osrm_url)
+    payload = _get_json(url, timeout_seconds)
+    return _parse_matrix(payload, duration_factor)
+
+
+# --- Асинхронный путь (Фаза 1.4: не держит воркер, пока ждёт сервер карт) ---
+
+
+async def get_route_async(
+    from_point: Point,
+    to_point: Point,
+    *,
+    osrm_url: str,
+    profile: str = "driving",
+    timeout_seconds: float = 10,
+    duration_factor: float = 1.0,
+) -> tuple[float, float]:
+    url = _route_url(from_point, to_point, profile, osrm_url)
+    payload = await _get_json_async(url, timeout_seconds)
+    return _parse_route(payload, duration_factor)
+
+
+async def get_distance_matrix_async(
+    points: list[Point],
+    *,
+    osrm_url: str,
+    profile: str = "driving",
+    timeout_seconds: float = 10,
+    duration_factor: float = 1.0,
+) -> DistanceMatrix:
+    if len(points) < 2:
+        return DistanceMatrix(distances_km=[[0.0]], durations_minutes=[[0.0]])
+    url = _matrix_url(points, profile, osrm_url)
+    payload = await _get_json_async(url, timeout_seconds)
+    return _parse_matrix(payload, duration_factor)
 
 
 def get_estimated_distance_matrix(
@@ -135,24 +202,51 @@ def haversine_km(from_lat: float, from_lon: float, to_lat: float, to_lon: float)
     return 2 * earth_radius_km * asin(sqrt(value))
 
 
-def _get_json(url: str, timeout_seconds: float) -> dict:
+def _response_json(response: httpx.Response) -> dict:
+    # ВНИМАНИЕ: raise_for_status() здесь звать нельзя на 4xx. На «дороги рядом нет» OSRM
+    # отвечает кодом HTTP 400 — и это не сбой связи, а осмысленный ответ:
+    # {"code": "NoSegment"}. Упав на статусе, тела мы не прочитаем и не отличим
+    # «человек вне покрытия» от «сервер недоступен». Первое надо сказать человеку
+    # словами, второе — молча пересчитать по прямой. Это разные вещи.
+    if response.status_code >= 500:
+        response.raise_for_status()
     try:
-        with httpx.Client(timeout=timeout_seconds, headers={"User-Agent": "home-visit-profit-bot/1.0"}) as client:
-            response = client.get(url)
-            # ВНИМАНИЕ: raise_for_status() здесь звать нельзя. На «дороги рядом нет» OSRM
-            # отвечает кодом HTTP 400 — и это не сбой связи, а осмысленный ответ:
-            # {"code": "NoSegment"}. Упав на статусе, тела мы не прочитаем и не отличим
-            # «человек вне покрытия» от «сервер недоступен». Первое надо сказать человеку
-            # словами, второе — молча пересчитать по прямой. Это разные вещи.
-            if response.status_code >= 500:
-                response.raise_for_status()
-            try:
-                return response.json()
-            except ValueError:
-                response.raise_for_status()
-                raise RoutingError("OSRM вернул не JSON")
-    except httpx.HTTPError as error:
-        raise RoutingError(f"Не удалось обратиться к OSRM: {error}") from error
+        return response.json()
+    except ValueError:
+        response.raise_for_status()
+        raise RoutingError("OSRM вернул не JSON")
+
+
+def _get_json(url: str, timeout_seconds: float) -> dict:
+    last_error: httpx.HTTPError | None = None
+    for attempt in range(NETWORK_RETRIES + 1):
+        try:
+            with httpx.Client(timeout=timeout_seconds, headers={"User-Agent": _USER_AGENT}) as client:
+                return _response_json(client.get(url))
+        except httpx.HTTPStatusError as error:
+            # 5xx уже пробросился из _response_json — это сбой, пробуем ещё раз.
+            last_error = error
+        except httpx.HTTPError as error:
+            last_error = error
+        if attempt < NETWORK_RETRIES:
+            import time
+            time.sleep(RETRY_BACKOFF_SECONDS)
+    raise RoutingError(f"Не удалось обратиться к OSRM: {last_error}") from last_error
+
+
+async def _get_json_async(url: str, timeout_seconds: float) -> dict:
+    last_error: httpx.HTTPError | None = None
+    for attempt in range(NETWORK_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds, headers={"User-Agent": _USER_AGENT}) as client:
+                return _response_json(await client.get(url))
+        except httpx.HTTPStatusError as error:
+            last_error = error
+        except httpx.HTTPError as error:
+            last_error = error
+        if attempt < NETWORK_RETRIES:
+            await asyncio.sleep(RETRY_BACKOFF_SECONDS)
+    raise RoutingError(f"Не удалось обратиться к OSRM: {last_error}") from last_error
 
 
 def snap_radius(profile: str) -> int:

@@ -3,9 +3,9 @@ from __future__ import annotations
 from itertools import permutations
 
 from app.models import Point, RouteLeg, RouteSummary, Visit
+from app.services.osrm_cache import cached_distance_matrix
 from app.services.routing_service import (
     DistanceMatrix,
-    get_distance_matrix,
     get_estimated_distance_matrix,
     summarize_manual_route,
 )
@@ -32,7 +32,7 @@ def optimize_route(
         if visit.status in {"accepted", "candidate", "completed"} and visit.lat is not None and visit.lon is not None
     ]
     if not route_visits:
-        matrix = get_distance_matrix(
+        matrix = cached_distance_matrix(
             [start, finish],
             osrm_url=osrm_url,
             profile=profile,
@@ -59,7 +59,7 @@ def optimize_route(
         Point(label=visit.address, lat=float(visit.lat), lon=float(visit.lon), visit_id=visit.id)
         for visit in route_visits
     ] + [finish]
-    matrix = get_distance_matrix(
+    matrix = cached_distance_matrix(
         points,
         osrm_url=osrm_url,
         timeout_seconds=timeout_seconds,
