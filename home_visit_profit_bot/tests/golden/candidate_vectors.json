@@ -219,5 +219,33 @@
       "verdict": "go",
       "score": 96
     }
+  },
+  {
+    "name": "paid_parking_cuts_margin",
+    "inputs": {
+      "income": 1500,
+      "extra_km": 8,
+      "extra_drive_minutes": 16,
+      "service_minutes": 30,
+      "fuel_per_km": 7.0,
+      "maintenance_per_km": 3.0,
+      "before_hourly": 700,
+      "after_hourly": 760,
+      "min_hourly": 600,
+      "min_marginal_hourly": 600,
+      "is_base_district": true,
+      "existing_base_count": 3,
+      "parking_cost": 100
+    },
+    "expected": {
+      "marginal_profit": 1320.0,
+      "marginal_hourly": 1721.74,
+      "marginal_per_km": 165.0,
+      "extra_car_cost": 80.0,
+      "extra_total_minutes": 46.0,
+      "decision": "ОДНОЗНАЧНО ДА",
+      "verdict": "go",
+      "score": 96
+    }
   }
 ]

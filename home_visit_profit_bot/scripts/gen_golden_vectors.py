@@ -77,6 +77,15 @@ CASES: list[dict] = [
         "after_hourly": 730, "min_hourly": 600, "min_marginal_hourly": 600,
         "outside_min_hourly": 700, "is_base_district": False, "existing_base_count": 5,
     },
+    {
+        # Платная зона: парковка вычитается из маржи (Фаза 9.4). Здесь визит 30 мин в
+        # зоне 200 ₽/час = 100 ₽: маржа 1500 − 8×10 − 100 = 1320 (без парковки было бы 1420).
+        "name": "paid_parking_cuts_margin",
+        "income": 1500, "extra_km": 8, "extra_drive_minutes": 16, "service_minutes": 30,
+        "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "before_hourly": 700,
+        "after_hourly": 760, "min_hourly": 600, "min_marginal_hourly": 600,
+        "is_base_district": True, "existing_base_count": 3, "parking_cost": 100,
+    },
 ]
 
 

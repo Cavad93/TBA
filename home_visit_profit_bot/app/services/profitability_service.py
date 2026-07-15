@@ -169,7 +169,12 @@ def calculate_remaining_route_summary(
     completed = [visit for visit in visits if visit.status == "completed"]
     future = [visit for visit in visits if visit.status in {"accepted", "candidate"}]
     current_point = _current_point(day, completed)
-    finish_point = _finish_point(day)
+    # Возврат ВСЕГДА в расчёте (Фаза 9.2): если финиш дня задан — замыкаем на него;
+    # если не задан — на точку старта дня. Иначе заказ «в жопу мира» с пустым возвратом
+    # выглядел бы бесконечно выгодным: маршрут кончался бы на дальней точке, и обратное
+    # порожнее плечо (последний визит → дом) в марж. километры не попадало бы. Прогноз
+    # обратных заказов НЕ делаем — честный километраж вместо гадания без данных.
+    finish_point = _finish_point(day) or _start_point(day)
 
     # Профиль по типу транспорта: раньше был всегда автомобильный, и курьер на
     # велосипеде получал маршрут для машины — неверные километры и время. У каждого
@@ -216,6 +221,8 @@ def calculate_candidate_impact(
     location_events: LocationEventRepository | None = None,
     *,
     strict_routing: bool = False,
+    parking_cost_low: float = 0.0,
+    parking_cost_high: float = 0.0,
 ) -> CandidateCalculation:
     cost = vehicle_km_cost(settings_repo, stats_repo, route_time_factor=day.planned_route_time_factor)
     min_hourly = settings_repo.get_float("min_hourly_income", 600)
@@ -231,6 +238,10 @@ def calculate_candidate_impact(
     after_net_profit, after_minutes, _, _, after_route = calculate_day_profitability(
         day, existing_visits + [candidate], settings_repo, stats_repo, strict_routing=strict_routing
     )
+    # Парковка у точки кандидата (Фаза 9.4): нижняя граница — реальный расход дня С
+    # заказом, поэтому вычитается из чистого «после». «До» её не платит (заказа нет),
+    # значит разница after−before честно относит парковку на кандидата.
+    after_net_profit -= parking_cost_low
 
     before_hourly = _safe_hourly(before_net_profit, before_minutes)
     after_hourly = _safe_hourly(after_net_profit, after_minutes)
@@ -240,7 +251,8 @@ def calculate_candidate_impact(
     paid_extra_drive_minutes = max(0.0, extra_drive_minutes)
     extra_total_minutes = paid_extra_drive_minutes + service_minutes
     _, _, extra_car_cost = calculate_car_expenses(paid_extra_km, cost)
-    marginal_profit = candidate.income - extra_car_cost
+    # Марж. прибыль заказа = доход − стоимость лишних км − парковка (нижняя граница).
+    marginal_profit = candidate.income - extra_car_cost - parking_cost_low
     marginal_hourly = _safe_hourly(marginal_profit, extra_total_minutes)
     # Маржинальные ₽/км: сколько заказ приносит на каждый километр, который вы
     # проедете ради него. У межгорода это и есть главное число.
@@ -341,6 +353,14 @@ def calculate_candidate_impact(
         effective_min_hourly=pricing.effective_min_hourly,
         overwork_markup_percent=round(pricing.markup * 100),
         recovery_blocks_outside_zone=pricing.blocks_outside_zone,
+        # ₽/км и себестоимость км доезжают до клиента для разложения круга (Фаза 9.3).
+        # Раньше считались локально, но в CandidateCalculation не клались — клиент
+        # получал ноль. marginal_per_km — деньги на км ради заказа, cost_per_km — полная
+        # себестоимость км (топливо+обслуживание+иные).
+        marginal_per_km=marginal_per_km,
+        cost_per_km=cost.total,
+        parking_cost_low=parking_cost_low,
+        parking_cost_high=parking_cost_high,
     )
 
 
@@ -550,6 +570,13 @@ def _finish_point(day: WorkDay) -> Point | None:
     if day.finish_lat is None or day.finish_lon is None:
         return None
     return Point(label=day.finish_address or "Финиш", lat=float(day.finish_lat), lon=float(day.finish_lon))
+
+
+def _start_point(day: WorkDay) -> Point | None:
+    """Точка старта дня — резервный финиш, когда финиш не задан (возврат домой, Фаза 9.2)."""
+    if day.start_lat is None or day.start_lon is None:
+        return None
+    return Point(label=day.start_address or "Старт", lat=float(day.start_lat), lon=float(day.start_lon))
 
 
 def _fallback_enabled(settings_repo: SettingsRepository) -> bool:

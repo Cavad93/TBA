@@ -33,6 +33,9 @@ object ProfitabilityCalculator {
         val outsideMinHourly: Double? = null,
         val outsideMinExtra: Double = 0.0,
         val blocksOutsideZone: Boolean = false,
+        // Парковка у точки заказа (Фаза 9.4): нижняя граница вычитается из маржи,
+        // как в серверном candidate_pure/calculate_candidate_impact. 0 — нет платной зоны.
+        val parkingCost: Double = 0.0,
     )
 
     data class Result(
@@ -56,7 +59,7 @@ object ProfitabilityCalculator {
         val paidExtraDrive = maxOf(0.0, extraDrive)
         val extraTotalMinutes = paidExtraDrive + input.serviceMinutes
         val extraCarCost = paidExtraKm * costPerKm
-        val marginalProfit = input.income - extraCarCost
+        val marginalProfit = input.income - extraCarCost - input.parkingCost
         val marginalHourly = safeHourly(marginalProfit, extraTotalMinutes)
         val marginalPerKm = if (paidExtraKm > 0) marginalProfit / paidExtraKm else 0.0
 

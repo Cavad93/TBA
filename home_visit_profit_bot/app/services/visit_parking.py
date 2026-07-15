@@ -47,7 +47,12 @@ def address_hint(connection: Database, lat: float | None, lon: float | None) -> 
 
     Про «платно ли прямо сейчас» здесь молчим намеренно: заказ оценивают заранее.
     """
-    hit = zone_at(connection, lat, lon)
+    return hint_from_hit(zone_at(connection, lat, lon))
+
+
+def hint_from_hit(hit: ParkingHit | None) -> dict[str, Any] | None:
+    """Собрать подсказку из уже найденной зоны — чтобы не искать её дважды, когда
+    рядом считаются деньги парковки (parking_cost_service)."""
     if hit is None:
         return None
     payload = hit.payload()

@@ -60,12 +60,15 @@ def evaluate(inputs: dict) -> dict:
     blocks_outside_zone = bool(inputs.get("blocks_outside_zone", False))
     is_base = bool(inputs["is_base_district"])
     existing_base_count = int(inputs["existing_base_count"])
+    # Парковка у точки заказа (Фаза 9.4): нижняя граница вычитается из маржи — так же,
+    # как в серверном calculate_candidate_impact. По умолчанию 0 (нет платной зоны).
+    parking_cost = float(inputs.get("parking_cost", 0.0))
 
     paid_extra_km = max(0.0, extra_km)
     paid_extra_drive_minutes = max(0.0, extra_drive_minutes)
     extra_total_minutes = paid_extra_drive_minutes + service_minutes
     extra_car_cost = paid_extra_km * cost_per_km
-    marginal_profit = income - extra_car_cost
+    marginal_profit = income - extra_car_cost - parking_cost
     marginal_hourly = _safe_hourly(marginal_profit, extra_total_minutes)
     marginal_per_km = marginal_profit / paid_extra_km if paid_extra_km > 0 else 0.0
 

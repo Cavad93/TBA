@@ -36,6 +36,7 @@ class ProfitabilityCalculatorTest {
         outsideMinHourly = if (j.has("outside_min_hourly")) j.getDouble("outside_min_hourly") else null,
         outsideMinExtra = j.optDouble("outside_min_extra", 0.0),
         blocksOutsideZone = j.optBoolean("blocks_outside_zone", false),
+        parkingCost = j.optDouble("parking_cost", 0.0),
     )
 
     @Test

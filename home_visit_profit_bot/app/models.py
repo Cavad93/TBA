@@ -175,6 +175,10 @@ class CandidateCalculation:
     # у городского курьера ограничивает время, у межгорода — километры.
     marginal_per_km: float = 0.0
     cost_per_km: float = 0.0
+    # Парковка в деньгах вердикта (Фаза 9.4): нижняя граница входит в марж. прибыль и
+    # дневной чистый (осторожная оценка), человеку показываем вилку low..high.
+    parking_cost_low: float = 0.0
+    parking_cost_high: float = 0.0
 
 
 @dataclass(frozen=True)

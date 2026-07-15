@@ -31,7 +31,9 @@ from app.services.profitability_service import (
 from app.services.routing_service import OutsideCoverageError, RoutingError
 from app.services.settings_service import allowed_clinics
 from app.services.visit_navigation import attach_navigation, navigation_settings
-from app.services.visit_parking import address_hint
+from app.services.visit_parking import hint_from_hit, zone_at
+from app.services.parking_cost_service import parking_money
+from app.services.vehicle_service import osrm_profile
 from app.services.server_settings import nominatim_url as server_nominatim_url, request_timeout_seconds as server_timeout
 
 
@@ -112,6 +114,12 @@ class MobileVisitService:
             normalized_address=geo.normalized_address,
         )
 
+        # Парковка у точки кандидата — в деньгах (Фаза 9.4). Зону ищем один раз здесь:
+        # нижняя граница уходит в расчёт вердикта, вилка — человеку в подсказке.
+        parking_hit = zone_at(self.connection, geo.lat, geo.lon)
+        parking_cost = parking_money(
+            parking_hit, day.planned_service_minutes, profile=osrm_profile(self.settings)
+        )
         try:
             calculation = calculate_candidate_impact(
                 day,
@@ -121,6 +129,8 @@ class MobileVisitService:
                 self.stats,
                 LocationEventRepository(self.connection),
                 strict_routing=route_km is None or route_minutes is None,
+                parking_cost_low=parking_cost.low if parking_cost else 0.0,
+                parking_cost_high=parking_cost.high if parking_cost else 0.0,
             )
         except OutsideCoverageError as error:
             # Адрес за пределами наших карт. Раньше OSRM в этом случае прилипал к
@@ -146,12 +156,16 @@ class MobileVisitService:
         # история могли показывать его без повторного пересчёта профитабельности.
         verdict = decision_to_verdict(calculation.decision)
         self.visits.set_verdict(candidate.id, verdict)
+        parking_payload = hint_from_hit(parking_hit)
+        if parking_payload is not None and parking_cost is not None:
+            # Деньги парковки рядом с зоной: «точка в платной зоне: +~150 ₽» (Ф9.4).
+            parking_payload["cost"] = parking_cost.payload()
         return CandidateApiResult(
             ok=True,
             reason="calculated",
             candidate=candidate,
             calculation=calculation,
-            parking=address_hint(self.connection, geo.lat, geo.lon),
+            parking=parking_payload,
         )
 
     def accept_candidate(self, visit_id: int) -> dict[str, Any]:
@@ -496,6 +510,8 @@ def calculation_payload(calculation: CandidateCalculation) -> dict[str, Any]:
         "marginal_hourly": calculation.marginal_hourly,
         "marginal_per_km": calculation.marginal_per_km,
         "cost_per_km": calculation.cost_per_km,
+        "parking_cost_low": calculation.parking_cost_low,
+        "parking_cost_high": calculation.parking_cost_high,
         "required_candidate_income": calculation.required_candidate_income,
         "required_extra_payment": calculation.required_extra_payment,
         "required_extra_for_min_hourly": calculation.required_extra_for_min_hourly,
