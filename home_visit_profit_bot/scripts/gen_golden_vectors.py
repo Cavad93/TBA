@@ -90,13 +90,22 @@ def build() -> list[dict]:
 
 def main() -> int:
     vectors = build()
-    out_dir = os.path.join(os.path.dirname(__file__), "..", "tests", "golden")
-    os.makedirs(out_dir, exist_ok=True)
-    path = os.path.abspath(os.path.join(out_dir, "candidate_vectors.json"))
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(vectors, handle, ensure_ascii=False, indent=2)
-        handle.write("\n")
-    print(f"золотых векторов: {len(vectors)} → {path}")
+    root = os.path.join(os.path.dirname(__file__), "..")
+    # Один генератор — две копии-близнеца: питоновский тест и Android-тест. Обе читают
+    # СВОЙ локальный файл (так работает и CI), а единственный источник правды — этот
+    # генератор + candidate_pure. Правишь формулу → перегенерируй, обе копии совпадут.
+    targets = [
+        os.path.join(root, "tests", "golden", "candidate_vectors.json"),
+        os.path.join(root, "android_location_client", "app", "src", "test",
+                     "resources", "candidate_vectors.json"),
+    ]
+    for path in targets:
+        path = os.path.abspath(path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(vectors, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        print(f"золотых векторов: {len(vectors)} → {path}")
     return 0
 
 

@@ -79,4 +79,9 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     kapt("androidx.room:room-compiler:2.6.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // JVM unit-тесты: золотые векторы выгодности (Фаза 3.1) гоняются на сборке через
+    // `gradlew testReleaseUnitTest`. org.json — та же реализация, что в Android рантайме.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

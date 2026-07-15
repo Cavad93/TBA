@@ -48,6 +48,12 @@ jobs:
             echo "no keystore secret; release will fall back to debug signing"
           fi
 
+      - name: Unit-тесты (золотые векторы выгодности — паритет с сервером, Фаза 3.1)
+        working-directory: home_visit_profit_bot/android_location_client
+        # Kotlin-калькулятор обязан совпадать с candidate_pure до копейки. Расхождение
+        # роняет сборку здесь — раньше, чем APK уедет к людям.
+        run: gradle :app:testReleaseUnitTest --no-daemon
+
       - name: Build release APK
         working-directory: home_visit_profit_bot/android_location_client
         env:
