@@ -358,6 +358,16 @@ CREATE TABLE IF NOT EXISTS personal_mileage (
     created_at TEXT NOT NULL
 );
 
+-- Журнал промахов ввода адреса (Ф13.4): текст, по которому человек в итоге ушёл в
+-- ручные км/мин — наш источник «какие ошибки система ещё не понимает». Координат юзера
+-- НЕ храним (это про текст ввода, не про человека). Персональное → RLS (ISOLATED_TABLES).
+CREATE TABLE IF NOT EXISTS address_miss_journal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    input_text TEXT NOT NULL,
+    resolved_path TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS work_day_location_state (
     work_day_id INTEGER PRIMARY KEY,
     gps_started_at TEXT,
@@ -599,6 +609,8 @@ ISOLATED_TABLES = [
     # свой. Общий кэш отдавал бы «Ленина 40» из чужого города — и заказ считался бы
     # по чужим координатам.
     "address_cache",
+    # Журнал промахов ввода адреса (Ф13.4): текст ввода — персональные данные.
+    "address_miss_journal",
 ]
 
 

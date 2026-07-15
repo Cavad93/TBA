@@ -33,6 +33,7 @@ from app.repositories import AddressCacheRepository, SettingsRepository
 from app.repositories_dadata_usage import DadataUsageRepository
 from app.repositories_osm_streets import OsmStreetRepository
 from app.services import dadata_service
+from app.services.address_building import canonical_building
 from app.services.address_resolver import looks_like_address
 from app.services.geocoding_service import GeocodingError, geocode_address, parse_coordinates
 from app.services.server_settings import (
@@ -66,6 +67,19 @@ def suggest(query: str, connection, settings: SettingsRepository, user_id: int,
     if coordinates:
         clat, clon = coordinates
         return {"resolved": _resolved(text, clat, clon, source="manual_coordinates")}
+
+    # Каноничный вид корпусов/строений/литер (Фаза 13.3): «5к1» → «5 корпус 1», чтобы
+    # разные написания хвоста не портили похожесть в DaData/pg_trgm.
+    text = canonical_building(text)
+
+    # Обучение на исправлениях (Ф13.2): ранее подтверждённый человеком ввод резолвится
+    # мгновенно, без DaData — «личный словарь сокращений» бесплатно.
+    learned = AddressCacheRepository(connection).get(text)
+    if learned is not None and learned["source"] == "learned" and learned["lat"] is not None:
+        return {"resolved": _resolved(
+            learned["normalized_address"] or text,
+            float(learned["lat"]), float(learned["lon"]), source="learned",
+        )}
 
     city = settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург"
     region = settings.get("default_region", "Ленинградская область") or "Ленинградская область"

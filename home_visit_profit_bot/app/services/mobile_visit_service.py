@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from app.models import CandidateCalculation, Point, RouteSummary, Visit
 from app.repositories import (
     AddressCacheRepository,
+    AddressMissRepository,
     DailyStatsRepository,
     LocationEventRepository,
     SettingsRepository,
@@ -15,6 +16,7 @@ from app.repositories import (
 )
 from app.services.address_resolver import expand_template
 from app.services.schedule_service import late_warnings
+from app.services.address_building import canonical_building
 from app.services.arrival_window_service import arrival_windows
 from app.services.fix_time_service import fix_time_price
 from app.services.geocoding_service import (
@@ -84,6 +86,11 @@ class MobileVisitService:
         # не спрашиваем. Цена отклика (платный лид) войдёт в расчёт выгодности.
         order_source = _optional_str(payload.get("order_source"))
         response_cost = _optional_non_negative_float(payload.get("response_cost")) or 0.0
+
+        # Журнал промахов (Ф13.4): ручные км/мин = геокодинг не помог. Логируем текст
+        # (без координат человека) — наш источник «какие вводы система ещё не понимает».
+        if route_km is not None and route_minutes is not None:
+            AddressMissRepository(self.connection).record(address, "manual_route")
         lat = _optional_float(payload.get("lat"))
         lon = _optional_float(payload.get("lon"))
 
@@ -126,6 +133,14 @@ class MobileVisitService:
             order_source=order_source,
             response_cost=response_cost,
         )
+
+        # Обучение на исправлениях (Ф13.2): человек дал точку/выбрал вариант — запоминаем
+        # ввод→координаты, чтобы повторный такой же ввод резолвился мгновенно, без DaData.
+        if lat is not None and lon is not None and geo.lat is not None and geo.lon is not None:
+            AddressCacheRepository(self.connection).put(
+                canonical_building(address), geo.normalized_address or address,
+                geo.district, geo.lat, geo.lon, 1.0, "learned",
+            )
 
         # Парковка у точки кандидата — в деньгах (Фаза 9.4). Зону ищем один раз здесь:
         # нижняя граница уходит в расчёт вердикта, вилка — человеку в подсказке.

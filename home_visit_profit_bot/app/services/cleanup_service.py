@@ -35,6 +35,10 @@ SYNC_DAYS = 30
 # что и поведение — сама норма живёт отдельно, в user_baselines, и не удаляется.
 DAY_METRICS_DAYS = 56
 
+# Журнал промахов адресов (Ф13.4): аналитика «что система не понимает». 90 дней
+# хватает на разбор паттернов; дальше — минимизация по 152-ФЗ.
+ADDRESS_MISS_DAYS = 90
+
 
 @dataclass(frozen=True)
 class CleanupReport:
@@ -45,6 +49,7 @@ class CleanupReport:
     sync_events: int = 0
     sync_conflicts: int = 0
     personal_mileage: int = 0
+    address_miss: int = 0
 
     @property
     def total(self) -> int:
@@ -56,6 +61,7 @@ class CleanupReport:
             + self.sync_events
             + self.sync_conflicts
             + self.personal_mileage
+            + self.address_miss
         )
 
 
@@ -84,6 +90,11 @@ def cleanup(connection: Database, *, today: date | None = None) -> CleanupReport
         # Личный пробег вне смены (Фаза 6): те же 14 дней, что весь GPS. Не привязан
         # к work_day — чистим по captured_at.
         personal_mileage=_delete_by_column(connection, "personal_mileage", "captured_at", gps_before),
+        # Журнал промахов адресов (Ф13.4): 90-дневное окно разбора.
+        address_miss=_delete_by_column(
+            connection, "address_miss_journal", "created_at",
+            (now - timedelta(days=ADDRESS_MISS_DAYS)).isoformat(),
+        ),
     )
     connection.commit()
 

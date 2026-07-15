@@ -1474,6 +1474,29 @@ class DailyStatsRepository:
         ).fetchall()
 
 
+class AddressMissRepository:
+    """Журнал промахов ввода адреса (Ф13.4): что система ещё не понимает."""
+
+    def __init__(self, connection: Database):
+        self.connection = connection
+
+    def record(self, input_text: str, resolved_path: str) -> None:
+        text = (input_text or "").strip()
+        if not text:
+            return
+        self.connection.execute(
+            "INSERT INTO address_miss_journal(input_text, resolved_path, created_at) VALUES (?, ?, ?)",
+            (text, resolved_path, now_iso()),
+        )
+        self.connection.commit()
+
+    def recent(self, limit: int = 100) -> list[Any]:
+        return self.connection.execute(
+            "SELECT * FROM address_miss_journal ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+
 class AddressCacheRepository:
     def __init__(self, connection: Database):
         self.connection = connection
