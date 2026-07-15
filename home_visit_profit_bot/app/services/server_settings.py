@@ -67,6 +67,32 @@ def nominatim_url() -> str:
     return os.getenv("NOMINATIM_URL") or _config().geo.nominatim_url or DEFAULT_NOMINATIM_URL
 
 
+def dadata_token() -> str | None:
+    """API-ключ «Подсказок» DaData — ТОЛЬКО из окружения сервера, никогда в APK.
+
+    Ключ из клиента извлекается, а привязки к пакету приложения у DaData нет — значит
+    любой мог бы жечь наш дневной лимит. Поэтому подсказки идут через наш прокси, а
+    ключ живёт здесь. Нет ключа — слой DaData просто выключен, оркестратор обходится
+    Nominatim + pg_trgm.
+    """
+    return os.getenv("DADATA_API_KEY") or None
+
+
+def dadata_daily_limit_per_user() -> int:
+    """Сколько запросов к DaData разрешаем одному пользователю в сутки.
+
+    Защита бесплатного дневного лимита DaData (10 000 запросов на весь аккаунт):
+    один пользователь не должен его выесть. Дефолт умеренный; правится env без релиза.
+    """
+    raw = os.getenv("DADATA_DAILY_LIMIT_PER_USER")
+    if raw:
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            pass
+    return 300
+
+
 def request_timeout_seconds() -> float:
     raw = os.getenv("REQUEST_TIMEOUT_SECONDS")
     if raw:

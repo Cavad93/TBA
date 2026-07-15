@@ -199,6 +199,40 @@ CREATE TABLE IF NOT EXISTS parking_street_prices (
     UNIQUE(city, street_key)
 );
 
+-- Улицы и населённые пункты из OpenStreetMap — офлайн-слой геокодинга (Фаза 2).
+--
+-- Публичные данные карты, как и parking_zones: НЕ в ISOLATED_TABLES. Нужны, чтобы
+-- неточный ввод адреса не был тупиком, когда внешние геокодеры недоступны или
+-- исчерпан лимит DaData: ищем похожую улицу триграммами (pg_trgm) прямо в базе.
+-- street_norm — имя, приведённое к нижнему регистру, ё→е, без типа улицы: по нему
+-- строится GIN-индекс триграмм (см. _ensure_osm_streets_index). lat/lon — центроид
+-- улицы (для длинной улицы приблизителен, но для подсказки-кандидата этого хватает).
+CREATE TABLE IF NOT EXISTS osm_streets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    region TEXT NOT NULL,
+    city TEXT NOT NULL,
+    street TEXT NOT NULL,
+    street_norm TEXT NOT NULL,
+    lat REAL NOT NULL,
+    lon REAL NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(city, street_norm)
+);
+
+CREATE INDEX IF NOT EXISTS idx_osm_streets_city ON osm_streets(city);
+
+-- Суточный счётчик обращений к DaData на пользователя (Фаза 2) — защита бесплатного
+-- дневного лимита DaData (10 000 запросов на весь аккаунт): один человек не должен
+-- его выесть. Это метрика-счётчик, не персональные данные: тут только «сколько раз»,
+-- без самих адресов, поэтому таблица НЕ под RLS. day — дата в UTC (YYYY-MM-DD).
+CREATE TABLE IF NOT EXISTS dadata_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(user_id, day)
+);
+
 -- Кэш геокодера. Уникальность — по паре (user_id, input_text): она навешивается
 -- миграцией _migrate_address_cache_to_per_user, потому что user_id добавляется позже,
 -- при включении RLS.
@@ -544,6 +578,7 @@ def init_db(config: AppConfig) -> None:
     with connect(config) as db:
         _apply_schema(db)
         _ensure_columns(db)
+        _ensure_osm_streets_index(db)
         migrate_out_of_special_categories(db)
         _ensure_isolation(db)
         _migrate_address_cache_to_per_user(db)
@@ -682,6 +717,39 @@ def _ensure_isolation(db: Database) -> None:
 def _apply_schema(db: Database) -> None:
     for statement in _split_statements(_to_postgres_ddl(SCHEMA)):
         db.execute(statement)
+
+
+def _ensure_osm_streets_index(db: Database) -> None:
+    """Расширение pg_trgm и GIN-индекс триграмм на osm_streets.street_norm (Фаза 2).
+
+    pg_trgm — «trusted»-расширение (PostgreSQL 13+), поэтому его создаёт и обычная
+    не-superuser роль приложения: superuser ради этого не нужен, изоляция RLS не
+    ослабляется. GIN-индекс по триграммам делает `similarity()`/`%` по названию улицы
+    быстрым — поиск похожего адреса не сканирует таблицу целиком.
+
+    Если прав на CREATE EXTENSION всё же не оказалось (нестандартная установка),
+    не валим старт: логируем и продолжаем. Поиск тогда деградирует до ILIKE —
+    медленнее, но приложение живёт; расширение доустановит администратор базы.
+    """
+    # SAVEPOINT, а не rollback всей транзакции: init_db создаёт все таблицы в ОДНОЙ
+    # незакоммиченной транзакции, и грубый db.rollback() здесь снёс бы уже созданную
+    # схему целиком (ловил на этом day_metrics does not exist). Savepoint откатывает
+    # только попытку с trgm.
+    #
+    # Оператор квалифицируем как public.gin_trgm_ops: расширение живёт в схеме public,
+    # а рабочая/тестовая схема может не держать public в search_path — тогда голый
+    # gin_trgm_ops «не найден». SCHEMA public при CREATE EXTENSION кладёт его туда же.
+    db.execute("SAVEPOINT sp_trgm")
+    try:
+        db.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public")
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_osm_streets_trgm "
+            "ON osm_streets USING gin (street_norm public.gin_trgm_ops)"
+        )
+        db.execute("RELEASE SAVEPOINT sp_trgm")
+    except Exception as error:  # noqa: BLE001 — старт важнее индекса
+        db.execute("ROLLBACK TO SAVEPOINT sp_trgm")
+        logger.warning("pg_trgm недоступен (%s): поиск улиц пойдёт по ILIKE", error)
 
 
 def _ensure_columns(db: Database) -> None:

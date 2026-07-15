@@ -55,13 +55,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return LegacyJSONResponse({"error": exc.detail}, status_code=exc.status_code)
 
     from app.api.routers import (
-        auth, day, driving, health, home, income, location,
+        address, auth, day, driving, health, home, income, location,
         profile, reports, route, settings, shift, sync, visits, workload,
     )
 
     for module in (
         health, auth, home, shift, profile, day, visits, route,
-        location, settings, sync, income, driving, reports, workload,
+        location, settings, sync, income, driving, reports, workload, address,
     ):
         app.include_router(module.router)
 
