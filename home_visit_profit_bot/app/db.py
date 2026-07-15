@@ -95,6 +95,8 @@ CREATE TABLE IF NOT EXISTS visits (
     service_minutes REAL DEFAULT 0,
     planned_start_at TEXT,
     planned_end_at TEXT,
+    order_source TEXT,
+    response_cost REAL DEFAULT 0,
     created_at TEXT NOT NULL,
     FOREIGN KEY(work_day_id) REFERENCES work_days(id)
 );
@@ -808,6 +810,10 @@ def _ensure_columns(db: Database) -> None:
     _ensure_column(db, "visits", "service_minutes", "REAL DEFAULT 0")
     _ensure_column(db, "visits", "planned_start_at", "TEXT")
     _ensure_column(db, "visits", "planned_end_at", "TEXT")
+    # Источник заказа (Ф11.2): Профи/Авито/YouDo/сарафан/другое — необязательно.
+    # Цена отклика (платный лид) входит в расчёт выгодности как расход заказа.
+    _ensure_column(db, "visits", "order_source", "TEXT")
+    _ensure_column(db, "visits", "response_cost", "REAL DEFAULT 0")
     # Походка по отрезкам пути: таблица уже создана на боевом сервере, поэтому колонки
     # добавляются миграцией, а не только через DDL.
     # Расходы на машину (ремонт, ТО, шины, страховка) — из них считается настоящий

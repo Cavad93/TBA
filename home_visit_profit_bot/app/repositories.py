@@ -82,6 +82,8 @@ def _visit_from_row(row: Any) -> Visit:
         service_minutes=float(_row_value(row, "service_minutes") or 0),
         planned_start_at=_row_value(row, "planned_start_at"),
         planned_end_at=_row_value(row, "planned_end_at"),
+        order_source=_row_value(row, "order_source"),
+        response_cost=float(_row_value(row, "response_cost") or 0),
     )
 
 
@@ -333,6 +335,8 @@ class VisitRepository:
         lon: float | None = None,
         normalized_address: str | None = None,
         clinic: str | None = None,
+        order_source: str | None = None,
+        response_cost: float = 0.0,
     ) -> Visit:
         self.connection.execute(
             "UPDATE visits SET status = 'rejected' WHERE work_day_id = ? AND status = 'candidate'",
@@ -342,8 +346,9 @@ class VisitRepository:
             """
             INSERT INTO visits(
                 work_day_id, status, address, normalized_address, clinic, district, is_base_district,
-                lat, lon, income, estimated_extra_km, estimated_extra_minutes, created_at
-            ) VALUES (?, 'candidate', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                lat, lon, income, estimated_extra_km, estimated_extra_minutes,
+                order_source, response_cost, created_at
+            ) VALUES (?, 'candidate', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 day_id,
@@ -357,6 +362,8 @@ class VisitRepository:
                 income,
                 route_km,
                 route_minutes,
+                order_source,
+                max(0.0, response_cost),
                 now_iso(),
             ),
         )

@@ -242,6 +242,9 @@ def calculate_candidate_impact(
     # заказом, поэтому вычитается из чистого «после». «До» её не платит (заказа нет),
     # значит разница after−before честно относит парковку на кандидата.
     after_net_profit -= parking_cost_low
+    # Цена отклика (Фаза 11.2): платный лид (Профи/Авито) — прямой расход заказа. «До»
+    # его не платит (заказа нет), поэтому вычитаем из «после», как и парковку.
+    after_net_profit -= candidate.response_cost
 
     before_hourly = _safe_hourly(before_net_profit, before_minutes)
     after_hourly = _safe_hourly(after_net_profit, after_minutes)
@@ -251,8 +254,8 @@ def calculate_candidate_impact(
     paid_extra_drive_minutes = max(0.0, extra_drive_minutes)
     extra_total_minutes = paid_extra_drive_minutes + service_minutes
     _, _, extra_car_cost = calculate_car_expenses(paid_extra_km, cost)
-    # Марж. прибыль заказа = доход − стоимость лишних км − парковка (нижняя граница).
-    marginal_profit = candidate.income - extra_car_cost - parking_cost_low
+    # Марж. прибыль заказа = доход − стоимость лишних км − парковка − цена отклика.
+    marginal_profit = candidate.income - extra_car_cost - parking_cost_low - candidate.response_cost
     marginal_hourly = _safe_hourly(marginal_profit, extra_total_minutes)
     # Маржинальные ₽/км: сколько заказ приносит на каждый километр, который вы
     # проедете ради него. У межгорода это и есть главное число.

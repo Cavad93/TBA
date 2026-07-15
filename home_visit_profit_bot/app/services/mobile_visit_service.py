@@ -79,6 +79,10 @@ class MobileVisitService:
         route_km = _optional_non_negative_float(payload.get("route_km"))
         route_minutes = _optional_non_negative_float(payload.get("route_minutes"))
         manual_district = _optional_str(payload.get("district"))
+        # Источник заказа и цена отклика (Фаза 11.2) — необязательны: пропустил, ничего
+        # не спрашиваем. Цена отклика (платный лид) войдёт в расчёт выгодности.
+        order_source = _optional_str(payload.get("order_source"))
+        response_cost = _optional_non_negative_float(payload.get("response_cost")) or 0.0
         lat = _optional_float(payload.get("lat"))
         lon = _optional_float(payload.get("lon"))
 
@@ -118,6 +122,8 @@ class MobileVisitService:
             lat=geo.lat,
             lon=geo.lon,
             normalized_address=geo.normalized_address,
+            order_source=order_source,
+            response_cost=response_cost,
         )
 
         # Парковка у точки кандидата — в деньгах (Фаза 9.4). Зону ищем один раз здесь:
@@ -632,6 +638,8 @@ def visit_payload(visit: Visit | None) -> dict[str, Any] | None:
         "service_minutes": visit.service_minutes,
         "planned_start_at": visit.planned_start_at,
         "planned_end_at": visit.planned_end_at,
+        "order_source": visit.order_source,
+        "response_cost": visit.response_cost,
     }
 
 

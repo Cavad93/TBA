@@ -86,6 +86,15 @@ CASES: list[dict] = [
         "after_hourly": 760, "min_hourly": 600, "min_marginal_hourly": 600,
         "is_base_district": True, "existing_base_count": 3, "parking_cost": 100,
     },
+    {
+        # Платный лид (Фаза 11.2): цена отклика 500 ₽ вычитается из маржи как расход
+        # заказа. Маржа 2000 − 8×10 − 500 = 1420 (без отклика было бы 1920).
+        "name": "paid_lead_cuts_margin",
+        "income": 2000, "extra_km": 8, "extra_drive_minutes": 16, "service_minutes": 30,
+        "fuel_per_km": 6.0, "maintenance_per_km": 4.0, "before_hourly": 650,
+        "after_hourly": 700, "min_hourly": 600, "min_marginal_hourly": 600,
+        "is_base_district": True, "existing_base_count": 2, "response_cost": 500,
+    },
 ]
 
 

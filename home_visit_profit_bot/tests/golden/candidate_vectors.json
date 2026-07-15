@@ -247,5 +247,33 @@
       "verdict": "go",
       "score": 96
     }
+  },
+  {
+    "name": "paid_lead_cuts_margin",
+    "inputs": {
+      "income": 2000,
+      "extra_km": 8,
+      "extra_drive_minutes": 16,
+      "service_minutes": 30,
+      "fuel_per_km": 6.0,
+      "maintenance_per_km": 4.0,
+      "before_hourly": 650,
+      "after_hourly": 700,
+      "min_hourly": 600,
+      "min_marginal_hourly": 600,
+      "is_base_district": true,
+      "existing_base_count": 2,
+      "response_cost": 500
+    },
+    "expected": {
+      "marginal_profit": 1420.0,
+      "marginal_hourly": 1852.17,
+      "marginal_per_km": 177.5,
+      "extra_car_cost": 80.0,
+      "extra_total_minutes": 46.0,
+      "decision": "ОДНОЗНАЧНО ДА",
+      "verdict": "go",
+      "score": 96
+    }
   }
 ]

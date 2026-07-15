@@ -84,6 +84,10 @@ class Visit:
     service_minutes: float = 0.0
     planned_start_at: str | None = None
     planned_end_at: str | None = None
+    # Источник заказа (Ф11.2): Профи/Авито/YouDo/сарафан/другое — необязательно.
+    order_source: str | None = None
+    # Цена отклика (платный лид) — расход заказа, входит в маржу.
+    response_cost: float = 0.0
 
     @property
     def is_anchor(self) -> bool:
