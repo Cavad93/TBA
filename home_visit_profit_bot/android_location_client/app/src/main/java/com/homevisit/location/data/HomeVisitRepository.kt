@@ -18,6 +18,7 @@ import com.homevisit.location.domain.AuthOutcome
 import com.homevisit.location.domain.AuthUser
 import com.homevisit.location.domain.CandidateEstimate
 import com.homevisit.location.domain.CandidateRequestResult
+import com.homevisit.location.domain.MatrixSnapshot
 import com.homevisit.location.domain.SurveyInfo
 import com.homevisit.location.domain.ClinicOptions
 import com.homevisit.location.domain.ClinicReportRow
@@ -794,6 +795,69 @@ class HomeVisitRepository private constructor(
         val response = cachedGetJson(normalizeApiUrl(serverUrl, "/api/route/active"), apiKey, "cache_route_active")
             ?: return@withContext null
         parseServerRoute(response)?.copy(fromCache = response.optBoolean("_from_cache", false))
+    }
+
+    /**
+     * Матрица расстояний/времени + коэффициенты для расчётов на телефоне (Ф3.2/3.4).
+     * Точки — [старт дня, заказы…, финиш] в порядке индексов, которого ждёт RouteOptimizer.
+     * Ответ кешируется в Room: по кешу телефон считает вердикт и порядок объезда офлайн
+     * (в самолётном режиме). Кеш инвалидируется добавлением/удалением адреса — зовущий
+     * запрашивает матрицу заново при изменении набора точек дня.
+     */
+    suspend fun fetchRouteMatrix(
+        serverUrl: String,
+        apiKey: String,
+        points: List<Pair<Double, Double>>,
+        serviceMinutes: Double? = null,
+    ): MatrixSnapshot? = withContext(Dispatchers.IO) {
+        val pointsJson = JSONArray()
+        points.forEach { (lat, lon) -> pointsJson.put(JSONObject().put("lat", lat).put("lon", lon)) }
+        val payload = JSONObject().put("points", pointsJson)
+        serviceMinutes?.let { payload.put("service_minutes", it) }
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/route/matrix"), apiKey, payload)
+        // Эндпоинт отдаёт поля на верхнем уровне (без обёртки ok) — свежесть по distances_km.
+        if (response != null && response.has("distances_km")) {
+            dao.saveSetting(SettingEntity(key = "cache_route_matrix", value = response.toString(), updatedAtEpochMillis = now()))
+            return@withContext parseMatrixSnapshot(response, fromCache = false)
+        }
+        val cached = dao.getSetting("cache_route_matrix")?.value ?: return@withContext null
+        val cachedJson = try { JSONObject(cached) } catch (_: Exception) { return@withContext null }
+        parseMatrixSnapshot(cachedJson, fromCache = true)
+    }
+
+    private fun parseMatrixSnapshot(json: JSONObject, fromCache: Boolean): MatrixSnapshot? {
+        val distances = parseMatrixRows(json.optJSONArray("distances_km")) ?: return null
+        val durations = parseMatrixRows(json.optJSONArray("durations_minutes")) ?: return null
+        val c = json.optJSONObject("coefficients") ?: JSONObject()
+        return MatrixSnapshot(
+            distancesKm = distances,
+            durationsMinutes = durations,
+            fallback = json.optBoolean("fallback", false),
+            costPerKm = c.optDouble("cost_per_km", 0.0),
+            fuelPerKm = c.optDouble("fuel_per_km", 0.0),
+            maintenancePerKm = c.optDouble("maintenance_per_km", 0.0),
+            minHourlyIncome = c.optDouble("min_hourly_income", 600.0),
+            minMarginalHourlyIncome = c.optDouble("min_marginal_hourly_income", 600.0),
+            outsideZoneMinHourlyIncome = c.optDouble("outside_zone_min_hourly_income", 600.0),
+            outsideZoneMinExtraPayment = c.optDouble("outside_zone_min_extra_payment", 0.0),
+            serviceMinutes = c.optDouble("service_minutes", 20.0),
+            avgSpeedKmh = c.optDouble("avg_speed_kmh", 30.0),
+            straightLineFactor = c.optDouble("straight_line_factor", 1.35),
+            snapshotVersion = json.optString("snapshot_version", ""),
+            fromCache = fromCache,
+        )
+    }
+
+    private fun parseMatrixRows(array: JSONArray?): List<List<Double>>? {
+        if (array == null) return null
+        val rows = ArrayList<List<Double>>(array.length())
+        for (i in 0 until array.length()) {
+            val rowArray = array.optJSONArray(i) ?: return null
+            val row = ArrayList<Double>(rowArray.length())
+            for (j in 0 until rowArray.length()) row.add(rowArray.optDouble(j, 0.0))
+            rows.add(row)
+        }
+        return rows
     }
 
     /**

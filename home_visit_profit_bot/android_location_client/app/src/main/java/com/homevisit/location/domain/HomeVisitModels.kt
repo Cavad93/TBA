@@ -796,3 +796,30 @@ data class SettingsSection(
 data class AppSettingsSnapshot(
     val sections: List<SettingsSection>,
 )
+
+/**
+ * Матрица расстояний/времени + снимок коэффициентов с сервера (Фаза 3.2/3.4).
+ *
+ * Сервер — карты (OSRM с кешем), телефон — арифметика и комбинаторика: по этой матрице
+ * RouteOptimizer строит порядок объезда, а ProfitabilityCalculator считает вердикт —
+ * мгновенно и офлайн. `fallback=true` — матрица посчитана по прямой (вне покрытия/сервер
+ * карт молчит), это честная оценка. `snapshotVersion` кладётся рядом с расчётом: сервер
+ * при синке сверяет её со своей (Ф3.6), расхождение версий объясняет расхождение чисел.
+ */
+data class MatrixSnapshot(
+    val distancesKm: List<List<Double>>,
+    val durationsMinutes: List<List<Double>>,
+    val fallback: Boolean,
+    val costPerKm: Double,
+    val fuelPerKm: Double,
+    val maintenancePerKm: Double,
+    val minHourlyIncome: Double,
+    val minMarginalHourlyIncome: Double,
+    val outsideZoneMinHourlyIncome: Double,
+    val outsideZoneMinExtraPayment: Double,
+    val serviceMinutes: Double,
+    val avgSpeedKmh: Double,
+    val straightLineFactor: Double,
+    val snapshotVersion: String,
+    val fromCache: Boolean = false,
+)
