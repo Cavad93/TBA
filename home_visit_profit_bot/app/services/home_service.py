@@ -11,6 +11,7 @@ from app.services.mobile_workload_service import MobileWorkloadService
 from app.services.mobile_report_service import MobileReportService
 from app.services.rest_service import rest_facts
 from app.services.overwork_pricing_service import OverworkPricing, build_pricing
+from app.services.osago_service import osago_card
 
 
 # Порог «зелёной зоны» восстановления: ниже — отдохнул, ресурс есть.
@@ -90,6 +91,9 @@ class HomeService:
             "trends": trends,
             "green_streak": streak,
             "recommendations": self._recommendations(recovery, active, streak),
+            # ОСАГО: карточка отсчёта появляется за 14 дней до конца полиса (Фаза 5).
+            # None — полис не заведён или срок ещё далеко: не отвлекаем.
+            "osago": osago_card(self.settings, today=today),
         }
 
     # --- сборка блоков ---------------------------------------------------

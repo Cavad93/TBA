@@ -93,6 +93,16 @@ def dadata_daily_limit_per_user() -> int:
     return 300
 
 
+def osago_partner_url() -> str | None:
+    """Партнёрская ссылка на продление ОСАГО (Пампаду) — серверная настройка (Фаза 5).
+
+    Меняется через env без релиза APK: пока Джавад не дал реферальную ссылку, карточка
+    ОСАГО работает без кнопки «Продлить», только напоминанием. Появится ссылка —
+    подъедет настройкой.
+    """
+    return os.getenv("OSAGO_PARTNER_URL") or None
+
+
 def request_timeout_seconds() -> float:
     raw = os.getenv("REQUEST_TIMEOUT_SECONDS")
     if raw:

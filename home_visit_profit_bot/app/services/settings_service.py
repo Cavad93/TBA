@@ -67,6 +67,7 @@ SECTION_TITLES: dict[str, str] = {
     "navigation": "Навигатор",
     "gps": "GPS",
     "fatigue": "Нагрузка",
+    "osago": "ОСАГО",
 }
 
 # Технические параметры (адрес OSRM, коэффициент дорог, таймауты, запасной расчёт без
@@ -313,6 +314,11 @@ SETTINGS_CATALOG: list[SettingField] = [
         "workload_learning_enabled", "fatigue", "Подстраивать под вас", "bool", True,
         hint="Оценка нагрузки уточняется по вашим же ответам о самочувствии.",
     ),
+    # ОСАГО (Фаза 5). Необязательно: пусто — ничего не показываем и не напоминаем.
+    SettingField(
+        "osago_expires_at", "osago", "Дата окончания ОСАГО", "date", "", allow_empty=True,
+        hint="Напомним продлить за 14 дней. Необязательно.",
+    ),
 ]
 
 _FIELD_BY_KEY: dict[str, SettingField] = {field.key: field for field in SETTINGS_CATALOG}
@@ -390,6 +396,18 @@ def _coerce(field: SettingField, value: Any) -> str:
         allowed = {key for key, _ in field.options}
         if text not in allowed:
             raise ValueError(f"{field.key}: допустимые значения — {', '.join(sorted(allowed))}")
+        return text
+    if field.type == "date":
+        text = str(value).strip()
+        if not text:
+            if field.allow_empty:
+                return ""
+            raise ValueError(f"{field.key}: значение не может быть пустым")
+        from datetime import date as _date
+        try:
+            _date.fromisoformat(text)
+        except ValueError:
+            raise ValueError(f"{field.key}: дата в формате ГГГГ-ММ-ДД")
         return text
     text = str(value).strip()
     if not text and not field.allow_empty:
