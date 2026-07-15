@@ -17,17 +17,23 @@ HEALTH_URL_TEST=http://127.0.0.1:${TEST_PORT}/api/health
 
 cd "$APP_DIR"
 
+# .env читаем в массив: каждая непустая строка `KEY=value` — ОДИН элемент, поэтому
+# `env "${ENV_LINES[@]}"` передаёт значение целиком, даже с пробелами (MAIL_FROM —
+# «Визиторкрут <noreply@…>»). Прежний `$(… | xargs)` такое значение разрывал и валил
+# и миграцию, и прогон. Массив + env — как systemd EnvironmentFile: без word-splitting.
+mapfile -t ENV_LINES < <(grep -vE '^#|^$' "$APP_DIR/.env")
+
 echo "==> 1. Обновляю зависимости (fastapi, uvicorn, psycopg_pool)"
 sudo -u homevisit "$VENV/bin/pip" install -q -r requirements.txt
 
 echo "==> 1b. Миграция схемы (init_db идемпотентна; создаёт новые таблицы Фазы 2: osm_streets, dadata_usage)"
 # ASGI-вход init_db НЕ зовёт (только открывает пул), а старый сервер после git pull
 # ещё крутит старый код в памяти — значит новые таблицы надо создать явно ДО переключения.
-sudo -u homevisit env $(grep -v '^#' "$APP_DIR/.env" | xargs) \
+sudo -u homevisit env "${ENV_LINES[@]}" \
     "$VENV/bin/python" -m app.db
 
 echo "==> 2. Параллельный прогон: uvicorn на запасном порту ${TEST_PORT} (старый сервер не трогаю)"
-sudo -u homevisit env $(grep -v '^#' "$APP_DIR/.env" | xargs) \
+sudo -u homevisit env "${ENV_LINES[@]}" \
     "$VENV/bin/uvicorn" app.asgi:app --host 127.0.0.1 --port "$TEST_PORT" --workers 1 &
 UVICORN_PID=$!
 trap 'kill "$UVICORN_PID" 2>/dev/null || true' EXIT
