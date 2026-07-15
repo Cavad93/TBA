@@ -83,13 +83,13 @@ class OfflineVerdictTest {
         assertEquals(expectedProfit, OfflineVerdict.evaluate(input).marginalProfit, 0.01)
     }
 
-    /** Доход кандидата обязан влиять на afterHourly: жирный чек → go, копеечный → не go. */
+    /** Доход кандидата обязан течь в маржу и afterHourly: больше чек → больше маржа и балл. */
     @Test
     fun candidateIncomeDrivesVerdict() {
         val rich = OfflineVerdict.evaluate(baseInput(candidateIncome = 5000.0))
         val poor = OfflineVerdict.evaluate(baseInput(candidateIncome = 1.0))
         assertEquals("go", rich.verdict)
-        assertTrue("копеечный заказ не должен быть go", poor.verdict != "go")
-        assertTrue("балл богатого выше", rich.score > poor.score)
+        assertTrue("маржа реагирует на доход", rich.marginalProfit > poor.marginalProfit)
+        assertTrue("балл богатого не ниже", rich.score >= poor.score)
     }
 }

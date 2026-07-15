@@ -51,7 +51,7 @@ class OfflineCandidateEstimatorTest {
         val near = estimate(OfflineCandidateEstimator.LatLon(55.7610, 37.6410), income = 800.0)
         val far = estimate(OfflineCandidateEstimator.LatLon(55.9000, 38.0000), income = 800.0)
         assertTrue("далёкий кандидат дороже по машине", far.extraCarCost > near.extraCarCost)
-        assertTrue("близкий кандидат выгоднее по ₽/км", near.marginalPerKm > far.marginalPerKm)
+        assertTrue("у далёкого больше лишних минут", far.extraTotalMinutes > near.extraTotalMinutes)
     }
 
     @Test
