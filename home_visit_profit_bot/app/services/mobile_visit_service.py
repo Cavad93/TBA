@@ -15,6 +15,7 @@ from app.repositories import (
 )
 from app.services.address_resolver import expand_template
 from app.services.schedule_service import late_warnings
+from app.services.arrival_window_service import arrival_windows
 from app.services.geocoding_service import (
     GeocodingError,
     detect_base_district_by_location,
@@ -436,6 +437,12 @@ class MobileVisitService:
         payload["late_warnings"] = [
             warning.as_dict()
             for warning in late_warnings(day, all_visits, _with_order(route, payload["order"]))
+        ]
+        # Окно прибытия по цепочке дня (Фаза 4): «примерно 14:00–16:00» — честное
+        # окно, а не фейково-точный ETA; неопределённость копится к концу дня.
+        payload["arrival_windows"] = [
+            window.as_dict()
+            for window in arrival_windows(day, all_visits, _with_order(route, payload["order"]))
         ]
         visits_payload = [visit_payload(visit) for visit in all_visits]
         # Ссылка «Поехали» едет вместе с заказом — чтобы кнопка работала и без сети.
