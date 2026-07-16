@@ -51,6 +51,14 @@ class ReminderWorker(appContext: Context, params: WorkerParameters) : CoroutineW
                 val net = home.breakeven?.accumulatedNet ?: return Result.success()
                 ReminderMessages.negativeShift(net) ?: return Result.success()
             }
+            KIND_WEEKLY -> {
+                // Недельная сводка (Ф7.3): «настоящая неделя чистыми». Тянем week-отчёт.
+                val week = HomeVisitRepository.create(applicationContext)
+                    .fetchStatsReport(serverUrl, apiKey, com.homevisit.location.domain.ReportPeriod.Week)
+                val net = week?.summary?.netProfit ?: return Result.success()
+                if (net == 0.0) return Result.success()
+                ReminderMessages.weekly(net, savedHours = 0)
+            }
             else -> return Result.success()
         }
         notify(kind, message)
@@ -90,5 +98,6 @@ class ReminderWorker(appContext: Context, params: WorkerParameters) : CoroutineW
         const val KIND_DAY_CLOSE = "day_close"
         const val KIND_OSAGO = "osago"
         const val KIND_NEGATIVE_ALERT = "negative_alert"
+        const val KIND_WEEKLY = "weekly"
     }
 }

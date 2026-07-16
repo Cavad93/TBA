@@ -22,6 +22,7 @@ object ReminderScheduler {
     private const val WORK_DAY_CLOSE = "reminder_day_close"
     private const val WORK_OSAGO = "reminder_osago"
     private const val WORK_NEGATIVE = "reminder_negative_alert"
+    private const val WORK_WEEKLY = "reminder_weekly"
 
     fun schedule(context: Context, now: Calendar = Calendar.getInstance()) {
         enqueueDaily(context, WORK_SHIFT_START, ReminderWorker.KIND_SHIFT_START, targetHour = 9, now = now)
@@ -29,6 +30,8 @@ object ReminderScheduler {
         enqueueDaily(context, WORK_OSAGO, ReminderWorker.KIND_OSAGO, targetHour = 10, now = now)
         // Проверка «смена в минусе» — середина дня (Ф10.3): кричим днём, а не вечером.
         enqueueDaily(context, WORK_NEGATIVE, ReminderWorker.KIND_NEGATIVE_ALERT, targetHour = 15, now = now)
+        // Недельная сводка (Ф7.3): раз в 7 дней вечером — «настоящая неделя чистыми».
+        enqueuePeriodic(context, WORK_WEEKLY, ReminderWorker.KIND_WEEKLY, targetHour = 19, days = 7, now = now)
     }
 
     /** Отменить все напоминания (например, при выходе из аккаунта). */
@@ -38,10 +41,14 @@ object ReminderScheduler {
         wm.cancelUniqueWork(WORK_DAY_CLOSE)
         wm.cancelUniqueWork(WORK_OSAGO)
         wm.cancelUniqueWork(WORK_NEGATIVE)
+        wm.cancelUniqueWork(WORK_WEEKLY)
     }
 
-    private fun enqueueDaily(context: Context, workName: String, kind: String, targetHour: Int, now: Calendar) {
-        val request = PeriodicWorkRequestBuilder<ReminderWorker>(1, TimeUnit.DAYS)
+    private fun enqueueDaily(context: Context, workName: String, kind: String, targetHour: Int, now: Calendar) =
+        enqueuePeriodic(context, workName, kind, targetHour, days = 1, now = now)
+
+    private fun enqueuePeriodic(context: Context, workName: String, kind: String, targetHour: Int, days: Long, now: Calendar) {
+        val request = PeriodicWorkRequestBuilder<ReminderWorker>(days, TimeUnit.DAYS)
             .setInitialDelay(initialDelayMinutes(now, targetHour), TimeUnit.MINUTES)
             .setInputData(Data.Builder().putString(ReminderWorker.KEY_KIND, kind).build())
             .build()

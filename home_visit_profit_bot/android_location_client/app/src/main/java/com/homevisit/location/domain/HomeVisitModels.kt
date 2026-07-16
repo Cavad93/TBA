@@ -57,6 +57,7 @@ enum class StopLabel(val apiValue: String, val title: String) {
 
 enum class ReportPeriod(val apiValue: String, val title: String) {
     Day("day", "День"),
+    Week("week", "Неделя"),
     Month("month", "Месяц"),
     Year("year", "Год"),
 }
