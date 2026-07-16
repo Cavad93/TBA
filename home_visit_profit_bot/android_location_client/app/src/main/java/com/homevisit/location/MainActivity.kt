@@ -170,6 +170,12 @@ import com.homevisit.location.ui.SyncUiState
 import java.util.Locale
 import kotlinx.coroutines.launch
 
+/** Текст из «Поделиться» (Ф15.1): только ACTION_SEND text/plain, иначе null. */
+private fun extractSharedText(intent: Intent?): String? {
+    if (intent?.action != Intent.ACTION_SEND || intent.type != "text/plain") return null
+    return intent.getStringExtra(Intent.EXTRA_TEXT)
+}
+
 class MainActivity : ComponentActivity() {
     private lateinit var prefs: SharedPreferences
 
@@ -199,6 +205,23 @@ class MainActivity : ComponentActivity() {
                 } else {
                 val viewModel: HomeVisitViewModel = viewModel()
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+                // Share-target (Ф15.1/15.2): пришёл «Поделиться» текстом — разбираем пакетным
+                // парсером и показываем экран подтверждения (зелёные/жёлтые/красные).
+                val sharedText = remember { extractSharedText(intent) }
+                val batchOrders by viewModel.batchOrders.collectAsStateWithLifecycle()
+                LaunchedEffect(sharedText) {
+                    if (!sharedText.isNullOrBlank()) {
+                        viewModel.parseSharedText(DEFAULT_SERVER_URL, sessionToken, sharedText)
+                    }
+                }
+                if (batchOrders.isNotEmpty()) {
+                    BatchOrdersScreen(
+                        orders = batchOrders,
+                        onAddGreen = { greens -> viewModel.addBatchGreen(DEFAULT_SERVER_URL, sessionToken, greens) },
+                        onClose = { viewModel.clearBatch() },
+                    )
+                    return@HomeVisitTheme
+                }
                 // Персист выбранного пресета источника заказов при его смене.
                 LaunchedEffect(OrderSource.current) {
                     prefs.edit().putString(KEY_ORDER_SOURCE, OrderSource.current.key).apply()

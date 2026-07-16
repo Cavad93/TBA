@@ -12,6 +12,7 @@ import com.homevisit.location.data.local.TelemedEntryEntity
 import com.homevisit.location.data.local.VisitEntity
 import com.homevisit.location.data.local.WorkDayEntity
 import com.homevisit.location.domain.AddressCandidate
+import com.homevisit.location.domain.BatchOrder
 import com.homevisit.location.domain.AddressSuggestResult
 import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.AuthOutcome
@@ -722,6 +723,38 @@ class HomeVisitRepository private constructor(
             }
         }
         AddressSuggestResult(resolved = resolved, candidates = candidates)
+    }
+
+    /**
+     * Пакетный разбор списка/шаринга (Ф15.2): текст → строки-заказы, каждая прогнана
+     * слоёным геокодингом на сервере. Зелёные/жёлтые/красные — статус в BatchOrder.
+     */
+    suspend fun batchParse(serverUrl: String, apiKey: String, text: String): List<BatchOrder> = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("text", text)
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/orders/batch-parse"), apiKey, payload)
+            ?: return@withContext emptyList()
+        val ordersJson = response.optJSONArray("orders") ?: return@withContext emptyList()
+        buildList {
+            for (i in 0 until ordersJson.length()) {
+                val o = ordersJson.optJSONObject(i) ?: continue
+                val resolvedJson = o.optJSONObject("resolved")
+                val resolved = if (resolvedJson != null) parseAddressCandidate(resolvedJson) else null
+                val candidates = mutableListOf<AddressCandidate>()
+                o.optJSONArray("candidates")?.let { arr ->
+                    for (j in 0 until arr.length()) {
+                        arr.optJSONObject(j)?.let { parseAddressCandidate(it)?.let(candidates::add) }
+                    }
+                }
+                add(
+                    BatchOrder(
+                        address = o.optString("address"),
+                        income = if (o.isNull("income")) null else o.optDouble("income"),
+                        resolved = resolved,
+                        candidates = candidates,
+                    ),
+                )
+            }
+        }
     }
 
     private fun parseAddressCandidate(json: JSONObject): AddressCandidate? {

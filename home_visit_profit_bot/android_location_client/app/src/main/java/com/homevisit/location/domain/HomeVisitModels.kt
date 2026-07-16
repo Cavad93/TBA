@@ -381,6 +381,27 @@ data class AddressCandidate(
 )
 
 /**
+ * Строка пакетного заказа (Ф15.2): адрес из списка/шаринга + необязательный доход +
+ * результат геокодинга. Зелёный (resolved) — готов; жёлтый (candidates) — выбрать;
+ * красный (ничего) — не понято, ручная правка. Молча ничего не добавляем.
+ */
+data class BatchOrder(
+    val address: String,
+    val income: Double?,
+    val resolved: AddressCandidate?,
+    val candidates: List<AddressCandidate>,
+) {
+    enum class Status { GREEN, YELLOW, RED }
+
+    val status: Status
+        get() = when {
+            resolved != null -> Status.GREEN
+            candidates.isNotEmpty() -> Status.YELLOW
+            else -> Status.RED
+        }
+}
+
+/**
  * Ответ `/api/address/suggest`: либо уверенный адрес (resolved), либо список кандидатов.
  * Ровно одно из двух непусто — так же, как отвечает сервер.
  */

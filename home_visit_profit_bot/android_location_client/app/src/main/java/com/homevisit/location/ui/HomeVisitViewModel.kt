@@ -43,6 +43,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import com.homevisit.location.domain.BatchOrder
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -69,6 +71,11 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     private val homeStateFlow = MutableStateFlow(HomeUiState())
     private val shiftStateFlow = MutableStateFlow(ShiftUiState())
     private val profileStateFlow = MutableStateFlow(ProfileUiState())
+
+    // Пакет заказов из вставки/шаринга (Ф15.2). Отдельный поток — MainActivity читает
+    // напрямую и показывает экран подтверждения; в общий uiState не мешаем.
+    private val batchOrdersState = MutableStateFlow<List<BatchOrder>>(emptyList())
+    val batchOrders: StateFlow<List<BatchOrder>> = batchOrdersState.asStateFlow()
 
     private val syncState = combine(repository.observeSyncQueueStats(), syncMessageState, backupExportState, syncConflictState) { stats, message, backupJson, conflicts ->
         SyncUiState(stats = stats, message = message, backupJson = backupJson, conflicts = conflicts)
@@ -640,6 +647,37 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun refreshRoute(serverUrl: String, apiKey: String) {
         viewModelScope.launch {
+            refreshRouteInternal(serverUrl, apiKey)
+        }
+    }
+
+    /** Разобрать пришедший списком/шарингом текст в пакет заказов (Ф15.2). */
+    fun parseSharedText(serverUrl: String, apiKey: String, text: String) {
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            batchOrdersState.value = repository.batchParse(serverUrl, apiKey, text)
+        }
+    }
+
+    fun clearBatch() {
+        batchOrdersState.value = emptyList()
+    }
+
+    /** «Добавить все зелёные» (Ф15.2): распознанные заказы — сразу в работу, по одному calc+accept. */
+    fun addBatchGreen(serverUrl: String, apiKey: String, greens: List<BatchOrder>) {
+        viewModelScope.launch {
+            val workDayId = ensureActiveDay()
+            for (order in greens) {
+                val resolved = order.resolved ?: continue
+                val result = repository.calculateVisitCandidate(
+                    serverUrl, apiKey, order.address, order.income ?: 0.0, "",
+                    lat = resolved.lat, lon = resolved.lon,
+                )
+                if (result.ok && result.estimate != null) {
+                    repository.acceptCandidate(serverUrl, apiKey, workDayId, result.estimate)
+                }
+            }
+            batchOrdersState.value = emptyList()
             refreshRouteInternal(serverUrl, apiKey)
         }
     }
