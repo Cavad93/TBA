@@ -11,8 +11,27 @@ from fastapi import APIRouter, Depends
 from app.api.deps import ApiError, Authed, authed, parse_json, raw_body
 from app.repositories import SettingsRepository
 from app.services.address_suggest_service import suggest
+from app.services.batch_parser import parse_order_lines
 
 router = APIRouter()
+
+
+@router.post("/api/orders/batch-parse")
+def batch_parse(body: bytes = Depends(raw_body), auth: Authed = Depends(authed)) -> dict:
+    """Пакет заказов из текста/шаринга (Ф15.2): разбить на строки-адреса + доход и
+    прогнать каждую слоёным геокодингом. Каждый заказ = {address, income} + resolved|
+    candidates: клиент красит зелёным (resolved) / жёлтым (candidates) / красным (не понято).
+    """
+    payload = parse_json(body, {"error": "bad_request"}, with_detail=True)
+    text = str(payload.get("text") or "")
+    lat = _optional_float(payload.get("lat"))
+    lon = _optional_float(payload.get("lon"))
+    settings = SettingsRepository(auth.db)
+    orders = []
+    for order in parse_order_lines(text):
+        geo = suggest(order.address, auth.db, settings, auth.user_id, lat=lat, lon=lon)
+        orders.append({"address": order.address, "income": order.income, **geo})
+    return {"orders": orders}
 
 
 @router.post("/api/address/suggest")
