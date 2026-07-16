@@ -55,6 +55,47 @@ def test_not_paid_off_shows_remaining(config) -> None:
     assert status.remaining_to_breakeven > 0
 
 
+def test_rent_entered_as_day_expense_is_not_double_counted(config) -> None:
+    """Аренда, внесённая расходом дня, не требует отбиваться дважды.
+
+    Раньше net уже включал вычет внесённой аренды, а fixed требовал её же ещё раз:
+    смена «отбивалась» только после двух аренд.
+    """
+    with connect(config) as connection:
+        day, completed, settings, stats = _shift(connection, [1500], rent=1000)
+        WorkDayRepository(connection).add_money(day.id, "vehicle_rent", 1000.0)
+        day = WorkDayRepository(connection).get(day.id)
+        status = shift_breakeven(day, completed, settings, stats)
+    assert status is not None
+    # Операционный чистый (~1500) ≥ аренды 1000 → отбита, несмотря на внесённый расход.
+    assert status.is_paid_off
+
+
+def test_car_section_rent_setting_counts(config) -> None:
+    """Ручка «Аренда машины за смену» из раздела «Машина» раньше не влияла ни на что."""
+    with connect(config) as connection:
+        days = WorkDayRepository(connection)
+        settings = SettingsRepository(connection)
+        settings.set("daily_vehicle_rent", "700")
+        day = days.create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        status = shift_breakeven(day, [], settings, DailyStatsRepository(connection))
+    assert status is not None
+    assert status.fixed_costs == 700.0
+
+
+def test_both_rent_settings_take_max_not_sum(config) -> None:
+    """Обе ручки аренды заполнены — это ОДНА аренда, берём максимум, не сумму."""
+    with connect(config) as connection:
+        days = WorkDayRepository(connection)
+        settings = SettingsRepository(connection)
+        settings.set("shift_rent_cost", "800")
+        settings.set("daily_vehicle_rent", "1000")
+        day = days.create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        status = shift_breakeven(day, [], settings, DailyStatsRepository(connection))
+    assert status is not None
+    assert status.fixed_costs == 1000.0
+
+
 def test_rent_and_other_costs_sum(config) -> None:
     with connect(config) as connection:
         days = WorkDayRepository(connection)

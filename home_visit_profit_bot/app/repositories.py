@@ -231,6 +231,11 @@ class WorkDayRepository:
             "telemed_minutes",
             "office_income",
             "office_minutes",
+            # Расходы на машину и аренду: категории «Машина»/«Аренда машины» маппятся
+            # именно сюда (EXPENSE_FIELD_BY_CATEGORY) — без этих полей их внесение
+            # падало с ValueError, и расход не записывался.
+            "vehicle_expenses",
+            "vehicle_rent",
             "fuel_expenses",
             "fuel_liters",
             "parking_expenses",
@@ -256,6 +261,11 @@ class WorkDayRepository:
             "telemed_minutes",
             "office_income",
             "office_minutes",
+            # Расходы на машину и аренду: категории «Машина»/«Аренда машины» маппятся
+            # именно сюда (EXPENSE_FIELD_BY_CATEGORY) — без этих полей их внесение
+            # падало с ValueError, и расход не записывался.
+            "vehicle_expenses",
+            "vehicle_rent",
             "fuel_expenses",
             "fuel_liters",
             "parking_expenses",

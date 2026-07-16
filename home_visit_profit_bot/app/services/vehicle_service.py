@@ -202,16 +202,6 @@ def uses_fuel(settings: SettingsRepository) -> bool:
     return bool(TRANSPORT_TYPES[transport_type(settings)]["fuel"])
 
 
-def daily_rent(settings: SettingsRepository) -> float:
-    """Аренда машины за смену — фиксированный расход, а не расход на километр.
-
-    У таксиста, который арендует машину в парке, это часто самая большая статья: она
-    не зависит от пробега вообще, и размазывать её по километрам значило бы завышать
-    цену коротких смен и занижать цену длинных.
-    """
-    return max(0.0, settings.get_float("daily_vehicle_rent", 0.0))
-
-
 def wear_coefficient(settings: SettingsRepository, *, aggressive_score: float = 0.0, route_time_factor: float = 1.0, today: date | None = None) -> float:
     """Коэффициент обслуживания и износа — то, во сколько раз он дороже топлива."""
     mode = _mode(settings)

@@ -37,8 +37,19 @@ class BreakevenStatus:
 
 
 def shift_fixed_costs(settings_repo: SettingsRepository) -> float:
-    """Сумма обязательных расходов смены: аренда авто + прочее (мойка, связь…)."""
-    rent = max(0.0, settings_repo.get_float("shift_rent_cost", 0.0))
+    """Сумма обязательных расходов смены: аренда авто + прочее (мойка, связь…).
+
+    Аренду исторически можно было задать двумя одноимёнными ручками в разных
+    разделах настроек: shift_rent_cost («Экономика») и daily_vehicle_rent
+    («Машина» — раньше она не влияла НИ НА ЧТО, мёртвая ручка). Смысл один —
+    аренда за смену, поэтому берём максимум, а не сумму: сумма задвоила бы
+    аренду у тех, кто заполнил обе.
+    """
+    rent = max(
+        0.0,
+        settings_repo.get_float("shift_rent_cost", 0.0),
+        settings_repo.get_float("daily_vehicle_rent", 0.0),
+    )
     other = max(0.0, settings_repo.get_float("shift_fixed_costs", 0.0))
     return rent + other
 
@@ -62,11 +73,15 @@ def shift_breakeven(
     # Чистый доход завершённых визитов: доходы − топливо по факту км − износ.
     # calculate_day_profitability со списком только завершённых считает маршрут по ним.
     net, _, _, _, _ = calculate_day_profitability(day, completed, settings_repo, stats_repo)
+    # Аренда, внесённая расходом дня (категория «Аренда машины»), — это и есть те
+    # фикс-расходы, которые отбиваем. Внутри net она уже вычтена, и сравнение net
+    # с fixed требовало бы отбить аренду ДВАЖДЫ. Возвращаем её в операционный чистый.
+    operating_net = net + max(0.0, day.vehicle_rent or 0.0)
 
-    remaining = fixed - net
+    remaining = fixed - operating_net
     return BreakevenStatus(
         fixed_costs=fixed,
-        accumulated_net=net,
-        is_paid_off=net >= fixed,
+        accumulated_net=operating_net,
+        is_paid_off=operating_net >= fixed,
         remaining_to_breakeven=max(0.0, remaining),
     )
