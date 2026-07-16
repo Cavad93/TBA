@@ -25,6 +25,32 @@ def codes(monkeypatch):
     return captured
 
 
+def test_forgot_password_is_throttled_silently(fresh_db, monkeypatch) -> None:
+    """Повторный запрос сброса в течение минуты не шлёт второе письмо.
+
+    Троттлинг молчаливый: ответ одинаковый (не 429), иначе разница ответов
+    раскрывала бы существование аккаунта. Без паузы чужую почту можно было
+    заваливать письмами сброса безостановочно.
+    """
+    config = fresh_db
+    sent: list[str] = []
+    monkeypatch.setattr(
+        auth_service_module, "send_code",
+        lambda cfg, to_email, code, purpose: sent.append(code),
+    )
+    with connect(config) as connection:
+        service = AuthService(connection, config)
+        service.register("throttle@example.com", "supersecret", "Иван")
+        service.verify_email("throttle@example.com", sent[-1])
+
+        first = service.forgot_password("throttle@example.com")
+        second = service.forgot_password("throttle@example.com")
+
+    assert first == second  # ответы неразличимы
+    # register + verify-код (1) + первый сброс (2); второй сброс письмо НЕ отправил.
+    assert len(sent) == 2
+
+
 def test_register_verify_login_me_flow(fresh_db, codes) -> None:
     config = fresh_db
     with connect(config) as connection:

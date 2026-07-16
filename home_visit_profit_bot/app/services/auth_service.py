@@ -127,7 +127,9 @@ class AuthService:
         if user["status"] != "active":
             raise AuthError("Аккаунт заблокирован", status=403)
         if not user["email_verified"]:
-            raise AuthError("Подтвердите e-mail — код отправлен на почту", status=403)
+            # Честный текст: при логине код НЕ отправляется (он ушёл при регистрации
+            # и мог истечь) — человеку нужно запросить повторную отправку.
+            raise AuthError("Подтвердите e-mail: запросите код повторно на экране подтверждения", status=403)
         token = auth.new_session_token()
         self.sessions.create(user["id"], auth.hash_secret(token), auth.in_minutes(SESSION_TTL_MINUTES))
         return {"ok": True, "token": token, "user": _user_payload(user)}
@@ -157,9 +159,14 @@ class AuthService:
     def forgot_password(self, email: str) -> dict[str, Any]:
         user = self.users.get_by_email(auth.normalize_email(email))
         if user:
-            code = auth.new_numeric_code()
-            self.resets.create(user["id"], auth.hash_secret(code), auth.in_minutes(CODE_TTL_MINUTES))
-            send_code(self.config, user["email"], code, "сброса пароля")
+            # Троттлинг МОЛЧАЛИВЫЙ (без 429): иначе разница ответов раскрывала бы,
+            # что аккаунт существует. Без паузы можно было заваливать чужую почту
+            # письмами сброса безостановочно.
+            last = self.resets.latest_active(user["id"])
+            if not last or _seconds_since(last["created_at"]) >= RESEND_MIN_INTERVAL_SECONDS:
+                code = auth.new_numeric_code()
+                self.resets.create(user["id"], auth.hash_secret(code), auth.in_minutes(CODE_TTL_MINUTES))
+                send_code(self.config, user["email"], code, "сброса пароля")
         return {"ok": True, "message": "Если аккаунт существует, код для сброса отправлен"}
 
     def reset_password(self, email: str, code: str, new_password: str) -> dict[str, Any]:
