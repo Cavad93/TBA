@@ -103,6 +103,18 @@ def osago_partner_url() -> str | None:
     return os.getenv("OSAGO_PARTNER_URL") or None
 
 
+def asr_url() -> str | None:
+    """URL ASR-микросервиса на сервере 2 (Ф14). None — голосовой ввод через свой
+    сервер выключен (клиент живёт на системном распознавателе). Секрет-канал: значение
+    указывает на локальный конец шифрованного канала сервер1↔сервер2 (см. Журнал)."""
+    return (os.getenv("ASR_URL") or None)
+
+
+def asr_token() -> str:
+    """Bearer-токен ASR-микросервиса (общий секрет сервер1↔сервер2). В чат/логи не выводить."""
+    return os.getenv("ASR_TOKEN", "")
+
+
 def request_timeout_seconds() -> float:
     raw = os.getenv("REQUEST_TIMEOUT_SECONDS")
     if raw:
