@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.homevisit.location.OrderSource
 import com.homevisit.location.settingText
 import com.homevisit.location.data.HomeVisitRepository
+import com.homevisit.location.ShareImageUi
 import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.ArchiveRange
 import com.homevisit.location.domain.ArchiveSort
