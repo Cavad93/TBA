@@ -637,7 +637,9 @@ internal fun EvaluateForm(
                     MoneyField(modifier = Modifier.weight(1f), value = routeMinutesText, onValueChange = { routeMinutesText = it }, label = "Мин вручную")
                 }
                 Text(
-                    "Адрес не распознан по карте — укажите километраж и время вручную.",
+                    // Не «адрес не распознан»: сюда попадают и случаи, когда адрес найден,
+                    // а не построился МАРШРУТ (нет старта смены, вне покрытия карт).
+                    "Маршрут не построился автоматически — укажите километраж и время вручную.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

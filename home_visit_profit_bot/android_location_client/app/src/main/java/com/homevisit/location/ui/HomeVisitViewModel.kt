@@ -567,7 +567,10 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 needsManualRoute = true,
             )
             result.needsCoordinates -> CandidateUiState(
-                message = "Сервер не нашёл адрес. Введите координаты вместо адреса.",
+                // Сервер принимает ручные км/мин и без координат — предлагаем оба пути:
+                // уточнить адрес (снова пройдёт через подсказки) или дать дорогу руками.
+                message = "Сервер не нашёл адрес. Уточните его или введите километры и минуты вручную.",
+                needsManualRoute = true,
             )
             else -> CandidateUiState(
                 message = "Не удалось рассчитать адрес: ${result.reason}",

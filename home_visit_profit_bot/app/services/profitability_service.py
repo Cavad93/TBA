@@ -182,34 +182,58 @@ def calculate_remaining_route_summary(
     # то, какой граф загрузил.
     profile = osrm_profile(settings_repo)
 
-    if current_point and finish_point and all(visit.lat is not None and visit.lon is not None for visit in future):
+    # Заказ без координат (дорогу дали руками) не должен ломать автомаршрут всем
+    # остальным: раньше ОДИН такой визит переводил весь день в RoutingError, и каждый
+    # следующий заказ требовал «км/мин вручную», хотя его адрес прекрасно распознан.
+    # Автомаршрут строим по точкам с координатами, а ручные км/мин прибавляем как есть.
+    future_routable = [visit for visit in future if visit.lat is not None and visit.lon is not None]
+    future_manual = [visit for visit in future if visit.lat is None or visit.lon is None]
+
+    if current_point and finish_point:
         try:
             future_route = optimize_route(
                 current_point,
-                future,
+                future_routable,
                 finish_point,
                 osrm_url=server_osrm_url(profile),
                 profile=profile,
                 timeout_seconds=server_timeout(),
                 duration_factor=day.planned_route_time_factor,
             )
-            return future_route
+            return _merge_manual_visits(future_route, future_manual)
         except RoutingError:
             if strict_routing and not _fallback_enabled(settings_repo):
                 raise
             if _fallback_enabled(settings_repo):
-                return optimize_route_estimated(
-                    current_point,
-                    future,
-                    finish_point,
-                    avg_speed_kmh=day.planned_avg_speed_kmh,
-                    straight_line_factor=settings_repo.get_float("straight_line_factor", 1.35),
+                return _merge_manual_visits(
+                    optimize_route_estimated(
+                        current_point,
+                        future_routable,
+                        finish_point,
+                        avg_speed_kmh=day.planned_avg_speed_kmh,
+                        straight_line_factor=settings_repo.get_float("straight_line_factor", 1.35),
+                    ),
+                    future_manual,
                 )
 
     if strict_routing:
         raise RoutingError("Для автоматического маршрута не хватает координат старта, финиша или адресов")
 
     return optimize_route_manual(future)
+
+
+def _merge_manual_visits(route: RouteSummary, manual_visits: list[Visit]) -> RouteSummary:
+    """Прибавить к автомаршруту заказы без координат: их дорога — ручные км/мин."""
+    if not manual_visits:
+        return route
+    manual = optimize_route_manual(manual_visits)
+    return RouteSummary(
+        visits_count=route.visits_count + manual.visits_count,
+        total_km=route.total_km + manual.total_km,
+        total_minutes=route.total_minutes + manual.total_minutes,
+        order=route.order + manual.order,
+        legs=route.legs,
+    )
 
 
 def calculate_candidate_impact(

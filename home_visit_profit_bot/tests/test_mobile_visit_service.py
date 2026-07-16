@@ -65,7 +65,7 @@ def test_candidate_typo_address_rescued_by_fuzzy_layers(config, monkeypatch) -> 
 
 
 def test_candidate_unresolvable_address_stays_needs_coordinates(config, monkeypatch) -> None:
-    """Оба слоя молчат — честный needs_coordinates, а не выдуманная точка."""
+    """Оба слоя молчат и ручной дороги нет — честный needs_coordinates."""
     from app.services import mobile_visit_service as mvs
 
     monkeypatch.setattr(mvs, "geocode_address", lambda *a, **k: None)
@@ -77,6 +77,49 @@ def test_candidate_unresolvable_address_stays_needs_coordinates(config, monkeypa
         )
     assert not result.ok
     assert result.reason == "needs_coordinates"
+
+
+def test_manual_route_creates_order_even_without_coordinates(config, monkeypatch) -> None:
+    """Дорогу дали руками — заказ создаётся, а не крутится в петле needs_coordinates.
+
+    Раньше: геокодер молчит → «укажите км/мин вручную» → указал → СНОВА
+    needs_coordinates. Заказ было невозможно создать в принципе.
+    """
+    from app.services import mobile_visit_service as mvs
+
+    monkeypatch.setattr(mvs, "geocode_address", lambda *a, **k: None)
+    monkeypatch.setattr(mvs, "resolve_fuzzy_geo", lambda *a, **k: None)
+    with connect(config) as connection:
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        result = MobileVisitService(connection).create_candidate(
+            {"address": "абракадабра 999", "income": 2500, "route_km": 7.0, "route_minutes": 15.0}
+        )
+    assert result.reason != "needs_coordinates"
+    assert result.candidate is not None
+    assert result.candidate.lat is None
+
+
+def test_coordinate_less_order_does_not_block_next_candidates(config, monkeypatch) -> None:
+    """Принятый заказ без координат не ломает автомаршрут следующим заказам.
+
+    Раньше один такой визит переводил ВЕСЬ день в RoutingError: каждый следующий
+    заказ получал needs_manual_route («укажите км/мин»), хотя его адрес распознан.
+    """
+    from app.services import mobile_visit_service as mvs
+
+    monkeypatch.setattr(mvs, "geocode_address", lambda *a, **k: None)
+    monkeypatch.setattr(mvs, "resolve_fuzzy_geo", lambda *a, **k: None)
+    with connect(config) as connection:
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        service = MobileVisitService(connection)
+        first = service.create_candidate(
+            {"address": "абракадабра 999", "income": 1000, "route_km": 7.0, "route_minutes": 15.0}
+        )
+        service.accept_candidate(first.candidate.id)
+        second = service.create_candidate(
+            {"address": "Невский 1", "income": 2500, "lat": 59.936, "lon": 30.315}
+        )
+    assert second.reason != "needs_manual_route"
 
 
 def test_mobile_candidate_can_be_cancelled_after_accept(config) -> None:

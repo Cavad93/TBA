@@ -137,11 +137,19 @@ class MobileVisitService:
                 return CandidateApiResult(ok=False, reason="geocoding_failed", detail=str(error))
 
         if geo is None or geo.lat is None or geo.lon is None:
-            return CandidateApiResult(ok=False, reason="needs_coordinates")
+            if route_km is None or route_minutes is None:
+                return CandidateApiResult(ok=False, reason="needs_coordinates")
+            # Человек уже дал дорогу руками — координаты желательны (автомаршрут,
+            # парковка), но не обязательны. Раньше здесь была вечная петля: «укажите
+            # км/мин вручную» → указал → снова needs_coordinates, заказ не создавался.
+            geo = None
 
-        inferred_base_district = detect_base_district_by_location(geo.district, geo.lat, geo.lon, base_districts)
+        inferred_base_district = (
+            detect_base_district_by_location(geo.district, geo.lat, geo.lon, base_districts)
+            if geo is not None else None
+        )
         district = None if manual_district == "-" else manual_district
-        district = district or inferred_base_district or geo.district
+        district = district or inferred_base_district or (geo.district if geo is not None else None)
         candidate = self.visits.create_candidate(
             day_id=day.id,
             address=address,
@@ -151,16 +159,16 @@ class MobileVisitService:
             route_minutes=route_minutes or 0.0,
             district=district,
             is_base_district=is_base_district(district, base_districts),
-            lat=geo.lat,
-            lon=geo.lon,
-            normalized_address=geo.normalized_address,
+            lat=geo.lat if geo is not None else None,
+            lon=geo.lon if geo is not None else None,
+            normalized_address=geo.normalized_address if geo is not None else address,
             order_source=order_source,
             response_cost=response_cost,
         )
 
         # Обучение на исправлениях (Ф13.2): человек дал точку/выбрал вариант — запоминаем
         # ввод→координаты, чтобы повторный такой же ввод резолвился мгновенно, без DaData.
-        if lat is not None and lon is not None and geo.lat is not None and geo.lon is not None:
+        if lat is not None and lon is not None and geo is not None and geo.lat is not None and geo.lon is not None:
             AddressCacheRepository(self.connection).put(
                 canonical_building(address), geo.normalized_address or address,
                 geo.district, geo.lat, geo.lon, 1.0, "learned",
@@ -168,7 +176,8 @@ class MobileVisitService:
 
         # Парковка у точки кандидата — в деньгах (Фаза 9.4). Зону ищем один раз здесь:
         # нижняя граница уходит в расчёт вердикта, вилка — человеку в подсказке.
-        parking_hit = zone_at(self.connection, geo.lat, geo.lon)
+        # Без координат зону не ищем — парковка честно нулевая, а не выдуманная.
+        parking_hit = zone_at(self.connection, geo.lat, geo.lon) if geo is not None else None
         parking_cost = parking_money(
             parking_hit, day.planned_service_minutes, profile=osrm_profile(self.settings)
         )
