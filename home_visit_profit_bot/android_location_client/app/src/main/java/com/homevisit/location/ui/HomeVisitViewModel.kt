@@ -377,7 +377,10 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             personalState.value = PersonalTripUi(isLoading = true)
             val gps = lastKnownGps()
-            val result = repository.quickEstimate(serverUrl, apiKey, address, gps?.first, gps?.second)
+            // mode=personal — по нему сервер решает, уместно ли сравнение с билетами (Ф11.6).
+            val result = repository.quickEstimate(
+                serverUrl, apiKey, address, gps?.first, gps?.second, mode = "personal",
+            )
             personalState.value = if (result.check != null) {
                 PersonalTripUi(result = result.check)
             } else {

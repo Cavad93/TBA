@@ -22,11 +22,13 @@ from app.repositories import (
     WorkDayRepository,
 )
 from app.services.address_resolver import expand_template
+from app.services.address_suggest_service import resolve_fuzzy
 from app.services.geocoding_service import (
     GeocodingError,
     geocode_address,
     manual_geocoding_result,
 )
+from app.services.iata_service import nearest_city_iata
 from app.services.parking_cost_service import parking_money
 from app.services.profitability_service import vehicle_km_cost
 from app.services.quick_estimate_service import minimum_check
@@ -40,7 +42,12 @@ from app.services.server_settings import (
     nominatim_url as server_nominatim_url,
     osrm_url as server_osrm_url,
     request_timeout_seconds as server_timeout,
+    tickets_min_distance_km,
+    tickets_savings_threshold,
+    travelpayouts_marker,
+    travelpayouts_token,
 )
+from app.services.tickets_service import tickets_block
 from app.services.vehicle_service import osrm_profile
 from app.services.visit_parking import zone_at
 
@@ -52,12 +59,12 @@ class QuickEstimateService:
         self.days = WorkDayRepository(connection)
         self.stats = DailyStatsRepository(connection)
 
-    def estimate(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def estimate(self, payload: dict[str, Any], user_id: int | None = None) -> dict[str, Any]:
         address = expand_template(str(payload.get("address", "")).strip(), self.settings)
         if not address:
             return {"ok": False, "reason": "no_address"}
 
-        dest = self._destination(address, payload)
+        dest = self._destination(address, payload, user_id)
         if dest is None:
             return {"ok": False, "reason": "needs_coordinates"}
 
@@ -87,10 +94,54 @@ class QuickEstimateService:
             "fallback": fallback,
             "cost_per_km": round(cost.total, 2),
             "parking": parking.payload() if parking else None,
+            "tickets": self._tickets(origin, dest, one_way_km, result.car_cost, payload),
             **result.payload(),
         }
 
     # --- вспомогательные ---------------------------------------------------
+
+    def _tickets(
+        self,
+        origin: Point,
+        dest: Point,
+        one_way_km: float,
+        car_cost: float,
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Блок «дешевле долететь» (Ф11.6): только личный режим и только межгород.
+
+        Сравниваем туда-обратно с туда-обратно: `car_cost` — дорога в обе стороны ×
+        себестоимость км, а `price` у Travelpayouts (`v1/prices/cheap`) — цена билета
+        именно за перелёт туда и обратно (сверено с доками). Сравнить круговую машину с
+        билетом в одну сторону значило бы завысить выгоду самолёта вдвое.
+
+        Молчим при любом сомнении: не личный режим, близко, нет ключа, город не опознан
+        или он тот же самый (лететь некуда), API не ответил. Нет уверенности — нет блока;
+        выдуманных цен не бывает.
+        """
+        if str(payload.get("mode", "")).strip().lower() != "personal":
+            return None
+        # Порог в ОДНУ сторону: «межгород» — это про то, как далеко ехать, а не про сумму
+        # пути туда-обратно. 100 км туда и 100 обратно межгородом не делают.
+        if one_way_km <= tickets_min_distance_km():
+            return None
+        token = travelpayouts_token()
+        if not token:
+            return None
+
+        origin_iata = nearest_city_iata(origin.lat, origin.lon)
+        dest_iata = nearest_city_iata(dest.lat, dest.lon)
+        if not origin_iata or not dest_iata or origin_iata == dest_iata:
+            return None
+
+        return tickets_block(
+            origin_iata,
+            dest_iata,
+            car_cost,
+            token=token,
+            marker=travelpayouts_marker(),
+            savings_threshold=tickets_savings_threshold(),
+        )
 
     def _destination(self, address: str, payload: dict[str, Any]) -> Point | None:
         lat = _optional_float(payload.get("lat"))

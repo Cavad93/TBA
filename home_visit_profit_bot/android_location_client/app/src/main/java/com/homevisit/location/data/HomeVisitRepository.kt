@@ -798,6 +798,10 @@ class HomeVisitRepository private constructor(
      * во сколько обойдётся съездить туда-обратно. from_* необязательны — без них сервер
      * считает от старта активной смены (дома). Сеть недоступна — reason=network_error,
      * экран покажет «нет связи» вместо молчаливого нуля.
+     *
+     * mode — режим поездки ("personal" для личной). Сервер по нему решает, показывать ли
+     * сравнение с билетами на межгороде (Ф11.6): в рабочем режиме билетов не бывает.
+     * Не прислали mode — сервер считает режим рабочим и билеты молчат.
      */
     suspend fun quickEstimate(
         serverUrl: String,
@@ -805,11 +809,15 @@ class HomeVisitRepository private constructor(
         address: String,
         fromLat: Double? = null,
         fromLon: Double? = null,
+        mode: String? = null,
     ): QuickEstimateResult = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("address", address.trim())
         if (fromLat != null && fromLon != null) {
             payload.put("from_lat", fromLat)
             payload.put("from_lon", fromLon)
+        }
+        if (!mode.isNullOrBlank()) {
+            payload.put("mode", mode)
         }
         val response = postJson(normalizeApiUrl(serverUrl, "/api/estimate/quick"), apiKey, payload)
             ?: return@withContext QuickEstimateResult(reason = "network_error")

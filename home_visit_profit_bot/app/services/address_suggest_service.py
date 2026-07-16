@@ -107,6 +107,32 @@ def suggest(query: str, connection, settings: SettingsRepository, user_id: int,
     return {"candidates": _dedup(candidates)[:MAX_CANDIDATES]}
 
 
+def resolve_fuzzy(text: str, connection, settings: SettingsRepository, user_id: int,
+                  lat: float | None = None, lon: float | None = None) -> dict | None:
+    """Уверенный resolved из «прощающих» слоёв (learned-кеш + DaData) — или None.
+
+    Для потоков, где кандидатов показать негде (личная поездка): Nominatim вызывающий
+    уже спросил сам и получил пусто, а DaData прощает опечатки («Аваконструкторов 33» →
+    «пр-кт Авиаконструкторов, д 33»). Возвращаем только точный дом без неоднозначности —
+    принцип «не подставлять молча при неопределённости» сохраняется.
+    """
+    text = canonical_building((text or "").strip())
+    if not text:
+        return None
+    learned = AddressCacheRepository(connection).get(text)
+    if learned is not None and learned["source"] == "learned" and learned["lat"] is not None:
+        return _resolved(
+            learned["normalized_address"] or text,
+            float(learned["lat"]), float(learned["lon"]), source="learned",
+        )
+    city = settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург"
+    suggestions = _fetch_dadata(text, connection, city, user_id)
+    decision = _decide_from_dadata(suggestions, lat, lon, city)
+    if decision is not None:
+        return decision.get("resolved")
+    return None
+
+
 def _fetch_dadata(text: str, connection, city: str, user_id: int) -> list:
     """Подсказки DaData с учётом лимита и с фолбэком без фильтра по городу.
 
