@@ -16,6 +16,8 @@ import com.homevisit.location.domain.BatchOrder
 import com.homevisit.location.domain.AddressSuggestResult
 import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.AuthOutcome
+import com.homevisit.location.domain.MinimumCheck
+import com.homevisit.location.domain.QuickEstimateResult
 import com.homevisit.location.domain.AuthUser
 import com.homevisit.location.calc.OfflineEstimateMapper
 import com.homevisit.location.domain.CandidateEstimate
@@ -761,6 +763,44 @@ class HomeVisitRepository private constructor(
                 )
             }
         }
+    }
+
+    /**
+     * Быстрая оценка личной поездки (Ф11.5): адрес + текущая точка (если GPS дал) →
+     * во сколько обойдётся съездить туда-обратно. from_* необязательны — без них сервер
+     * считает от старта активной смены (дома). Сеть недоступна — reason=network_error,
+     * экран покажет «нет связи» вместо молчаливого нуля.
+     */
+    suspend fun quickEstimate(
+        serverUrl: String,
+        apiKey: String,
+        address: String,
+        fromLat: Double? = null,
+        fromLon: Double? = null,
+    ): QuickEstimateResult = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("address", address.trim())
+        if (fromLat != null && fromLon != null) {
+            payload.put("from_lat", fromLat)
+            payload.put("from_lon", fromLon)
+        }
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/estimate/quick"), apiKey, payload)
+            ?: return@withContext QuickEstimateResult(reason = "network_error")
+        if (!response.optBoolean("ok", false)) {
+            return@withContext QuickEstimateResult(reason = response.optString("reason", "bad_request"))
+        }
+        QuickEstimateResult(
+            check = MinimumCheck(
+                address = response.optString("address", address.trim()),
+                roundTripKm = response.optDouble("round_trip_km", 0.0),
+                roundTripMinutes = response.optDouble("round_trip_minutes", 0.0),
+                carCost = response.optDouble("car_cost", 0.0),
+                timeCost = response.optDouble("time_cost", 0.0),
+                parkingCost = response.optDouble("parking_cost", 0.0),
+                minimumCheck = response.optDouble("minimum_check", 0.0),
+                hourlyOnSite = response.optDouble("hourly_on_site", 0.0),
+                fallback = response.optBoolean("fallback", false),
+            ),
+        )
     }
 
     private fun parseAddressCandidate(json: JSONObject): AddressCandidate? {

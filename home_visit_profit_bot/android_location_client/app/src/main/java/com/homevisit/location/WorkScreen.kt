@@ -86,6 +86,7 @@ import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.filled.Work
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
@@ -167,6 +168,7 @@ import com.homevisit.location.ui.HomeVisitUiState
 import com.homevisit.location.ui.HomeVisitViewModel
 import com.homevisit.location.ui.ReportUiState
 import com.homevisit.location.ui.RouteUiState
+import com.homevisit.location.ui.PersonalTripUi
 import com.homevisit.location.ui.ProfileUiState
 import com.homevisit.location.ui.RouteVisitUi
 import com.homevisit.location.ui.ShiftUiState
@@ -405,7 +407,10 @@ internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
                 ?: uiState.routeVisits.lastOrNull()?.income,
             templates = uiState.appSettings.addressTemplates(),
             recentAddresses = uiState.recentAddresses,
+            personalTrip = uiState.personalTrip,
             onCalculate = workActions.onCalculateVisit,
+            onPersonalEstimate = workActions.onPersonalEstimate,
+            onClearPersonal = workActions.onClearPersonalEstimate,
             onPickCandidate = workActions.onPickAddressCandidate,
             onReopenResult = { showResult = true },
         )
@@ -463,10 +468,16 @@ internal fun EvaluateForm(
     frequentIncome: Double?,
     templates: List<AddressTemplate>,
     recentAddresses: List<String> = emptyList(),
+    personalTrip: PersonalTripUi = PersonalTripUi(),
     onCalculate: (String, Double, String, Double?, Double?, String?, Double?) -> Unit,
+    onPersonalEstimate: (String) -> Unit = {},
+    onClearPersonal: () -> Unit = {},
     onPickCandidate: (AddressCandidate) -> Unit,
     onReopenResult: () -> Unit,
 ) {
+    // Рубильник «Работа / Личная поездка» (Ф11.5). В личном режиме нет дохода и вердикта:
+    // человек не зарабатывает, а хочет знать, во сколько обойдётся съездить туда-обратно.
+    var personalMode by rememberSaveable { mutableStateOf(false) }
     var address by rememberSaveable { mutableStateOf("") }
     var incomeText by rememberSaveable { mutableStateOf("") }
     // Пусто = «Без компании» (общий учёт — минимализм для новичков).
@@ -498,7 +509,21 @@ internal fun EvaluateForm(
         }
     }
 
-    InputCard("Оценить заказ") {
+    InputCard(if (personalMode) "Личная поездка" else "Оценить заказ") {
+        // Рубильник режима: тап переключает и сбрасывает прошлый результат личной поездки,
+        // чтобы старая цифра не висела над новым адресом.
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = !personalMode,
+                onClick = { personalMode = false; onClearPersonal() },
+                label = { Text("Работа") },
+            )
+            FilterChip(
+                selected = personalMode,
+                onClick = { personalMode = true },
+                label = { Text("Личная поездка") },
+            )
+        }
         OutlinedTextField(
             modifier = Modifier.fillMaxWidth(),
             value = address,
@@ -532,65 +557,81 @@ internal fun EvaluateForm(
                 color = VerdictColors.go,
             )
         }
-        MoneyField(value = incomeText, onValueChange = { incomeText = it }, label = "Доход, ₽")
-        if (frequentIncome != null && frequentIncome > 0 && incomeText.isBlank()) {
-            OutlinedButton(onClick = { incomeText = frequentIncome.toLong().toString() }) {
-                Text("Частый тариф: ${money(frequentIncome)}")
+        if (!personalMode) {
+            MoneyField(value = incomeText, onValueChange = { incomeText = it }, label = "Доход, ₽")
+            if (frequentIncome != null && frequentIncome > 0 && incomeText.isBlank()) {
+                OutlinedButton(onClick = { incomeText = frequentIncome.toLong().toString() }) {
+                    Text("Частый тариф: ${money(frequentIncome)}")
+                }
             }
-        }
-        CompanyPicker(clinics = clinics, value = clinic, onValue = { clinic = it })
-        // Источник заказа + цена отклика (Ф11.2): необязательно. Цена отклика (платный
-        // лид) вычитается из маржи — заказ за 800 ₽ с откликом 400 ₽ выглядит иначе.
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                modifier = Modifier.weight(1f),
-                value = orderSource,
-                onValueChange = { orderSource = it },
-                label = { Text("Источник (напр. Профи)") },
-                singleLine = true,
-            )
-            MoneyField(modifier = Modifier.weight(1f), value = responseCostText, onValueChange = { responseCostText = it }, label = "Цена отклика, ₽")
-        }
-        // Сервер не уверен в адресе — предлагаем 2–3 варианта. Тап = подтверждение,
-        // координаты выбранного уходят в расчёт как ручная точка. Молча ничего не берём.
-        if (candidate.addressCandidates.isNotEmpty()) {
-            AddressCandidatesList(candidate.addressCandidates, onPickCandidate)
-        }
-        if (candidate.needsManualRoute) {
+            CompanyPicker(clinics = clinics, value = clinic, onValue = { clinic = it })
+            // Источник заказа + цена отклика (Ф11.2): необязательно. Цена отклика (платный
+            // лид) вычитается из маржи — заказ за 800 ₽ с откликом 400 ₽ выглядит иначе.
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MoneyField(modifier = Modifier.weight(1f), value = routeKmText, onValueChange = { routeKmText = it }, label = "Км вручную")
-                MoneyField(modifier = Modifier.weight(1f), value = routeMinutesText, onValueChange = { routeMinutesText = it }, label = "Мин вручную")
-            }
-            Text(
-                "Адрес не распознан по карте — укажите километраж и время вручную.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            enabled = address.isNotBlank() && income != null && !candidate.isLoading,
-            onClick = {
-                onCalculate(
-                    // Набрали название шаблона («Дом») — отправляем сохранённый за ним
-                    // адрес: геокодер по названию ничего не найдёт.
-                    resolveAddressTemplate(address, templates),
-                    income ?: 0.0,
-                    clinic,
-                    if (hasManualRoute) routeKm else null,
-                    if (hasManualRoute) routeMinutes else null,
-                    orderSource.ifBlank { null },
-                    parseNumber(responseCostText),
+                OutlinedTextField(
+                    modifier = Modifier.weight(1f),
+                    value = orderSource,
+                    onValueChange = { orderSource = it },
+                    label = { Text("Источник (напр. Профи)") },
+                    singleLine = true,
                 )
-            },
-        ) {
-            Text(if (candidate.isLoading) "Считаю…" else "Оценить заказ")
-        }
-        if (candidate.estimate != null) {
-            TextButton(onClick = onReopenResult, modifier = Modifier.fillMaxWidth()) {
-                Text("Показать оценку снова")
+                MoneyField(modifier = Modifier.weight(1f), value = responseCostText, onValueChange = { responseCostText = it }, label = "Цена отклика, ₽")
+            }
+            // Сервер не уверен в адресе — предлагаем 2–3 варианта. Тап = подтверждение,
+            // координаты выбранного уходят в расчёт как ручная точка. Молча ничего не берём.
+            if (candidate.addressCandidates.isNotEmpty()) {
+                AddressCandidatesList(candidate.addressCandidates, onPickCandidate)
+            }
+            if (candidate.needsManualRoute) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MoneyField(modifier = Modifier.weight(1f), value = routeKmText, onValueChange = { routeKmText = it }, label = "Км вручную")
+                    MoneyField(modifier = Modifier.weight(1f), value = routeMinutesText, onValueChange = { routeMinutesText = it }, label = "Мин вручную")
+                }
+                Text(
+                    "Адрес не распознан по карте — укажите километраж и время вручную.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
+        if (personalMode) {
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = address.isNotBlank() && !personalTrip.isLoading,
+                onClick = { onPersonalEstimate(resolveAddressTemplate(address, templates)) },
+            ) {
+                Text(if (personalTrip.isLoading) "Считаю…" else "Сколько обойдётся?")
+            }
+        } else {
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = address.isNotBlank() && income != null && !candidate.isLoading,
+                onClick = {
+                    onCalculate(
+                        // Набрали название шаблона («Дом») — отправляем сохранённый за ним
+                        // адрес: геокодер по названию ничего не найдёт.
+                        resolveAddressTemplate(address, templates),
+                        income ?: 0.0,
+                        clinic,
+                        if (hasManualRoute) routeKm else null,
+                        if (hasManualRoute) routeMinutes else null,
+                        orderSource.ifBlank { null },
+                        parseNumber(responseCostText),
+                    )
+                },
+            ) {
+                Text(if (candidate.isLoading) "Считаю…" else "Оценить заказ")
+            }
+            if (candidate.estimate != null) {
+                TextButton(onClick = onReopenResult, modifier = Modifier.fillMaxWidth()) {
+                    Text("Показать оценку снова")
+                }
+            }
+        }
+    }
+    // Результат личной поездки — отдельной карточкой под формой (Ф11.5).
+    if (personalMode && (personalTrip.isLoading || personalTrip.result != null || personalTrip.message.isNotBlank())) {
+        PersonalTripCard(personalTrip)
     }
 }
 

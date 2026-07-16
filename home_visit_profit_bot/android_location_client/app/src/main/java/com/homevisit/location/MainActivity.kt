@@ -257,6 +257,8 @@ class MainActivity : ComponentActivity() {
                     onPrepareEndShift = viewModel::prepareEndShift,
                     onClearEndShift = viewModel::clearEndShift,
                     onCalculateVisit = viewModel::calculateVisitCandidate,
+                    onPersonalEstimate = viewModel::runPersonalEstimate,
+                    onClearPersonalEstimate = viewModel::clearPersonalEstimate,
                     onPickAddressCandidate = viewModel::pickAddressCandidate,
                     onAcceptCandidate = viewModel::acceptCandidate,
                     onRejectCandidate = viewModel::rejectCandidate,
@@ -488,6 +490,9 @@ internal data class WorkActions(
     val onPrepareEndShift: () -> Unit,
     val onClearEndShift: () -> Unit,
     val onCalculateVisit: (String, Double, String, Double?, Double?, String?, Double?) -> Unit,
+    /** Личная поездка (Ф11.5): «во сколько обойдётся» по адресу, без дохода и вердикта. */
+    val onPersonalEstimate: (String) -> Unit,
+    val onClearPersonalEstimate: () -> Unit,
     /** Тап по варианту адреса из кандидатов (Фаза 2): докрутить расчёт по его координатам. */
     val onPickAddressCandidate: (AddressCandidate) -> Unit,
     val onAcceptCandidate: () -> Unit,
@@ -556,6 +561,8 @@ internal fun HomeVisitApp(
     onPrepareEndShift: (String, String) -> Unit,
     onClearEndShift: () -> Unit,
     onCalculateVisit: (String, String, String, Double, String, Double?, Double?, String?, Double?) -> Unit,
+    onPersonalEstimate: (String, String, String) -> Unit,
+    onClearPersonalEstimate: () -> Unit,
     onPickAddressCandidate: (AddressCandidate) -> Unit,
     onAcceptCandidate: (String, String) -> Unit,
     onRejectCandidate: (String, String) -> Unit,
@@ -639,6 +646,8 @@ internal fun HomeVisitApp(
         onCalculateVisit = { address, income, clinic, routeKm, routeMinutes, source, responseCost ->
             onCalculateVisit(serverUrl, apiKey, address, income, clinic, routeKm, routeMinutes, source, responseCost)
         },
+        onPersonalEstimate = { address -> onPersonalEstimate(serverUrl, apiKey, address) },
+        onClearPersonalEstimate = onClearPersonalEstimate,
         onPickAddressCandidate = onPickAddressCandidate,
         onAcceptCandidate = { onAcceptCandidate(serverUrl, apiKey) },
         onRejectCandidate = { onRejectCandidate(serverUrl, apiKey) },

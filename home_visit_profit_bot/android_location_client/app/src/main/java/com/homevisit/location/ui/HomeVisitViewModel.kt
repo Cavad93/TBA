@@ -13,6 +13,7 @@ import com.homevisit.location.data.HomeVisitRepository
 import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.AddressCandidate
 import com.homevisit.location.domain.CandidateEstimate
+import com.homevisit.location.domain.MinimumCheck
 import com.homevisit.location.domain.ClinicOptions
 import com.homevisit.location.domain.EndDayDetails
 import com.homevisit.location.domain.EndDayPreview
@@ -56,6 +57,9 @@ import kotlinx.coroutines.launch
 class HomeVisitViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = HomeVisitRepository.create(application)
     private val candidateState = MutableStateFlow(CandidateUiState())
+    // Личная поездка (Ф11.5): та же форма адреса, но без дохода и вердикта — только
+    // «во сколько обойдётся». Отдельный поток, чтобы не мешать состоянию оценки заказа.
+    private val personalState = MutableStateFlow(PersonalTripUi())
     private val routeState = MutableStateFlow(RouteUiState())
     private var navCountdownJob: Job? = null
     private val gpsEstimateState = MutableStateFlow(GpsEstimateUiState())
@@ -141,7 +145,14 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         AuxUiState(appSettings, clinics, home, shift, profile)
     }
 
-    val uiState: StateFlow<HomeVisitUiState> = combine(dayState, candidateState, operationalState, syncState, auxState) { day, candidate, operational, sync, aux ->
+    // Оценка заказа и личная поездка делят одну форму — складываем их в пару, чтобы не
+    // превысить арность верхнего combine (максимум 5 источников).
+    private val evaluateState = combine(candidateState, personalState) { candidate, personal ->
+        candidate to personal
+    }
+
+    val uiState: StateFlow<HomeVisitUiState> = combine(dayState, evaluateState, operationalState, syncState, auxState) { day, evaluate, operational, sync, aux ->
+        val candidate = evaluate.first
         // Порядок Ленты берём с сервера (order_number): он отражает и авто-оптимизацию,
         // и ручную перестановку. Без него список шёл бы по времени создания.
         val serverOrder = operational.route.snapshot?.order.orEmpty()
@@ -159,6 +170,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             // закрывала бы не тот заказ, который показан сверху.
             activeVisit = ordered.firstOrNull() ?: day.activeVisit,
             candidate = candidate,
+            personalTrip = evaluate.second,
             serverRoute = operational.route,
             gpsEstimate = operational.gpsEstimate,
             gpsHint = operational.gpsHint,
@@ -353,6 +365,38 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             }
             runCandidate(serverUrl, apiKey, address, income, clinic, routeKm, routeMinutes, null, null, orderSource, responseCost)
         }
+    }
+
+    /**
+     * Личная поездка (Ф11.5): «во сколько обойдётся съездить туда-обратно» — без дохода,
+     * без вердикта. Текущую точку GPS шлём, если есть; иначе сервер считает от старта
+     * смены (дома). Сеть/адрес не сложились — показываем человеку словами, не нулём.
+     */
+    fun runPersonalEstimate(serverUrl: String, apiKey: String, address: String) {
+        if (address.isBlank()) return
+        viewModelScope.launch {
+            personalState.value = PersonalTripUi(isLoading = true)
+            val gps = lastKnownGps()
+            val result = repository.quickEstimate(serverUrl, apiKey, address, gps?.first, gps?.second)
+            personalState.value = if (result.check != null) {
+                PersonalTripUi(result = result.check)
+            } else {
+                PersonalTripUi(message = personalEstimateMessage(result.reason))
+            }
+        }
+    }
+
+    /** Сбросить результат личной поездки (переключение режима/новый адрес). */
+    fun clearPersonalEstimate() {
+        personalState.value = PersonalTripUi()
+    }
+
+    private fun personalEstimateMessage(reason: String?): String = when (reason) {
+        "no_address" -> "Введите адрес."
+        "needs_coordinates" -> "Адрес не распознан по карте — уточните его."
+        "needs_location" -> "Нет местоположения: включите GPS или начните смену от дома."
+        "network_error" -> "Нет связи с сервером — попробуйте позже."
+        else -> "Не удалось посчитать поездку."
     }
 
     /**
@@ -1180,6 +1224,8 @@ data class HomeVisitUiState(
     val endOdometer: Double? = null,
     val breakHoursBefore: Double = 0.0,
     val candidate: CandidateUiState = CandidateUiState(),
+    /** Личная поездка (Ф11.5): минимальный чек без дохода и вердикта. */
+    val personalTrip: PersonalTripUi = PersonalTripUi(),
     val activeVisit: RouteVisitUi? = null,
     val routeVisits: List<RouteVisitUi> = emptyList(),
     /** Недавние уникальные адреса дня (Ф13.1): чипы над полем адреса — ввод в один тап. */
@@ -1265,6 +1311,16 @@ data class CandidateUiState(
     val parking: ParkingHint? = null,
     /** Сервер не уверен в адресе — 2–3 варианта на выбор (Фаза 2). Пусто = выбирать нечего. */
     val addressCandidates: List<AddressCandidate> = emptyList(),
+)
+
+/**
+ * Состояние личной поездки (Ф11.5). `result` — посчитанный минимальный чек; `message` —
+ * человеческое объяснение, когда посчитать нечем (нет адреса/координат/связи).
+ */
+data class PersonalTripUi(
+    val isLoading: Boolean = false,
+    val result: MinimumCheck? = null,
+    val message: String = "",
 )
 
 /** Отложенный до выбора адреса запрос оценки: всё, чтобы докрутить расчёт после тапа. */
