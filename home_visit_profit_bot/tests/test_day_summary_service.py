@@ -43,6 +43,28 @@ def _add_sample(samples, day_id, *, meters, seconds, captured_at) -> None:
     )
 
 
+def test_planned_minutes_respect_onsite_own_duration(config) -> None:
+    """Работа на точке занимает свою длительность, а не среднюю по заказам.
+
+    Приём на 4 часа в плановом фолбэке считался как 30 минут — рабочее время
+    дня недооценивалось.
+    """
+    with connect(config) as connection:
+        day = WorkDayRepository(connection).create(
+            "Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31
+        )
+        service = MobileVisitService(connection)
+        service.create_onsite({
+            "address": "Клиника", "income": 5000, "service_minutes": 240,
+            "lat": 59.94, "lon": 30.33, "start_at": "2026-07-16T09:00:00", "end_at": "2026-07-16T13:00:00",
+        })
+
+        preview = _preview(connection, WorkDayRepository(connection).active())
+
+    # 240 минут точки + дорога, а не 30 «средних» минут.
+    assert preview.total_work_minutes >= 240
+
+
 def test_preview_falls_back_to_planned_km_without_gps(config) -> None:
     with connect(config) as connection:
         day = WorkDayRepository(connection).create(

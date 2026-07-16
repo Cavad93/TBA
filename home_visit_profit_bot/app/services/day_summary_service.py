@@ -111,9 +111,17 @@ def build_end_day_preview(
         driving_minutes = estimate.route_minutes
         avg_service_minutes = estimate.avg_service_minutes
     else:
+        # Работа на точке занимает СВОЮ длительность (приём может идти 4 часа) —
+        # считать ей среднюю по заказам значило бы недооценить рабочее время дня.
+        planned_service_total = sum(
+            (visit.service_minutes or day.planned_service_minutes)
+            if visit.kind == "onsite"
+            else day.planned_service_minutes
+            for visit in day_visits
+        )
         total_work_minutes = (
             planned_route_minutes
-            + len(day_visits) * day.planned_service_minutes
+            + planned_service_total
             + day.telemed_minutes
             + day.office_minutes
         )
