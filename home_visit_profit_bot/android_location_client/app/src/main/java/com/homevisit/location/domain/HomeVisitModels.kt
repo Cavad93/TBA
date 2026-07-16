@@ -77,6 +77,8 @@ data class HomeSnapshot(
     val hourlyVsMonth: Double,
     val debtVsPrev: Double?,
     val greenStreak: Int,
+    /** «Уберёг» (Ф7.5): убыточных заказов не взято в этом месяце (skip + отклонён). */
+    val savedSkips: Int = 0,
     val recommendations: List<HomeRecommendation>,
     val osago: HomeOsago? = null,
     val breakeven: HomeBreakeven? = null,

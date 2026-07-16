@@ -73,6 +73,7 @@ class HomeService:
         }
         trends = self._trends_payload(money, recovery)
         streak = self._green_streak()
+        saved_skips = self._saved_skips(today.replace(day=1).isoformat())
 
         return {
             "ok": True,
@@ -91,6 +92,9 @@ class HomeService:
             "money": money,
             "trends": trends,
             "green_streak": streak,
+            # «Уберёг» (Ф7.5): сколько убыточных заказов система помогла НЕ взять в этом
+            # месяце — заказы с вердиктом skip, которые человек отклонил/отменил.
+            "saved_skips": saved_skips,
             "recommendations": self._recommendations(recovery, active, streak),
             # ОСАГО: карточка отсчёта появляется за 14 дней до конца полиса (Фаза 5).
             # None — полис не заведён или срок ещё далеко: не отвлекаем.
@@ -168,6 +172,19 @@ class HomeService:
             else:
                 break
         return streak
+
+    def _saved_skips(self, since: str) -> int:
+        """«Уберёг» (Ф7.5): убыточные заказы (вердикт skip), которые человек отклонил/отменил."""
+        row = self.connection.execute(
+            """
+            SELECT COUNT(*) AS n FROM visits
+            WHERE verdict = 'skip'
+              AND status IN ('rejected', 'cancelled', 'cancelled_in_route')
+              AND created_at >= ?
+            """,
+            (since,),
+        ).fetchone()
+        return int((row["n"] if row is not None else 0) or 0)
 
     def _start_prompt(self, latest_closed: Any) -> dict[str, Any]:
         """Что подставить в форму старта смены. Ничего лишнего не спрашивая.

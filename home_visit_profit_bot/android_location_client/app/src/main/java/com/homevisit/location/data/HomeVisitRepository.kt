@@ -1886,6 +1886,7 @@ class HomeVisitRepository private constructor(
             hourlyVsMonth = trends.optDouble("hourly_vs_month", 0.0),
             debtVsPrev = if (trends.isNull("debt_vs_prev")) null else trends.optDouble("debt_vs_prev"),
             greenStreak = response.optInt("green_streak", 0),
+            savedSkips = response.optInt("saved_skips", 0),
             recommendations = recommendations,
             osago = parseHomeOsago(response.optJSONObject("osago")),
             breakeven = parseHomeBreakeven(response.optJSONObject("breakeven")),

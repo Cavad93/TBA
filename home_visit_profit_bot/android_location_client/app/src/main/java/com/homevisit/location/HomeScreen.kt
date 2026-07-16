@@ -275,6 +275,10 @@ internal fun HomeDashboard(
 
             snapshot.breakeven?.let { BreakevenCard(it) }
 
+            if (snapshot.savedSkips > 0) {
+                SavedSkipsCard(snapshot.savedSkips)
+            }
+
             MoneySection(snapshot, onOpenReports)
 
             if (snapshot.recommendations.isNotEmpty()) {
@@ -470,6 +474,37 @@ internal fun BreakevenCard(breakeven: HomeBreakeven) {
                 color = accent,
             )
             Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/**
+ * «Уберёг» (Ф7.5): сколько невыгодных заказов приложение помогло НЕ взять — переменная
+ * награда петли удержания. Показываем, только когда есть что показать.
+ */
+@Composable
+internal fun SavedSkipsCard(count: Int) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = VerdictColors.go.copy(alpha = 0.10f)),
+        border = BorderStroke(1.5.dp, VerdictColors.go),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text("Уберегли", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "$count невыгодных заказов не взято в этом месяце",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                "Приложение помогло сказать «нет» тому, что съело бы время и деньги.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
