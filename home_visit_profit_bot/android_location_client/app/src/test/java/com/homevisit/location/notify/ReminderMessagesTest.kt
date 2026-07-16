@@ -33,6 +33,15 @@ class ReminderMessagesTest {
     }
 
     @Test
+    fun negativeShiftAlertsOnlyInTheRed() {
+        assertNull("в плюсе — молчим", ReminderMessages.negativeShift(500.0))
+        assertNull("ноль — молчим", ReminderMessages.negativeShift(0.0))
+        val m = ReminderMessages.negativeShift(-320.0)!!
+        assertTrue(m.body.contains("-320 ₽"))
+        assertTrue(m.title.contains("минус"))
+    }
+
+    @Test
     fun shiftStartIsCaringNotPushy() {
         val m = ReminderMessages.shiftStart()
         assertTrue(m.title.isNotBlank())

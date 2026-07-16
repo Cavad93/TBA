@@ -45,6 +45,12 @@ class ReminderWorker(appContext: Context, params: WorkerParameters) : CoroutineW
                 val osago = home?.osago ?: return Result.success()
                 ReminderMessages.osago(osago.daysLeft, osago.expired) ?: return Result.success()
             }
+            KIND_NEGATIVE_ALERT -> {
+                // Только в активную смену и только если реально в минусе (Ф10.3).
+                if (home?.shiftActive != true) return Result.success()
+                val net = home.breakeven?.accumulatedNet ?: return Result.success()
+                ReminderMessages.negativeShift(net) ?: return Result.success()
+            }
             else -> return Result.success()
         }
         notify(kind, message)
@@ -83,5 +89,6 @@ class ReminderWorker(appContext: Context, params: WorkerParameters) : CoroutineW
         const val KIND_SHIFT_START = "shift_start"
         const val KIND_DAY_CLOSE = "day_close"
         const val KIND_OSAGO = "osago"
+        const val KIND_NEGATIVE_ALERT = "negative_alert"
     }
 }
