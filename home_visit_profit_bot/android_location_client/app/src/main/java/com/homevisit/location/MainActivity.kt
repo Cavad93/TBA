@@ -176,7 +176,7 @@ private fun extractSharedText(intent: Intent?): String? {
     return intent.getStringExtra(Intent.EXTRA_TEXT)
 }
 
-/** Картинка из «Поделиться» (Ф15.4): ACTION_SEND image/*, иначе null. */
+/** Картинка из «Поделиться» (Ф15.4): ACTION_SEND с mime-типом image, иначе null. */
 private fun extractSharedImageUri(intent: Intent?): android.net.Uri? {
     if (intent?.action != Intent.ACTION_SEND || intent.type?.startsWith("image/") != true) return null
     @Suppress("DEPRECATION")
