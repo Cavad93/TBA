@@ -756,6 +756,18 @@ class HomeVisitRepository private constructor(
         parseBatchOrders(response)
     }
 
+    /**
+     * Голос → текст через наш ASR (Ф14.4), фолбэк для телефонов без системного
+     * распознавателя. Тело — сырые байты аудио (m4a). ASR недоступен/выключен → null,
+     * человек вводит адрес вручную (мягкая деградация).
+     */
+    suspend fun transcribeAudio(serverUrl: String, apiKey: String, audio: ByteArray): String? = withContext(Dispatchers.IO) {
+        val response = postBytes(normalizeApiUrl(serverUrl, "/api/speech/transcribe"), apiKey, audio, "audio/mp4")
+            ?: return@withContext null
+        if (!response.optBoolean("ok", false)) return@withContext null
+        response.optString("text").ifBlank { null }
+    }
+
     private fun parseBatchOrders(response: JSONObject): List<BatchOrder> {
         val ordersJson = response.optJSONArray("orders") ?: return emptyList()
         return buildList {

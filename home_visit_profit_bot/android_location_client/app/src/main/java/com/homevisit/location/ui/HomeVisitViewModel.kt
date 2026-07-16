@@ -718,6 +718,20 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /**
+     * Записанный голос → текст через наш ASR (Ф14.4). Результат отдаём колбэком: поле
+     * адреса — локальное состояние формы, туда и кладём распознанное (человек правит).
+     */
+    fun transcribeServerVoice(serverUrl: String, apiKey: String, audio: ByteArray, onResult: (String?) -> Unit) {
+        if (audio.isEmpty()) {
+            onResult(null)
+            return
+        }
+        viewModelScope.launch {
+            onResult(repository.transcribeAudio(serverUrl, apiKey, audio))
+        }
+    }
+
     fun clearBatch() {
         batchOrdersState.value = emptyList()
     }

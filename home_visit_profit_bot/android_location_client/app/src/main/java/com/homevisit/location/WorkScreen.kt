@@ -3,11 +3,15 @@
 package com.homevisit.location
 
 import android.Manifest
+import android.speech.SpeechRecognizer
+import com.homevisit.location.voice.ServerVoiceRecorder
 import android.content.Intent
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.runtime.DisposableEffect
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
@@ -411,6 +415,7 @@ internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
             onCalculate = workActions.onCalculateVisit,
             onPersonalEstimate = workActions.onPersonalEstimate,
             onClearPersonal = workActions.onClearPersonalEstimate,
+            onServerVoiceTranscribe = workActions.onServerVoiceTranscribe,
             onPickCandidate = workActions.onPickAddressCandidate,
             onReopenResult = { showResult = true },
         )
@@ -472,6 +477,7 @@ internal fun EvaluateForm(
     onCalculate: (String, Double, String, Double?, Double?, String?, Double?) -> Unit,
     onPersonalEstimate: (String) -> Unit = {},
     onClearPersonal: () -> Unit = {},
+    onServerVoiceTranscribe: (ByteArray, (String?) -> Unit) -> Unit = { _, cb -> cb(null) },
     onPickCandidate: (AddressCandidate) -> Unit,
     onReopenResult: () -> Unit,
 ) {
@@ -496,8 +502,7 @@ internal fun EvaluateForm(
 
     // Голосовой ввод адреса (Ф14.4): системный распознаватель телефона — мгновенно, на
     // устройстве, без нашего сервера. Распознанный текст ложится в поле и правится до
-    // подтверждения (контроль у человека). На телефонах без Google-сервисов кнопки может
-    // не быть — там ручной ввод (серверный ASR-фолбэк подключится по готовности канала Ф14.2).
+    // подтверждения (контроль у человека).
     val voiceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -506,6 +511,50 @@ internal fun EvaluateForm(
                 ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 ?.firstOrNull()
             if (!spoken.isNullOrBlank()) address = spoken
+        }
+    }
+
+    // Серверный ASR-фолбэк (Ф14.4) — ТОЛЬКО когда системного распознавателя нет (телефоны
+    // без Google-сервисов). Тогда микрофон-кнопка сама пишет короткое аудио и шлёт на наш
+    // сервер по шифрованному каналу. На телефонах с Google этот путь не используется.
+    val context = LocalContext.current
+    val hasSystemRecognizer = remember { SpeechRecognizer.isRecognitionAvailable(context) }
+    val recorder = remember { ServerVoiceRecorder(context) }
+    var recording by remember { mutableStateOf(false) }
+    var transcribing by remember { mutableStateOf(false) }
+    // Запись живёт секунды: если экран уходит во время записи — обрубаем и удаляем файл.
+    DisposableEffect(Unit) { onDispose { recorder.cancel() } }
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> if (granted) recording = recorder.start() }
+    // Остановить запись и распознать на сервере; результат — в поле адреса.
+    fun stopAndTranscribe() {
+        recording = false
+        val audio = recorder.stop() ?: return
+        transcribing = true
+        onServerVoiceTranscribe(audio) { text ->
+            transcribing = false
+            if (!text.isNullOrBlank()) address = text
+        }
+    }
+    // Тап по микрофону: системный распознаватель — если есть; иначе наша запись (старт/стоп).
+    fun onMicTap() {
+        if (hasSystemRecognizer) {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Назовите адрес")
+            }
+            runCatching { voiceLauncher.launch(intent) }
+            return
+        }
+        if (transcribing) return
+        if (recording) {
+            stopAndTranscribe()
+        } else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            recording = recorder.start()
+        } else {
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
@@ -531,18 +580,25 @@ internal fun EvaluateForm(
             label = { Text("Адрес") },
             singleLine = false,
             trailingIcon = {
-                IconButton(onClick = {
-                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Назовите адрес")
+                when {
+                    transcribing -> CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    recording -> IconButton(onClick = { onMicTap() }) {
+                        Icon(Icons.Filled.Stop, contentDescription = "Остановить запись", tint = MaterialTheme.colorScheme.error)
                     }
-                    runCatching { voiceLauncher.launch(intent) }
-                }) {
-                    Icon(Icons.Filled.Mic, contentDescription = "Голосовой ввод адреса")
+                    else -> IconButton(onClick = { onMicTap() }) {
+                        Icon(Icons.Filled.Mic, contentDescription = "Голосовой ввод адреса")
+                    }
                 }
             },
         )
+        // Подсказка во время записи: человек видит, что идёт запись и как её завершить.
+        if (recording) {
+            Text(
+                "Идёт запись — назовите адрес и нажмите ■",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         // Чипы недавних адресов (Ф13.1): тап = адрес в один тап, повторный резолвится
         // мгновенно из learned-кеша (Ф13.2). Показываем, только когда поле пустое.
         if (address.isBlank() && recentAddresses.isNotEmpty()) {

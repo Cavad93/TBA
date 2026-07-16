@@ -279,6 +279,7 @@ class MainActivity : ComponentActivity() {
                     onCalculateVisit = viewModel::calculateVisitCandidate,
                     onPersonalEstimate = viewModel::runPersonalEstimate,
                     onClearPersonalEstimate = viewModel::clearPersonalEstimate,
+                    onServerVoiceTranscribe = viewModel::transcribeServerVoice,
                     onPickAddressCandidate = viewModel::pickAddressCandidate,
                     onAcceptCandidate = viewModel::acceptCandidate,
                     onRejectCandidate = viewModel::rejectCandidate,
@@ -513,6 +514,8 @@ internal data class WorkActions(
     /** Личная поездка (Ф11.5): «во сколько обойдётся» по адресу, без дохода и вердикта. */
     val onPersonalEstimate: (String) -> Unit,
     val onClearPersonalEstimate: () -> Unit,
+    /** Голос через наш ASR (Ф14.4): байты записи → текст колбэком (для телефонов без Google). */
+    val onServerVoiceTranscribe: (ByteArray, (String?) -> Unit) -> Unit,
     /** Тап по варианту адреса из кандидатов (Фаза 2): докрутить расчёт по его координатам. */
     val onPickAddressCandidate: (AddressCandidate) -> Unit,
     val onAcceptCandidate: () -> Unit,
@@ -583,6 +586,7 @@ internal fun HomeVisitApp(
     onCalculateVisit: (String, String, String, Double, String, Double?, Double?, String?, Double?) -> Unit,
     onPersonalEstimate: (String, String, String) -> Unit,
     onClearPersonalEstimate: () -> Unit,
+    onServerVoiceTranscribe: (String, String, ByteArray, (String?) -> Unit) -> Unit,
     onPickAddressCandidate: (AddressCandidate) -> Unit,
     onAcceptCandidate: (String, String) -> Unit,
     onRejectCandidate: (String, String) -> Unit,
@@ -668,6 +672,7 @@ internal fun HomeVisitApp(
         },
         onPersonalEstimate = { address -> onPersonalEstimate(serverUrl, apiKey, address) },
         onClearPersonalEstimate = onClearPersonalEstimate,
+        onServerVoiceTranscribe = { audio, cb -> onServerVoiceTranscribe(serverUrl, apiKey, audio, cb) },
         onPickAddressCandidate = onPickAddressCandidate,
         onAcceptCandidate = { onAcceptCandidate(serverUrl, apiKey) },
         onRejectCandidate = { onRejectCandidate(serverUrl, apiKey) },
