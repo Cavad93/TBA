@@ -42,6 +42,26 @@ def test_service_computes_loss_from_driven_gps(config) -> None:
     assert response["cancel_loss"] > 0
 
 
+def test_cancelled_in_route_excluded_from_completed(config) -> None:
+    """Отменённый в пути визит не попадает в выборку completed — из неё finalize_day
+    считает доход и время визитов (личные нормы длительности/дохода и индексы). Иначе
+    несостоявшийся заказ завышал бы нормы и портил будущие вердикты (Ф11.7)."""
+    with connect(config) as conn:
+        days = WorkDayRepository(conn)
+        visits = VisitRepository(conn)
+        day = days.create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31)
+        done = visits.create_candidate(day.id, "Выполнен", 1000, 0, 0, None, True, lat=59.94, lon=30.33)
+        visits.accept(done.id)
+        visits.complete_visit(done.id)
+        cancelled = visits.create_candidate(day.id, "Отменён", 800, 0, 0, None, True, lat=59.95, lon=30.36)
+        visits.accept(cancelled.id)
+        visits.cancel_in_route(cancelled.id, 500.0)
+        completed = visits.list_for_day(day.id, ("completed",))
+    incomes = [v.income for v in completed]
+    # Только выполненный заказ (1000); доход отменённого (800) в нормы не попадает.
+    assert incomes == [1000]
+
+
 def test_service_falls_back_to_estimated_leg(config) -> None:
     with connect(config) as conn:
         days = WorkDayRepository(conn)
