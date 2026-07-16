@@ -427,6 +427,16 @@ internal fun VehicleCostCard(cost: VehicleCost) {
                 )
             }
 
+            // Одометр: личный пробег вне смены (Ф6.4), отдельно от рабочего. Показываем
+            // только когда опция включена и что-то накопилось.
+            if (cost.personalKm > 0) {
+                MetricLine(
+                    "Личный пробег (вне смены)",
+                    "${oneDecimal(cost.personalKm)} км",
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             Text(
                 cost.explanation,
                 style = MaterialTheme.typography.bodySmall,

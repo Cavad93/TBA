@@ -818,6 +818,8 @@ data class VehicleCost(
     val measuredConsumption: Double?,
     val measuredCoefficient: Double?,
     val measuredKm: Double,
+    /** Личный пробег вне смены (Ф6.4): показываем отдельно от рабочего. 0 — опция выключена. */
+    val personalKm: Double = 0.0,
 )
 
 /**

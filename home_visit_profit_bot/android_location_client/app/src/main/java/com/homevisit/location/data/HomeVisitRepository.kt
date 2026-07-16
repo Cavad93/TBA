@@ -2025,6 +2025,7 @@ class HomeVisitRepository private constructor(
             measuredCoefficient = measured?.takeIf { !it.isNull("measured_coefficient") }
                 ?.optDouble("measured_coefficient"),
             measuredKm = measured?.optDouble("km", 0.0) ?: 0.0,
+            personalKm = o.optDouble("personal_km", 0.0),
         )
     }
 
