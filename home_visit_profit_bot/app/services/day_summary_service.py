@@ -160,6 +160,12 @@ def build_end_day_preview(
             "parking_expenses": float(day.parking_expenses or 0),
             "toll_expenses": float(day.toll_expenses or 0),
             "other_expenses": float(day.other_expenses or 0),
+            # Машина и аренда: человек видит полную картину расходов при подтверждении
+            # итогов. Заодно закрывает тихую потерю — мастер слал vehicle_expenses: 0.0
+            # (значение по умолчанию своей модели), и ноль затирал записанное за смену:
+            # в живом дне расходы были, а в закрытом (daily_stats) исчезали.
+            "vehicle_expenses": float(day.vehicle_expenses or 0),
+            "vehicle_rent": float(day.vehicle_rent or 0),
         },
         last_fuel_price_per_liter=round(last_fuel_price_per_liter(stats, settings), 2),
         fuel_consumption_l_per_100km=settings.get_float("fuel_consumption_l_per_100km", 10.0),

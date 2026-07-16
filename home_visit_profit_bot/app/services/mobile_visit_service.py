@@ -412,6 +412,10 @@ class MobileVisitService:
         ]
         # Доходы принятых заказов в том же порядке, что точки-заказы (индексы 1..K).
         response["incomes"] = [visit.income for visit in ordered]
+        # Цены откликов (платные лиды Профи/Авито) — тем же порядком. Без них офлайн-
+        # оценка на телефоне строила «до» из одних доходов и на днях с платными лидами
+        # была оптимистичнее серверной: сервер лиды вычитает, телефон — нет.
+        response["response_costs"] = [visit.response_cost for visit in ordered]
         return response
 
     def update_finish(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -625,6 +629,12 @@ class MobileVisitService:
             "route": payload,
             "visits": visits_payload,
             "navigation": navigation_settings(self.settings),
+            # Адреса дня сервер знает всегда, а телефон — не всегда: смена, начатая
+            # офлайн или до загрузки настроек, остаётся локально без старта/финиша и
+            # показывает «не задан», хотя на сервере они есть. Отдаём их, чтобы клиент
+            # дозаполнил пустое (только пустое — свою правку человека не трогаем).
+            "start": _anchor_payload(day.start_address, day.start_lat, day.start_lon),
+            "finish": _anchor_payload(day.finish_address, day.finish_lat, day.finish_lon),
         }
 
     def reorder_route(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -752,6 +762,13 @@ def _with_order(route: RouteSummary, order: list[int]) -> RouteSummary:
     """Маршрут с СОХРАНЁННЫМ порядком показа: опоздания считаем по тому порядку, который
     пользователь видит в Ленте, а не по «идеальному» порядку оптимизатора."""
     return replace(route, order=order)
+
+
+def _anchor_payload(address: str | None, lat: float | None, lon: float | None) -> dict[str, Any] | None:
+    """Старт/финиш дня для клиента. None — адреса нет, и придумывать его нечем."""
+    if not address:
+        return None
+    return {"address": address, "lat": lat, "lon": lon}
 
 
 def route_payload(route: RouteSummary) -> dict[str, Any]:

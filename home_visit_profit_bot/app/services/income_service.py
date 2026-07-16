@@ -16,7 +16,7 @@ from app.repositories import SettingsRepository
 # превращается в то, что напрямую экономит его собственные деньги.
 
 INCOME_MODELS: dict[str, str] = {
-    "per_order": "Сдельный — плачу́т за заказ",
+    "per_order": "Сдельный",
     "salary": "Оклад и премия",
     "mixed": "Оклад плюс сдельные сверху",
 }

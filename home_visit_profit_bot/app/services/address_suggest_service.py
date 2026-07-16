@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import math
+import re
 
 from app.repositories import AddressCacheRepository, SettingsRepository
 from app.repositories_dadata_usage import DadataUsageRepository
@@ -91,7 +92,7 @@ def suggest(query: str, connection, settings: SettingsRepository, user_id: int,
 
     # 1. DaData — сильнейший слой на грязном вводе (опечатки, раскладка, сокращения).
     suggestions = _fetch_dadata(text, connection, city, user_id)
-    decision = _decide_from_dadata(suggestions, lat, lon, city)
+    decision = _decide_from_dadata(text, suggestions, lat, lon, city)
     if decision is not None:
         return decision
 
@@ -132,7 +133,7 @@ def resolve_fuzzy(text: str, connection, settings: SettingsRepository, user_id: 
         )
     city = settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург"
     suggestions = _fetch_dadata(text, connection, city, user_id)
-    decision = _decide_from_dadata(suggestions, lat, lon, city)
+    decision = _decide_from_dadata(text, suggestions, lat, lon, city)
     if decision is not None:
         return decision.get("resolved")
     return None
@@ -187,13 +188,49 @@ def _fetch_dadata(text: str, connection, city: str, user_id: int) -> list:
     return [s for s in found if s.lat is not None and s.lon is not None]
 
 
-def _decide_from_dadata(suggestions: list, lat: float | None, lon: float | None,
+# Номера квартиры/подъезда/этажа/офиса — это НЕ дом. Из «Туристская 18к1, подъезд 2,
+# этаж 16, кв. 141» дом только «18к1». Иначе «141» сошло бы за номер дома, и гард
+# пропустил бы чужой адрес — ровно то, что он должен ловить.
+_UNIT_PART = re.compile(
+    r"\b(?:кв|квартира|под|подъезд|эт|этаж|оф|офис|пом|помещение)\.?\s*\d+[а-яё]?",
+    re.IGNORECASE,
+)
+
+
+def _normalized_for_house_match(text: str) -> str:
+    """Единый вид для сравнения домов: «5К1» и «5 корп 1» — один и тот же дом."""
+    without_units = _UNIT_PART.sub(" ", text or "")
+    canonical = canonical_building(without_units).lower()
+    # Дробь пишут и слитно, и с пробелами: «44 / 6» → «44/6».
+    return re.sub(r"\s*/\s*", "/", canonical)
+
+
+def _house_matches(text: str, house: str) -> bool:
+    """Дом из подсказки DaData обязан присутствовать в том, что ввёл человек.
+
+    DaData — прощающий автокомплит: на «Большая Зеленина 6» он охотно предлагает
+    соседние реальные дома, включая угловой «Большая Зеленина 44/6». По координатам
+    такой дом может оказаться ближе к человеку, чем настоящий, — и раньше молча
+    подменял введённый: в навигаторе открывался чужой адрес.
+
+    Сравниваем по вхождению, а не по хвосту строки: после дома нередко идут
+    «подъезд 2, этаж 16, кв. 141», и хвост поймал бы номер квартиры.
+    """
+    wanted = _normalized_for_house_match(house)
+    if not wanted:
+        return False
+    typed = _normalized_for_house_match(text)
+    # Границы по цифре и дроби: «6» не должен находиться внутри «16» или «44/6».
+    return re.search(rf"(?<![\d/]){re.escape(wanted)}(?![\d/])", typed) is not None
+
+
+def _decide_from_dadata(text: str, suggestions: list, lat: float | None, lon: float | None,
                         city: str) -> dict | None:
     """По подсказкам DaData решить: resolved, кандидаты — или пас (None) следующим слоям.
 
-    Точный дом (есть house) и одна точка — resolved. Есть GPS — резолвим ближайшую
-    точку (так «понимаем по GPS», не спрашивая город). Иначе несколько разных точек —
-    кандидаты на выбор. Пусто — None: пусть попробуют Nominatim и pg_trgm.
+    Точный дом (есть house И он совпал с введённым) — resolved. Иначе кандидаты на
+    выбор: под неопределённостью адрес молча не подставляем. Пусто — None: пусть
+    попробуют Nominatim и pg_trgm.
     """
     if not suggestions:
         return None
@@ -204,7 +241,10 @@ def _decide_from_dadata(suggestions: list, lat: float | None, lon: float | None,
     distinct = _distinct_by_point(ranked)
     best = ranked[0]
 
-    if best.house:
+    # Близость по GPS НЕ отменяет совпадения по дому: иначе ближайший чужой дом
+    # выигрывал у введённого, а человек даже не видел вариантов — resolved уводил
+    # клиента с пути показа кандидатов.
+    if best.house and _house_matches(text, best.house):
         # Точный дом: одна точка — сразу resolved; GPS — резолвим ближайшую; иначе,
         # если домов в разных местах несколько, пусть выберет человек.
         if len(distinct) == 1 or (lat is not None and lon is not None):
