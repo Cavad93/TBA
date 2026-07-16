@@ -420,7 +420,7 @@ internal fun ReorderCard(orders: List<RouteVisitUi>, onReorder: (List<Int>) -> U
                     Column(Modifier.weight(1f)) {
                         Text(visit.address, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
-                            "${visit.clinic.ifBlank { "Без компании" }} · ${money(visit.income)}",
+                            "${visit.clinic.ifBlank { "Без ${OrderSource.current.genSingle}" }} · ${money(visit.income)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -611,7 +611,7 @@ internal fun FocusOrderCard(
             } else {
                 Text(active.address, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text(
-                    "${active.clinic.ifBlank { "Без компании" }} · ${money(active.income)}",
+                    "${active.clinic.ifBlank { "Без ${OrderSource.current.genSingle}" }} · ${money(active.income)}",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -709,7 +709,7 @@ internal fun UpNextList(orders: List<RouteVisitUi>, activeLocalId: String?) {
                     Column(Modifier.weight(1f)) {
                         Text(v.address, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
-                            "${v.clinic.ifBlank { "Без компании" }} · ${money(v.income)}",
+                            "${v.clinic.ifBlank { "Без ${OrderSource.current.genSingle}" }} · ${money(v.income)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

@@ -402,9 +402,15 @@ internal fun GpsEstimateControls(state: GpsEstimateUiState, onRefresh: () -> Uni
 internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
     val candidate = uiState.candidate
     var showResult by rememberSaveable { mutableStateOf(false) }
-    // Датчик выгоды всплывает, как только пришёл расчёт (или нужен ручной маршрут).
-    LaunchedEffect(candidate.estimate, candidate.needsManualRoute, candidate.message) {
-        if (candidate.estimate != null || candidate.needsManualRoute) showResult = true
+    // Датчик выгоды всплывает, как только пришёл расчёт (или нужен ручной маршрут), и
+    // сам уходит, когда заказ принят/отклонён: считать больше нечего. Раньше лист на
+    // терминальном состоянии не закрывался — приём переоткрывал его (у промежуточного
+    // «Принимаю адрес…» расчёт ещё был), и человек оставался с «Адрес принят» на экране.
+    LaunchedEffect(candidate.estimate, candidate.needsManualRoute, candidate.message, candidate.done) {
+        when {
+            candidate.estimate != null || candidate.needsManualRoute -> showResult = true
+            candidate.done -> showResult = false
+        }
     }
 
     ScreenColumn {
@@ -805,24 +811,29 @@ internal fun OtherEntriesSection(uiState: HomeVisitUiState, workActions: WorkAct
 internal fun CompanyPicker(clinics: List<String>, value: String, onValue: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     var manual by rememberSaveable { mutableStateOf(false) }
+    // Подписи берём из выбранного пресета: сменил человек «Компания» на «Клиника» —
+    // и здесь должно стать «Без клиники». Раньше эти строки были захардкожены, и
+    // переключение источника заказов на самом заметном месте ничего не меняло.
+    val source = OrderSource.current
+    val none = "Без ${source.genSingle}"
     val display = when {
         manual -> "Вручную"
-        value.isBlank() -> "Без компании"
+        value.isBlank() -> none
         else -> value
     }
     Text(
-        "Компания · необязательно",
+        "${source.nomSingle} · необязательно",
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Box(Modifier.fillMaxWidth()) {
         OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
             Text(display, modifier = Modifier.weight(1f), textAlign = TextAlign.Start, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = "Выбрать компанию")
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = "Выбрать: ${source.nomSingle.lowercase()}")
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
-                text = { Text("Без компании") },
+                text = { Text(none) },
                 onClick = { manual = false; onValue(""); expanded = false },
             )
             clinics.forEach { name ->
@@ -842,7 +853,7 @@ internal fun CompanyPicker(clinics: List<String>, value: String, onValue: (Strin
             modifier = Modifier.fillMaxWidth(),
             value = value,
             onValueChange = onValue,
-            label = { Text("Название компании (разовая)") },
+            label = { Text("Название: ${source.nomSingle.lowercase()} (разовая)") },
             singleLine = true,
         )
     }
@@ -895,12 +906,21 @@ internal fun CandidateGauge(candidate: CandidateUiState, onAccept: () -> Unit, o
                 Text("Считаю выгодность…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             estimate == null -> {
+                // Заголовок — по СМЫСЛУ состояния, а не по тому, что расчёта нет.
+                // «Адрес принят» тоже приходит без расчёта (считать больше нечего), и
+                // раньше успех показывался под заголовком «Не удалось рассчитать».
+                val title = when {
+                    candidate.done -> candidate.message
+                    candidate.needsManualRoute -> "Нужно уточнить маршрут"
+                    else -> "Не удалось рассчитать"
+                }
                 Text(
-                    if (candidate.needsManualRoute) "Нужно уточнить маршрут" else "Не удалось рассчитать",
+                    title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
-                if (candidate.message.isNotBlank()) {
+                // При done текст уже стоит в заголовке — второй раз не повторяем.
+                if (!candidate.done && candidate.message.isNotBlank()) {
                     Text(candidate.message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                 }
                 if (candidate.needsManualRoute) {
@@ -956,8 +976,13 @@ internal fun CandidateGauge(candidate: CandidateUiState, onAccept: () -> Unit, o
                 // новому порогу, и человек должен понимать, почему сегодня строже.
                 if (estimate.tariffRaised) {
                     RaisedTariffRow(estimate)
-                    ParkingHintCard(candidate.parking)
                 }
+                // Платная зона — самостоятельный факт про адрес, к поднятому тарифу
+                // отношения не имеющий. Раньше карточка стояла ВНУТРИ ветки
+                // tariffRaised, и заметка «адрес в зоне платной парковки» показывалась
+                // только в те дни, когда сработала надбавка за переработку. В обычный
+                // день человек про платную зону не узнавал вовсе.
+                ParkingHintCard(candidate.parking)
                 Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
                         modifier = Modifier.weight(1f),

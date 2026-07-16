@@ -82,6 +82,11 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     private val batchOrdersState = MutableStateFlow<List<BatchOrder>>(emptyList())
     val batchOrders: StateFlow<List<BatchOrder>> = batchOrdersState.asStateFlow()
 
+    // Фото из «Поделиться» (Ф15.4): принято, разбирается, не нашлось адресов. Пустой
+    // список заказов — не состояние: по нему не отличить «ещё считаем» от «не нашли».
+    private val shareImageState = MutableStateFlow(ShareImageUi())
+    val shareImage: StateFlow<ShareImageUi> = shareImageState.asStateFlow()
+
     private val syncState = combine(repository.observeSyncQueueStats(), syncMessageState, backupExportState, syncConflictState) { stats, message, backupJson, conflicts ->
         SyncUiState(stats = stats, message = message, backupJson = backupJson, conflicts = conflicts)
     }
@@ -625,8 +630,10 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             val ok = repository.acceptCandidate(serverUrl, apiKey, workDayId, estimate)
             candidateState.value = if (ok) {
                 refreshRouteInternal(serverUrl, apiKey)
-                CandidateUiState(message = "Адрес принят")
+                CandidateUiState(message = "Адрес принят", done = true)
             } else {
+                // Провал оставляет estimate: человеку есть что повторить, и лист
+                // остаётся открытым с честным заголовком ошибки.
                 CandidateUiState(estimate = estimate, message = "Не удалось принять адрес")
             }
         }
@@ -638,7 +645,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             candidateState.update { it.copy(isLoading = true, message = "Отклоняю адрес...") }
             val ok = repository.rejectCandidate(serverUrl, apiKey, estimate.visitId)
             candidateState.value = if (ok) {
-                CandidateUiState(message = "Адрес отклонён")
+                CandidateUiState(message = "Адрес отклонён", done = true)
             } else {
                 CandidateUiState(estimate = estimate, message = "Не удалось отклонить адрес")
             }
@@ -807,12 +814,26 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /** Разобрать пришедший скриншот в пакет заказов через наш OCR (Ф15.4). */
+    /** Разобрать пришедший скриншот в пакет заказов через наш OCR (Ф15.4).
+     *
+     * Состояние [shareImage] нужно, чтобы человек видел: фото принято и с ним что-то
+     * происходит. Раньше единственной реакцией был экран пакета, который открывался
+     * только при непустом результате: пока OCR считает — тишина, а если адресов не
+     * нашлось — тишина навсегда, неотличимая от «приложение сломалось».
+     */
     fun parseSharedImage(serverUrl: String, apiKey: String, image: ByteArray) {
         if (image.isEmpty()) return
         viewModelScope.launch {
-            batchOrdersState.value = repository.ocrExtract(serverUrl, apiKey, image)
+            shareImageState.value = ShareImageUi(loading = true)
+            val orders = repository.ocrExtract(serverUrl, apiKey, image)
+            batchOrdersState.value = orders
+            shareImageState.value = ShareImageUi(loading = false, failed = orders.isEmpty())
         }
+    }
+
+    /** Спрятать карточку принятого фото (человек её прочитал). */
+    fun dismissSharedImage() {
+        shareImageState.value = ShareImageUi()
     }
 
     /**
@@ -1487,6 +1508,13 @@ data class CandidateUiState(
     val candidatesForAddress: String = "",
     /** Оговорки честности оценки с сервера: нет старта смены, мало заказов в ленте. */
     val warnings: List<String> = emptyList(),
+    /**
+     * Заказ принят или отклонён — считать больше нечего.
+     *
+     * Без этого флага успех был неотличим от провала: у обоих `estimate == null`, и
+     * лист показывал «Адрес принят» под заголовком «Не удалось рассчитать».
+     */
+    val done: Boolean = false,
 )
 
 /**

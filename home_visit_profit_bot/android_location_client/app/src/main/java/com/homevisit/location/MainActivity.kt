@@ -101,12 +101,14 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -219,6 +221,10 @@ class MainActivity : ComponentActivity() {
                 // наш OCR, дальше тот же экран пакета, что и для текста.
                 val sharedImageUri = remember { extractSharedImageUri(intent) }
                 val batchOrders by viewModel.batchOrders.collectAsStateWithLifecycle()
+                val shareImage by viewModel.shareImage.collectAsStateWithLifecycle()
+                // Миниатюра принятого фото. Живёт только в памяти экрана: изображение
+                // транзитное и на диск не ложится (152-ФЗ).
+                var sharedImagePreview by remember { mutableStateOf<ImageBitmap?>(null) }
                 LaunchedEffect(sharedText) {
                     if (!sharedText.isNullOrBlank()) {
                         viewModel.parseSharedText(DEFAULT_SERVER_URL, sessionToken, sharedText)
@@ -230,6 +236,9 @@ class MainActivity : ComponentActivity() {
                             contentResolver.openInputStream(sharedImageUri)?.use { it.readBytes() }
                         }.getOrNull()
                         if (bytes != null && bytes.isNotEmpty()) {
+                            // Сначала миниатюра, потом разбор: человек должен увидеть, что
+                            // фото принято, ещё до того, как ответит OCR.
+                            sharedImagePreview = decodeThumbnail(bytes)
                             viewModel.parseSharedImage(DEFAULT_SERVER_URL, sessionToken, bytes)
                         }
                     }
@@ -252,6 +261,7 @@ class MainActivity : ComponentActivity() {
                     if (hasRequiredPermissions()) startTrackingIfReady() else requestRequiredPermissions()
                     SyncScheduler.runOnce(this@MainActivity)
                 }
+                Box(Modifier.fillMaxSize()) {
                 HomeVisitApp(
                     uiState = uiState,
                     initialServerUrl = prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL).orEmpty(),
@@ -317,6 +327,23 @@ class MainActivity : ComponentActivity() {
                     onSaveAppSettings = viewModel::saveAppSettings,
                     onRefreshClinics = viewModel::refreshClinics,
                 )
+                    // Подтверждение принятого фото — поверх приложения, а не вместо него:
+                    // OCR считает на сервере секунды, и всё это время человек должен
+                    // видеть, что фото добавлено, продолжая пользоваться экраном.
+                    // Нашлись адреса — откроется экран пакета, и карточка не нужна.
+                    if (batchOrders.isEmpty() && (shareImage.loading || shareImage.failed)) {
+                        Box(Modifier.align(Alignment.TopCenter)) {
+                            SharedImageCard(
+                                preview = sharedImagePreview,
+                                ui = shareImage,
+                                onDismiss = {
+                                    viewModel.dismissSharedImage()
+                                    sharedImagePreview = null
+                                },
+                            )
+                        }
+                    }
+                }
                 }
             }
         }
@@ -955,24 +982,33 @@ internal fun AppScaffold(
                 .padding(padding),
             color = MaterialTheme.colorScheme.background,
         ) {
-            when (selected) {
-                AppDestination.Home -> HomeScreen(
-                    home = uiState.home,
-                    shiftActive = uiState.status == WorkDayStatus.Active,
-                    workActions = workActions,
-                    onOpenWork = { onSelectDestination(AppDestination.Work) },
-                    onOpenReports = { onSelectDestination(AppDestination.Shift) },
-                )
-                AppDestination.Work -> WorkScreen(uiState, workActions)
-                AppDestination.Route -> RouteScreen(uiState, workActions, settingsState)
-                AppDestination.Shift -> ShiftScreen(uiState.shift, workActions.onRefreshShift)
-                AppDestination.Profile -> ProfileScreen(
-                    profile = uiState.profile,
-                    onRefresh = workActions.onRefreshProfile,
-                    onOpenSettings = onOpenSettings,
-                    onConfirmIncome = workActions.onConfirmIncome,
-                    onLogout = settingsState.onLogout,
-                )
+            // Состояние вкладки переживает переключение. Без SaveableStateProvider экран
+            // при уходе покидает композицию, и весь его rememberSaveable обнуляется:
+            // набранный адрес пропадал при переходе на Ленту и обратно. rememberSaveable
+            // спасает только от поворота экрана и смерти процесса (запись в Bundle), но
+            // не от удаления из дерева. Теперь поле чистится лишь тогда, когда его
+            // очистил сам человек.
+            val tabState = rememberSaveableStateHolder()
+            tabState.SaveableStateProvider(selected) {
+                when (selected) {
+                    AppDestination.Home -> HomeScreen(
+                        home = uiState.home,
+                        shiftActive = uiState.status == WorkDayStatus.Active,
+                        workActions = workActions,
+                        onOpenWork = { onSelectDestination(AppDestination.Work) },
+                        onOpenReports = { onSelectDestination(AppDestination.Shift) },
+                    )
+                    AppDestination.Work -> WorkScreen(uiState, workActions)
+                    AppDestination.Route -> RouteScreen(uiState, workActions, settingsState)
+                    AppDestination.Shift -> ShiftScreen(uiState.shift, workActions.onRefreshShift)
+                    AppDestination.Profile -> ProfileScreen(
+                        profile = uiState.profile,
+                        onRefresh = workActions.onRefreshProfile,
+                        onOpenSettings = onOpenSettings,
+                        onConfirmIncome = workActions.onConfirmIncome,
+                        onLogout = settingsState.onLogout,
+                    )
+                }
             }
         }
     }

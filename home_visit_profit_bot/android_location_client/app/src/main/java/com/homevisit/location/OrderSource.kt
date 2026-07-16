@@ -17,6 +17,7 @@ data class OrderSourcePreset(
     val nomSingle: String,  // Компания   — именительный ед.
     val nomPlural: String,  // Компании   — именительный мн. (= винительный мн. для неодуш.: «Добавьте компании»)
     val genPlural: String,  // компаний   — родительный мн. («Список компаний пуст»)
+    val genSingle: String,  // компании   — родительный ед. («Без компании»)
     val datSingle: String,  // компании   — «по компании»
     val datPlural: String,  // компаниям  — «По компаниям»
 )
@@ -27,12 +28,14 @@ data class OrderSourcePreset(
  * (см. MainActivity: загрузка в onCreate, персист через LaunchedEffect).
  */
 object OrderSource {
+    // genSingle — именно родительный ед. («Без клиники»), а не дательный datSingle
+    // («клинике»): подставь дательный, и получилось бы «Без клинике».
     val presets = listOf(
-        OrderSourcePreset("company", "Компания", "Компании", "компаний", "компании", "компаниям"),
-        OrderSourcePreset("clinic", "Клиника", "Клиники", "клиник", "клинике", "клиникам"),
-        OrderSourcePreset("park", "Парк", "Парки", "парков", "парку", "паркам"),
-        OrderSourcePreset("service", "Сервис", "Сервисы", "сервисов", "сервису", "сервисам"),
-        OrderSourcePreset("platform", "Площадка", "Площадки", "площадок", "площадке", "площадкам"),
+        OrderSourcePreset("company", "Компания", "Компании", "компаний", "компании", "компании", "компаниям"),
+        OrderSourcePreset("clinic", "Клиника", "Клиники", "клиник", "клиники", "клинике", "клиникам"),
+        OrderSourcePreset("park", "Парк", "Парки", "парков", "парка", "парку", "паркам"),
+        OrderSourcePreset("service", "Сервис", "Сервисы", "сервисов", "сервиса", "сервису", "сервисам"),
+        OrderSourcePreset("platform", "Площадка", "Площадки", "площадок", "площадки", "площадке", "площадкам"),
     )
 
     val default: OrderSourcePreset = presets.first()
