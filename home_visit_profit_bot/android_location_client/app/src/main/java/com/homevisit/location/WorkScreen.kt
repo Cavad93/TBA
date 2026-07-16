@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -399,6 +400,7 @@ internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
             frequentIncome = uiState.appSettings.settingNumber("frequent_income")
                 ?: uiState.routeVisits.lastOrNull()?.income,
             templates = uiState.appSettings.addressTemplates(),
+            recentAddresses = uiState.recentAddresses,
             onCalculate = workActions.onCalculateVisit,
             onPickCandidate = workActions.onPickAddressCandidate,
             onReopenResult = { showResult = true },
@@ -426,6 +428,29 @@ internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
     }
 }
 
+/**
+ * Чипы недавних адресов (Ф13.1): самый быстрый ввод — тап по адресу из истории дня.
+ * Горизонтальный ряд, чтобы длинные адреса не ломали вёрстку.
+ */
+@Composable
+internal fun RecentAddressChips(addresses: List<String>, onPick: (String) -> Unit) {
+    androidx.compose.foundation.layout.Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        addresses.forEach { addr ->
+            androidx.compose.material3.SuggestionChip(
+                onClick = { onPick(addr) },
+                label = {
+                    Text(addr, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                },
+            )
+        }
+    }
+}
+
 /** Форма «Оценить заказ»: только адрес, доход (с частым тарифом) и опциональная компания. */
 @Composable
 internal fun EvaluateForm(
@@ -433,6 +458,7 @@ internal fun EvaluateForm(
     clinics: List<String>,
     frequentIncome: Double?,
     templates: List<AddressTemplate>,
+    recentAddresses: List<String> = emptyList(),
     onCalculate: (String, Double, String, Double?, Double?) -> Unit,
     onPickCandidate: (AddressCandidate) -> Unit,
     onReopenResult: () -> Unit,
@@ -457,6 +483,11 @@ internal fun EvaluateForm(
             label = { Text("Адрес") },
             singleLine = false,
         )
+        // Чипы недавних адресов (Ф13.1): тап = адрес в один тап, повторный резолвится
+        // мгновенно из learned-кеша (Ф13.2). Показываем, только когда поле пустое.
+        if (address.isBlank() && recentAddresses.isNotEmpty()) {
+            RecentAddressChips(recentAddresses) { address = it }
+        }
         // Набрали название шаблона — показываем, какой адрес за ним стоит.
         val resolved = resolveAddressTemplate(address, templates)
         if (resolved != address.trim() && address.isNotBlank()) {

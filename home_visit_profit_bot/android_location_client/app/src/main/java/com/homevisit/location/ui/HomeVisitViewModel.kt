@@ -109,6 +109,12 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                             .filter { it.status == VisitStatus.Accepted }
                             .sortedBy { it.createdAtEpochMillis }
                             .map { RouteVisitUi.fromVisit(it) },
+                        recentAddresses = visits
+                            .sortedByDescending { it.createdAtEpochMillis }
+                            .map { it.address }
+                            .filter { it.isNotBlank() }
+                            .distinct()
+                            .take(5),
                     )
                 }
             }
@@ -1117,6 +1123,8 @@ data class HomeVisitUiState(
     val candidate: CandidateUiState = CandidateUiState(),
     val activeVisit: RouteVisitUi? = null,
     val routeVisits: List<RouteVisitUi> = emptyList(),
+    /** Недавние уникальные адреса дня (Ф13.1): чипы над полем адреса — ввод в один тап. */
+    val recentAddresses: List<String> = emptyList(),
     val serverRoute: RouteUiState = RouteUiState(),
     val gpsEstimate: GpsEstimateUiState = GpsEstimateUiState(),
     val endShift: EndShiftUiState = EndShiftUiState(),

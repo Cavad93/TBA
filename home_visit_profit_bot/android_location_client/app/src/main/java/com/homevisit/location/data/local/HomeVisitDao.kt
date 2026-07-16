@@ -46,6 +46,10 @@ interface HomeVisitDao {
     @Query("SELECT * FROM visits ORDER BY createdAtEpochMillis ASC")
     suspend fun getAllVisits(): List<VisitEntity>
 
+    /** Недавние уникальные адреса (Ф13.1): чипы над полем адреса — ввод в один тап. */
+    @Query("SELECT address FROM visits WHERE address != '' GROUP BY address ORDER BY MAX(createdAtEpochMillis) DESC LIMIT :limit")
+    suspend fun recentAddresses(limit: Int): List<String>
+
     @Query("SELECT * FROM office_entries ORDER BY createdAtEpochMillis ASC")
     suspend fun getAllOfficeEntries(): List<OfficeEntryEntity>
 

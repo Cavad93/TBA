@@ -871,6 +871,11 @@ class HomeVisitRepository private constructor(
      * координат заказов не хранит, поэтому берём их с сервера, пока сеть есть. Best-effort:
      * зовём при обновлении маршрута, молча пропускаем при сбое.
      */
+    /** Недавние уникальные адреса из локальной истории (Ф13.1) — для чипов ввода в один тап. */
+    suspend fun recentAddresses(limit: Int = 5): List<String> = withContext(Dispatchers.IO) {
+        runCatching { dao.recentAddresses(limit) }.getOrDefault(emptyList())
+    }
+
     suspend fun warmDayMatrix(serverUrl: String, apiKey: String): Boolean = withContext(Dispatchers.IO) {
         val response = getJson(normalizeApiUrl(serverUrl, "/api/route/matrix/day"), apiKey)
         if (response != null && response.has("distances_km")) {
