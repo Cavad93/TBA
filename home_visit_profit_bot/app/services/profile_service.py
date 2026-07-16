@@ -11,6 +11,7 @@ from app.repositories import (
     DayMetricRepository,
     DrivingBehaviorRepository,
     DrivingSegmentRepository,
+    PersonalMileageRepository,
     SettingsRepository,
     UserBaselineRepository,
     WorkDayRepository,
@@ -127,6 +128,11 @@ class ProfileService:
         cost = vehicle_km_cost(self.settings, self.stats)
         payload = cost.payload()
         payload["measured"] = facts.payload()
+        # Личный пробег вне смены (Ф6.4): показываем рабочий и личный раздельно. При
+        # выключенной опции точки не хранятся — здесь будет 0. Никаких выводов о человеке,
+        # только километры (см. решение по спецкатегориям ПДн).
+        personal_km = PersonalMileageRepository(self.connection).total_km_since("1970-01-01")
+        payload["personal_km"] = round(personal_km, 1)
         return payload
 
     # --- пользователь -----------------------------------------------------

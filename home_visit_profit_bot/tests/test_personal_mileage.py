@@ -62,3 +62,15 @@ def test_gps_teleport_segment_not_counted(config) -> None:
         # Скачок ~130 км за один интервал — не поездка, а сбой GPS: не считаем.
         km = record_personal_point(repo, lat=60.0, lon=31.0, captured_at="2026-07-15T10:05")
     assert km == 0.0
+
+
+def test_profile_vehicle_block_exposes_personal_km(config) -> None:
+    """Одометр в профиле (Ф6.4): личный пробег виден в блоке vehicle, отдельно от рабочего."""
+    from app.services.profile_service import ProfileService
+    with connect(config) as conn:
+        repo = PersonalMileageRepository(conn)
+        record_personal_point(repo, lat=59.930, lon=30.310, captured_at="2026-07-16T10:00")
+        record_personal_point(repo, lat=59.945, lon=30.345, captured_at="2026-07-16T10:05")
+        block = ProfileService(conn)._vehicle_block()
+    assert "personal_km" in block
+    assert block["personal_km"] > 0
