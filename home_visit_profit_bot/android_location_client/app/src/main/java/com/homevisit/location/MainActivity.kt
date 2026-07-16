@@ -151,6 +151,7 @@ import com.homevisit.location.domain.ShiftToday
 import com.homevisit.location.domain.StopLabel
 import com.homevisit.location.domain.WellbeingGauge
 import com.homevisit.location.domain.WorkDayStatus
+import com.homevisit.location.notify.ReminderScheduler
 import com.homevisit.location.sync.SyncScheduler
 import com.homevisit.location.ui.AppSettingsUiState
 import com.homevisit.location.ui.CandidateUiState
@@ -177,6 +178,9 @@ class MainActivity : ComponentActivity() {
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         OrderSource.current = OrderSource.byKey(prefs.getString(KEY_ORDER_SOURCE, null))
         SyncScheduler.schedule(this)
+        // Плановые уведомления петли удержания (Ф7.1/7.2, 5.5): старт смены, закрытие дня,
+        // ОСАГО. Локальный WorkManager, без FCM; отключается настройкой reminders_enabled.
+        ReminderScheduler.schedule(this)
         setContent {
             HomeVisitTheme {
                 var sessionToken by rememberSaveable {
