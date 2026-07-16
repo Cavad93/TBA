@@ -583,6 +583,11 @@ data class EndDayPreview(
     val avgServiceMinutes: Double,
     val completedVisitsCount: Int,
     val minutesSource: String,
+    // Уже записанные за смену расходы машины и аренды. Мастер обязан их и показать,
+    // и вернуть серверу как есть: он подставляет присланное вместо накопленного,
+    // поэтому дефолтный 0.0 затирал реальные суммы при закрытии дня.
+    val vehicleExpenses: Double = 0.0,
+    val vehicleRent: Double = 0.0,
     val foodMealExpenses: Double,
     val coffeeExpenses: Double,
     val drinksExpenses: Double,

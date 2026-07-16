@@ -11,6 +11,7 @@ import com.homevisit.location.data.local.SyncStatus
 import com.homevisit.location.data.local.TelemedEntryEntity
 import com.homevisit.location.data.local.VisitEntity
 import com.homevisit.location.data.local.WorkDayEntity
+import com.homevisit.location.domain.AnchorUpdate
 import com.homevisit.location.domain.AddressCandidate
 import com.homevisit.location.domain.BatchOrder
 import com.homevisit.location.domain.AddressSuggestResult
@@ -976,7 +977,7 @@ class HomeVisitRepository private constructor(
         address: String,
         lat: Double? = null,
         lon: Double? = null,
-    ): String? = withContext(Dispatchers.IO) {
+    ): AnchorUpdate = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("finish_address", address)
         // Координаты от слоя подсказок (resolved/кандидат) — сервер тогда не геокодит
         // текст заново и не может ответить needs_coordinates.
@@ -984,8 +985,12 @@ class HomeVisitRepository private constructor(
             payload.put("lat", lat)
             payload.put("lon", lon)
         }
-        val response = postJson(normalizeApiUrl(serverUrl, "/api/day/finish"), apiKey, payload) ?: return@withContext null
-        response.optString("reason", if (response.optBoolean("ok", false)) "finish_updated" else "error")
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/day/finish"), apiKey, payload)
+            ?: return@withContext AnchorUpdate(null, null)
+        AnchorUpdate(
+            reason = response.optString("reason", if (response.optBoolean("ok", false)) "finish_updated" else "error"),
+            address = response.optJSONObject("finish")?.optString("address")?.ifBlank { null },
+        )
     }
 
     // Путь именно /api/day/start-address: /api/day/start занят стартом рабочего дня.
@@ -995,14 +1000,18 @@ class HomeVisitRepository private constructor(
         address: String,
         lat: Double? = null,
         lon: Double? = null,
-    ): String? = withContext(Dispatchers.IO) {
+    ): AnchorUpdate = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("start_address", address)
         if (lat != null && lon != null) {
             payload.put("lat", lat)
             payload.put("lon", lon)
         }
-        val response = postJson(normalizeApiUrl(serverUrl, "/api/day/start-address"), apiKey, payload) ?: return@withContext null
-        response.optString("reason", if (response.optBoolean("ok", false)) "start_updated" else "error")
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/day/start-address"), apiKey, payload)
+            ?: return@withContext AnchorUpdate(null, null)
+        AnchorUpdate(
+            reason = response.optString("reason", if (response.optBoolean("ok", false)) "start_updated" else "error"),
+            address = response.optJSONObject("start")?.optString("address")?.ifBlank { null },
+        )
     }
 
     /** Ручная перестановка принятых заказов: сервер сохраняет порядок как есть. */
@@ -1166,6 +1175,8 @@ class HomeVisitRepository private constructor(
             avgServiceMinutes = json.optDouble("avg_service_minutes", 0.0),
             completedVisitsCount = json.optInt("completed_visits_count", 0),
             minutesSource = json.optString("minutes_source", "planned"),
+            vehicleExpenses = expenses.optDouble("vehicle_expenses", 0.0),
+            vehicleRent = expenses.optDouble("vehicle_rent", 0.0),
             foodMealExpenses = expenses.optDouble("food_meal_expenses", 0.0),
             coffeeExpenses = expenses.optDouble("coffee_expenses", 0.0),
             drinksExpenses = expenses.optDouble("drinks_expenses", 0.0),

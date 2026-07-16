@@ -12,6 +12,7 @@ import com.homevisit.location.OrderSource
 import com.homevisit.location.settingText
 import com.homevisit.location.data.HomeVisitRepository
 import com.homevisit.location.ShareImageUi
+import com.homevisit.location.domain.AnchorUpdate
 import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.ArchiveRange
 import com.homevisit.location.domain.ArchiveSort
@@ -1003,26 +1004,31 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         lon: Double?,
     ) {
         val what = if (target == "start") "старта" else "финиша"
-        val reason = if (target == "start") {
+        val update = if (target == "start") {
             repository.updateDayStart(serverUrl, apiKey, address, lat, lon)
         } else {
             repository.updateDayFinish(serverUrl, apiKey, address, lat, lon)
         }
+        val reason = update.reason
         val expected = if (target == "start") "start_updated" else "finish_updated"
         if (reason == expected) {
+            // Храним НОРМАЛИЗОВАННЫЙ адрес с сервера, а не набранный текст: координаты
+            // и там и там одни, но строки расходились, и один адрес выглядел на
+            // телефоне и на сервере по-разному. Сервер не прислал — остаётся введённое.
+            val stored = update.address ?: address
             // Локальная база — источник адреса для карточек Ленты: без этого успешная
             // правка выглядела «не сохранившейся».
             if (target == "start") {
-                repository.updateLocalDayAddresses(startAddress = address)
+                repository.updateLocalDayAddresses(startAddress = stored)
             } else {
-                repository.updateLocalDayAddresses(finishAddress = address)
+                repository.updateLocalDayAddresses(finishAddress = stored)
             }
             // Запоминаем как адрес по умолчанию: следующая смена стартует с него.
             // Раньше адреса жили только внутри одного дня, а новая смена бралась из
             // настроек default_* — их никто не обновлял, и человек, задавший старт и
             // финиш вчера, сегодня снова видел «не задан» и вводил всё заново.
             val defaultKey = if (target == "start") "default_start_address" else "default_finish_address"
-            repository.queueAppSettingsUpdate(mapOf(defaultKey to address))
+            repository.queueAppSettingsUpdate(mapOf(defaultKey to stored))
             refreshRouteInternal(serverUrl, apiKey)
             routeState.value = routeState.value.copy(
                 message = if (target == "start") "Старт изменён, маршрут пересчитан" else "Финиш изменён, маршрут пересчитан",

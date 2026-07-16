@@ -198,6 +198,10 @@ private fun WizardContent(
             MoneyField(toll, { toll = it }, "Платная дорога, ₽")
             MoneyField(parking, { parking = it }, "Парковка, ₽")
             MoneyField(other, { other = it }, "Прочее, ₽")
+            // Машина и аренда уже записаны за смену — показываем как справку, без поля
+            // ввода: человек видит полную картину расходов, но не может случайно
+            // задвоить сумму, вписав её ещё раз.
+            RecordedExpenses(preview)
             StepButtons(onNext = { next() }, onSkip = { next() })
         }
 

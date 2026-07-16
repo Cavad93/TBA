@@ -32,6 +32,15 @@ object OfflineEstimateMapper {
         val durations = parseMatrix(cache.optJSONArray("durations_minutes")) ?: return null
         if (points.size < 2 || distances.size != points.size || durations.size != points.size) return null
         val incomes = parseDoubles(cache.optJSONArray("incomes"))
+        // Цены откликов (платные лиды) приходят тем же порядком, что доходы. Сервер
+        // вычитает их из чистого дня, а офлайн-оценка раньше не знала о них вовсе — и
+        // на днях с платными лидами телефон был оптимистичнее сервера. Вычитаем здесь,
+        // чтобы «до» считалось из тех же денег. Старый кеш без поля даёт пустой список
+        // — тогда всё как раньше.
+        val responseCosts = parseDoubles(cache.optJSONArray("response_costs"))
+        val netIncomes = incomes.mapIndexed { index, value ->
+            value - responseCosts.getOrElse(index) { 0.0 }
+        }
         val c = cache.optJSONObject("coefficients") ?: JSONObject()
 
         val coeff = OfflineCandidateEstimator.Coefficients(
@@ -52,7 +61,7 @@ object OfflineEstimateMapper {
             cachedDurations = durations,
             candidate = OfflineCandidateEstimator.LatLon(candidateLat, candidateLon),
             candidateIncome = income,
-            existingIncomes = incomes,
+            existingIncomes = netIncomes,
             coeff = coeff,
         )
 

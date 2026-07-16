@@ -116,6 +116,12 @@ internal fun buildEndDayDetails(
         coffeeExpenses = parseNumber(coffee) ?: 0.0,
         drinksExpenses = parseNumber(drinks) ?: 0.0,
         parkingExpenses = parseNumber(parking) ?: 0.0,
+        // Расходы машины и аренды человек в мастере не вводит — они уже записаны за
+        // смену. Но вернуть их серверу обязаны: он подставляет ПРИСЛАННОЕ вместо
+        // накопленного, и дефолтный 0.0 затирал реальные суммы. В живом дне расходы
+        // были, а в закрытом (daily_stats) исчезали — тихая потеря денег из истории.
+        vehicleExpenses = preview?.vehicleExpenses ?: 0.0,
+        vehicleRent = preview?.vehicleRent ?: 0.0,
         workloadRating = workloadRating.toDouble(),
     ).let { details ->
         // Средняя длительность визита в контракт дня не входит: сервер выводит её

@@ -55,6 +55,7 @@ public class LocationUploadService extends Service implements LocationListener, 
     private LocationManager locationManager;
     private SensorManager sensorManager;
     private Sensor accelerometer;
+    private Sensor linearAccelerometer;
     private Sensor gyroscope;
     private long lastSensorTimestampNs = 0L;
     private long lastPersistMs = 0L;
@@ -62,8 +63,18 @@ public class LocationUploadService extends Service implements LocationListener, 
     private long lastHardCornerMs = 0L;
     private long lastLaneChangeMs = 0L;
     private float lastLinearAccel = 0f;
+    /** Сглаженное линейное ускорение: рывок считаем по нему, а не по сырому шуму. */
+    private float smoothedLinearAccel = 0f;
     private float lastSpeedKmh = -1f;
     private long lastSpeedTimeMs = 0L;
+    /**
+     * Куда шла скорость на последних фиксациях: (+) разгон, (−) торможение.
+     *
+     * Нужен, чтобы РЕЗКОСТЬ брать с акселерометра (он видит секундные события), а
+     * НАПРАВЛЕНИЕ — с GPS. Порознь оба источника врали: акселерометр не знает, разгон
+     * это или торможение, а GPS с интервалом в минуту не видит самого события.
+     */
+    private float speedTrendKmh = 0f;
     // Номер отрезка пути = сколько адресов уже закрыто. Присылает сервер.
     private int segmentIndex = 0;
 
@@ -73,6 +84,14 @@ public class LocationUploadService extends Service implements LocationListener, 
     // алерт должен успеть); в движении → копим и шлём пачкой. Очередь трогается только
     // на потоке колбэка LocationListener (main looper), отправка — в executor по снимку.
     private static final float MOVING_SPEED_KMH = 8f;   // ниже — «стою/иду к двери», выше — «еду»
+    // Ниже этой скорости телеметрию вождения не копим: пешком человек тоже трясёт
+    // телефон, и шаг к подъезду неотличим от резкого разгона по одному акселерометру.
+    private static final float DRIVING_MIN_SPEED_KMH = 10f;
+    // Порог резкого продольного события, м/с². Один и тот же для разгона и торможения:
+    // симметрия обязательна, иначе одно из них всегда выглядит хуже другого.
+    private static final float HARSH_ACCEL_MPS2 = 2.8f;
+    // Сглаживание перед вычислением рывка (0..1): меньше — сильнее фильтр.
+    private static final float JERK_FILTER_ALPHA = 0.2f;
     private static final int BATCH_MAX_POINTS = 10;
     private static final long BATCH_MAX_INTERVAL_MS = 5 * 60 * 1000L;
     private final java.util.ArrayList<JSONObject> pendingPoints = new java.util.ArrayList<>();
@@ -99,6 +118,10 @@ public class LocationUploadService extends Service implements LocationListener, 
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         if (sensorManager != null) {
             accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+            // Гравитацию убирает сама система (сенсорная фьюжн), и это единственный
+            // честный способ получить ускорение машины. Есть не на всех устройствах —
+            // тогда падаем на сырой акселерометр с прежней грубой формулой.
+            linearAccelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
             gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
         }
         loadAggregate();
@@ -165,7 +188,11 @@ public class LocationUploadService extends Service implements LocationListener, 
         if (sensorManager == null) {
             return;
         }
-        if (accelerometer != null) {
+        // Слушаем ЛИБО линейный акселерометр, либо сырой — не оба: иначе одно движение
+        // попало бы в счётчики дважды.
+        if (linearAccelerometer != null) {
+            sensorManager.registerListener(this, linearAccelerometer, SensorManager.SENSOR_DELAY_NORMAL);
+        } else if (accelerometer != null) {
             sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
         }
         if (gyroscope != null) {
@@ -217,13 +244,26 @@ public class LocationUploadService extends Service implements LocationListener, 
     public void onSensorChanged(SensorEvent event) {
         resetDailyIfNeeded();
         long nowMs = System.currentTimeMillis();
-        if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
+        boolean isLinearSensor = event.sensor.getType() == Sensor.TYPE_LINEAR_ACCELERATION;
+        // Когда есть TYPE_LINEAR_ACCELERATION, сырой акселерометр для телеметрии не
+        // слушаем: иначе одно и то же движение посчиталось бы дважды.
+        boolean isRawFallback = event.sensor.getType() == Sensor.TYPE_ACCELEROMETER
+                && linearAccelerometer == null;
+        if (isLinearSensor || isRawFallback) {
             float magnitude = (float) Math.sqrt(
                     event.values[0] * event.values[0]
                             + event.values[1] * event.values[1]
                             + event.values[2] * event.values[2]
             );
-            float linear = Math.abs(magnitude - SensorManager.GRAVITY_EARTH);
+            // TYPE_LINEAR_ACCELERATION отдаёт ускорение УЖЕ без гравитации — это и есть
+            // движение машины. Прежняя формула |‖a‖ − g| гравитацию не убирала: вычитать
+            // скаляр из модуля вектора корректно, только когда телефон лежит идеально
+            // ровно. При произвольной ориентации боковой толчок 2.8 м/с² давал
+            // √(9.81² + 2.8²) − 9.81 ≈ 0.39 (занижение в семь раз), а наклон телефона в
+            // держателе — наоборот, ложный всплеск на ровном месте.
+            float linear = isLinearSensor
+                    ? magnitude
+                    : Math.abs(magnitude - SensorManager.GRAVITY_EARTH);
             double dt = 0.02;
             if (lastSensorTimestampNs > 0 && event.timestamp > lastSensorTimestampNs) {
                 dt = Math.min(1.0, Math.max(0.01, (event.timestamp - lastSensorTimestampNs) / 1_000_000_000.0));
@@ -231,11 +271,28 @@ public class LocationUploadService extends Service implements LocationListener, 
             lastSensorTimestampNs = event.timestamp;
             samplesCount += 1;
             sensorSeconds += dt;
-            double jerk = Math.abs(linear - lastLinearAccel) / dt;
+            // Низкочастотный фильтр перед производной: рывок — это разность соседних
+            // значений, делённая на сотые доли секунды, поэтому сырой шум сенсора он
+            // усиливает в разы и раздувал jerk_score на ровной дороге.
+            smoothedLinearAccel += JERK_FILTER_ALPHA * (linear - smoothedLinearAccel);
+            double jerk = Math.abs(smoothedLinearAccel - lastLinearAccel) / dt;
             jerkTotal += Math.min(50.0, jerk);
-            lastLinearAccel = linear;
-            if (linear >= 2.8f && nowMs - lastHarshAccelMs > 2500) {
-                harshAccelerationCount += 1;
+            lastLinearAccel = smoothedLinearAccel;
+            // Считаем стиль ВОЖДЕНИЯ, а не жизни: шаг к подъезду даёт те же 2–4 м/с²,
+            // что и резкий разгон, и без этого гейта пешая часть смены исправно
+            // накручивала «резкие разгоны» и рывки.
+            boolean driving = lastSpeedKmh >= DRIVING_MIN_SPEED_KMH;
+            if (driving && linear >= HARSH_ACCEL_MPS2 && nowMs - lastHarshAccelMs > 2500) {
+                // Резкость видит акселерометр, направление — GPS. Иначе торможение не
+                // ловилось вовсе: порог −2.2 м/с² при интервале GPS в 60 с требует
+                // падения скорости на 475 км/ч, поэтому harsh_braking_count был
+                // фактически всегда нулём, и «плавность торможения» выглядела идеальной
+                // у любого водителя.
+                if (speedTrendKmh < 0) {
+                    harshBrakingCount += 1;
+                } else {
+                    harshAccelerationCount += 1;
+                }
                 lastHarshAccelMs = nowMs;
             }
             walk.onSample(linear, event.timestamp / 1_000_000_000.0, lastSpeedKmh < 0 ? 0 : lastSpeedKmh);
@@ -393,10 +450,13 @@ public class LocationUploadService extends Service implements LocationListener, 
             double dt = (timeMs - lastSpeedTimeMs) / 1000.0;
             if (dt >= 1 && dt <= 180) {
                 double deltaKmh = speedKmh - lastSpeedKmh;
-                double accelMps2 = (speedKmh / 3.6 - lastSpeedKmh / 3.6) / dt;
-                if (accelMps2 <= -2.2) {
-                    harshBrakingCount += 1;
-                }
+                // Направление изменения скорости — единственное, что GPS тут может дать
+                // честно. Само событие торможения он не видит: фиксации идут раз в
+                // минуту (интервал ≥ 60 с), а торможение длится секунды и в среднем по
+                // минуте растворяется в ноль. Поэтому прежний порог accelMps2 <= -2.2
+                // требовал падения на 475 км/ч за интервал и не срабатывал никогда —
+                // резкость теперь берёт акселерометр, а знак берём отсюда.
+                speedTrendKmh = (float) deltaKmh;
                 if ((lastSpeedKmh < 5 && speedKmh > 15) || (lastSpeedKmh > 15 && speedKmh < 5)) {
                     stopGoCount += 1;
                 }
