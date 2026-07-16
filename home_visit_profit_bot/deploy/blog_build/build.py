@@ -73,6 +73,22 @@ def icon_svg(key, cls="icon"):
     return f'<svg class="{cls}" viewBox="0 0 24 24">{inner}</svg>'
 
 
+# Скрипт Travelpayouts (Туту.ру / Aviasales): верификация сайта и учёт партнёрских
+# переходов по билетам. НЕ УДАЛЯТЬ — зачем, см. CLAUDE.md → «Скрипт Travelpayouts на
+# сайте». Держим отдельной (НЕ f-) строкой: в JS есть фигурные скобки, внутри f-строки
+# head() они сломали бы рендер. Тот же блок вручную продублирован в статических
+# index.html / consent.html / policy.html — при правке синхронизировать все четыре.
+TP_SCRIPT = """<!-- Travelpayouts (Туту.ру / Aviasales) — верификация сайта и учёт партнёрских переходов. НЕ УДАЛЯТЬ (см. CLAUDE.md → «Скрипт Travelpayouts на сайте»). -->
+<script nowprocket data-noptimize="1" data-cfasync="false" data-wpfc-render="false" seraph-accel-crit="1" data-no-defer="1">
+  (function () {
+      var script = document.createElement("script");
+      script.async = 1;
+      script.src = 'https://tpembars.com/NTUxMDYy.js?t=551062';
+      document.head.appendChild(script);
+  })();
+</script>"""
+
+
 def head(title, description, css_extra=""):
     return f"""<!doctype html>
 <html lang="ru">
@@ -81,6 +97,7 @@ def head(title, description, css_extra=""):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
 <meta name="description" content="{description}">
+{TP_SCRIPT}
 <link rel="stylesheet" href="/ds.css">
 <link rel="stylesheet" href="/blog.css">{css_extra}
 </head>
