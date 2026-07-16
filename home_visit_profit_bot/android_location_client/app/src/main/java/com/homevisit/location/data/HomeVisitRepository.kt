@@ -176,6 +176,29 @@ class HomeVisitRepository private constructor(
      * читают адрес именно отсюда: без этого успешная серверная правка выглядела
      * «не сохранившейся» — сервер уже знает новый адрес, а телефон показывал старый.
      */
+    /**
+     * Дозаполнить адреса дня значениями с сервера — ТОЛЬКО если локально пусто.
+     *
+     * Смена, начатая офлайн или до загрузки настроек, остаётся локально без старта и
+     * финиша и показывает «не задан», хотя сервер их знает. Строго «только пустое»:
+     * серверное значение не должно затирать то, что человек правил руками, — его
+     * правка новее и всегда главнее.
+     */
+    suspend fun fillMissingDayAddresses(startAddress: String?, finishAddress: String?) {
+        val now = now()
+        database.withTransaction {
+            val day = dao.getLatestWorkDayByStatus(WorkDayStatus.Active) ?: return@withTransaction
+            val start = day.startAddress?.takeIf { it.isNotBlank() }
+                ?: startAddress?.trim()?.ifEmpty { null }
+            val finish = day.finishAddress?.takeIf { it.isNotBlank() }
+                ?: finishAddress?.trim()?.ifEmpty { null }
+            if (start == day.startAddress && finish == day.finishAddress) return@withTransaction
+            dao.saveWorkDay(
+                day.copy(startAddress = start, finishAddress = finish, updatedAtEpochMillis = now),
+            )
+        }
+    }
+
     suspend fun updateLocalDayAddresses(startAddress: String? = null, finishAddress: String? = null) {
         val now = now()
         database.withTransaction {
@@ -1931,6 +1954,9 @@ class HomeVisitRepository private constructor(
             )
         }
         return ServerRouteSnapshot(
+            // start/finish лежат рядом с route, на верхнем уровне ответа.
+            startAddress = response.optJSONObject("start")?.optString("address")?.ifBlank { null },
+            finishAddress = response.optJSONObject("finish")?.optString("address")?.ifBlank { null },
             order = order,
             visitsCount = route.optInt("visits_count", 0),
             totalKm = route.optDouble("total_km", 0.0),

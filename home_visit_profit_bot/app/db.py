@@ -819,6 +819,8 @@ def _ensure_columns(db: Database) -> None:
     # parking_zones мог быть создан прошлым деплоем ещё без региона: CREATE TABLE
     # IF NOT EXISTS колонку в существующую таблицу не добавит, и индекс по ней упал бы
     # на старте. Поэтому колонка и индекс — здесь, после миграций, а не в SCHEMA.
+    # Метка бэкфилла координат (P1): видно, что точку проставил скрипт, а не человек.
+    _ensure_column(db, "visits", "coords_backfilled_at", "TEXT")
     _ensure_column(db, "visit_location_events", "left_at", "TEXT")
     _ensure_column(db, "parking_state", "entered_zone_id", "INTEGER")
     _ensure_column(db, "parking_state", "entered_at", "TEXT")

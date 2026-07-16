@@ -353,6 +353,40 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /**
+     * Начать день, прогнав старт и финиш через слой подсказок (P7).
+     *
+     * Координаты старта — фундамент всей оценки дня, а поля «Начала дня» шли на сервер
+     * как есть: опечатка («Аваконструкторов 33») не находилась строгим геокодером, и
+     * день стартовал вообще без координат — адрес оставался просто строкой.
+     * Прощающий слой (learned-кеш + DaData) опечатку исправляет; уверенного ответа
+     * нет — стартуем с тем, что ввёл человек: сервер попробует сам, и день начнётся
+     * в любом случае. Начало смены нельзя блокировать разбором адреса.
+     */
+    fun startDayWithResolvedDetails(
+        serverUrl: String,
+        apiKey: String,
+        startAddress: String,
+        finishAddress: String,
+        startOdometer: Double,
+    ) {
+        viewModelScope.launch {
+            repository.startDay(
+                startAddress = resolvedLabelOr(serverUrl, apiKey, startAddress),
+                finishAddress = resolvedLabelOr(serverUrl, apiKey, finishAddress),
+                startOdometer = startOdometer,
+            )
+        }
+    }
+
+    /** Нормализованный адрес от слоя подсказок или исходный текст, если уверенности нет. */
+    private suspend fun resolvedLabelOr(serverUrl: String, apiKey: String, address: String): String {
+        if (serverUrl.isBlank() || apiKey.isBlank() || address.isBlank()) return address
+        val gps = lastKnownGps()
+        val suggestion = repository.suggestAddress(serverUrl, apiKey, address, gps?.first, gps?.second)
+        return suggestion.resolved?.label?.takeIf { it.isNotBlank() } ?: address
+    }
+
     fun endDay() {
         viewModelScope.launch {
             repository.endDay(uiState.value.workDayId)
@@ -1473,6 +1507,9 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         routeState.value = if (route == null) {
             RouteUiState(message = "Не удалось получить маршрут с сервера")
         } else {
+            // Смена, начатая офлайн, локально без адресов и показывает «не задан», хотя
+            // сервер их знает. Дозаполняем ТОЛЬКО пустое: правка человека новее и главнее.
+            repository.fillMissingDayAddresses(route.startAddress, route.finishAddress)
             RouteUiState(snapshot = route, message = "Маршрут обновлён")
         }
         // Прогреваем кеш матрицы дня для офлайн-вердикта (Ф3.4/3.5) — ПОСЛЕ показа Ленты,

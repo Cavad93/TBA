@@ -461,6 +461,43 @@ class VisitRepository:
             raise KeyError(f"Visit {visit_id} not found")
         return _visit_from_row(row)
 
+    def list_missing_coordinates(self, limit: int = 100) -> list[Visit]:
+        """Заказы без точки: заведены с ручными км, в автомаршрут не попадают (P1).
+
+        Порядок по id: бэкфилл идёт партиями, и стабильный порядок делает повторный
+        прогон предсказуемым.
+        """
+        rows = self.connection.execute(
+            "SELECT * FROM visits WHERE lat IS NULL OR lon IS NULL ORDER BY id LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [_visit_from_row(row) for row in rows]
+
+    def backfill_coordinates(
+        self,
+        visit_id: int,
+        *,
+        lat: float,
+        lon: float,
+        normalized_address: str,
+        backfilled_at: str,
+    ) -> None:
+        """Дозаполнить координаты старого заказа, пометив строку как правленную скриптом.
+
+        Метка обязательна: без неё потом не отличить точку, распознанную задним числом,
+        от той, что была с самого начала. Деньги и километры дня НЕ трогаем — пересчёт
+        закрытых смен это отдельное решение, а не побочный эффект бэкфилла.
+        """
+        self.connection.execute(
+            """
+            UPDATE visits
+            SET lat = ?, lon = ?, normalized_address = ?, coords_backfilled_at = ?
+            WHERE id = ?
+            """,
+            (lat, lon, normalized_address, backfilled_at, visit_id),
+        )
+        self.connection.commit()
+
     def set_verdict(self, visit_id: int, verdict: str | None) -> None:
         """Сохранить вердикт заказа ('go'|'edge'|'skip'|NULL) в visits.verdict."""
         self.connection.execute(

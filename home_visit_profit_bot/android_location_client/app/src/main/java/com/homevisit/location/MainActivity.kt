@@ -277,7 +277,7 @@ class MainActivity : ComponentActivity() {
                     onStartGps = ::startTracking,
                     onStopGps = ::stopTracking,
                     onStartDay = viewModel::startDay,
-                    onStartDayDetails = viewModel::startDayWithDetails,
+                    onStartDayDetails = viewModel::startDayWithResolvedDetails,
                     onStartShift = viewModel::startShift,
                     onRefreshHome = viewModel::refreshHome,
                     onRefreshShift = viewModel::refreshShift,
@@ -613,7 +613,7 @@ internal fun HomeVisitApp(
     onStartGps: (String, String, String) -> Unit,
     onStopGps: () -> Unit,
     onStartDay: () -> Unit,
-    onStartDayDetails: (String, String, Double) -> Unit,
+    onStartDayDetails: (String, String, String, String, Double) -> Unit,
     onStartShift: (Double, Double) -> Unit,
     onRefreshHome: (String, String) -> Unit,
     onRefreshShift: (String, String, String) -> Unit,
@@ -702,7 +702,9 @@ internal fun HomeVisitApp(
     )
     val workActions = WorkActions(
         onStartDay = onStartDay,
-        onStartDayDetails = onStartDayDetails,
+        onStartDayDetails = { start, finish, odometer ->
+            onStartDayDetails(serverUrl, apiKey, start, finish, odometer)
+        },
         onStartShift = onStartShift,
         onRefreshHome = { onRefreshHome(serverUrl, apiKey) },
         onRefreshShift = { period -> onRefreshShift(serverUrl, apiKey, period) },

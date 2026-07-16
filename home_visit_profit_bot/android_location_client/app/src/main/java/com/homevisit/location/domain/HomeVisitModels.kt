@@ -431,6 +431,9 @@ data class AddressSuggestResult(
 )
 
 data class ServerRouteSnapshot(
+    /** Адреса старта/финиша дня с сервера: телефон дозаполняет ими пустое (P2). */
+    val startAddress: String? = null,
+    val finishAddress: String? = null,
     val visitsCount: Int,
     val totalKm: Double,
     val totalMinutes: Double,
