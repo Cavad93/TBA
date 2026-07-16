@@ -17,8 +17,28 @@ from app.repositories import (
 
 MOVING_SPEED_KMH = 10.0
 GPS_WINDOW_MINUTES = 12
-GPS_JUMP_KM_PER_MINUTE = 10.0
 FINISH_DWELL_MINUTES = 30.0
+
+# Отсев телепортов (глушение GPS). В Петербурге глушилки регулярно «переносят»
+# людей в Ладожское озеро на минуты и часы: позиция скачет на десятки километров,
+# хотя человек стоит на месте. Такой сэмпл нельзя пускать в расчёт — он рисует
+# фантомные километры, ломает автозакрытие по GPS и парковочные уведомления.
+#
+# Отличаем прыжок от езды по подразумеваемой скорости между соседними ТОЧНЫМИ
+# точками: 200 км/ч заведомо выше всего, чем ездит выездной работник, но выше
+# любого городского и трассового реального движения.
+#
+# Прошлый порог был 10 км/мин = 600 КМ/Ч и пропускал почти любой прыжок, а
+# множитель max(seconds/60, 1) держал бюджет минимум 10 км: на интервале меньше
+# минуты пролезал ЛЮБОЙ скачок до 10 км (например, 10 км за 5 секунд).
+GPS_MAX_SPEED_KMH = 200.0
+# Соседние точки почти одновременны — скорость считать не по чему: шум делится на
+# крошечный Δt и даёт тысячи км/ч. На таком интервале пропускаем только заведомо
+# мелкие сдвиги.
+GPS_MIN_SECONDS = 3.0
+# Дрожание GPS на месте (переключение вышек/спутников) — не телепорт: точку с
+# таким сдвигом принимаем независимо от подразумеваемой скорости.
+GPS_STUTTER_GRACE_M = 150.0
 
 
 @dataclass(frozen=True)
@@ -199,6 +219,52 @@ def calculate_location_day_estimate(
     )
 
 
+def _last_seen_at(work_day_id: int, samples: LocationSampleRepository) -> datetime | None:
+    """Когда телефон последний раз присылал точку — любую, хоть выброс."""
+    row = samples.last_any(work_day_id)
+    if row is None:
+        return None
+    return _parse_datetime(str(row["captured_at"]))
+
+
+def _looks_like_real_movement(
+    *,
+    distance_m: float,
+    captured_at: datetime,
+    previous_valid_at: datetime,
+    last_seen_at: datetime | None,
+) -> bool:
+    """Человек правда переместился — или его «перенесло» глушилкой?
+
+    Расстояние меряем от последней ДОСТОВЕРНОЙ точки (где он реально был), а время —
+    от последнего НАБЛЮДЕНИЯ (когда телефон в последний раз выходил на связь). Это и
+    отличает две ситуации, которые по одному расстоянию неразличимы:
+
+      * Глушение. Точки идут как обычно, раз в минуту, но все они — выбросы. Реальная
+        поездка за 70 км оставила бы след из валидных точек по дороге; следа нет,
+        значит человек никуда не ехал. Сравнение с последним наблюдением держит
+        подразумеваемую скорость запредельной всё глушение, сколько бы оно ни длилось.
+      * Честный перерыв. Туннель, метро, севшая батарея: точек не было вовсе, и за час
+        человек законно уехал за 70 км. Тут время считается от последней валидной
+        точки, и скорость выходит нормальной — точку принимаем.
+
+    Без этого разделения любой телепорт «легализовался» бы сам собой: время от
+    последней валидной точки всё росло, и через 21 минуту 70 км давали ровно 200 км/ч.
+    Именно так глушение на час-два и становилось новой правдой.
+    """
+    if distance_m <= GPS_STUTTER_GRACE_M:
+        # Дрожание на месте — не телепорт, каким бы коротким ни был интервал.
+        return True
+
+    observed_at = max(previous_valid_at, last_seen_at) if last_seen_at else previous_valid_at
+    seconds = (captured_at - observed_at).total_seconds()
+    if seconds < GPS_MIN_SECONDS:
+        # Наблюдали только что, а человек уже далеко: скорость считать не по чему
+        # (шум делится на крошечный Δt), но такой сдвиг всё равно не бывает настоящим.
+        return False
+    return distance_m / 1000 / (seconds / 3600) <= GPS_MAX_SPEED_KMH
+
+
 def _store_location_sample(
     *,
     day: WorkDay,
@@ -222,10 +288,14 @@ def _store_location_sample(
             segment_started_at = previous_at.isoformat(timespec="seconds")
             seconds = max(0.0, (captured_at - previous_at).total_seconds())
             distance_m = haversine_m(lat, lon, float(previous["lat"]), float(previous["lon"]))
+            is_valid = _looks_like_real_movement(
+                distance_m=distance_m,
+                captured_at=captured_at,
+                previous_valid_at=previous_at,
+                last_seen_at=_last_seen_at(day.id, samples),
+            )
             if seconds > 0:
                 speed_kmh = distance_m / 1000 / (seconds / 3600)
-                max_distance_m = GPS_JUMP_KM_PER_MINUTE * 1000 * max(seconds / 60, 1)
-                is_valid = distance_m <= max_distance_m
     samples.add(
         work_day_id=day.id,
         lat=lat,

@@ -22,6 +22,7 @@ from app.repositories import (
 )
 from app.services.location_service import process_location_update
 from app.services.parking_alert_service import check as parking_check
+from app.services.parking_alert_service import check_entry as parking_entry_check
 from app.services.personal_mileage_service import record_personal_point
 
 router = APIRouter()
@@ -90,10 +91,16 @@ def _process_one(payload: dict, db, repos: dict) -> dict:
         len(visits.list_for_day(active_day.id, ("completed",))) if active_day else 0
     )
     parking_alert = None
-    if active_day is not None and settings.get_bool("parking_alerts", True):
+    # Прыжок GPS в парковку не пускаем: точка-фантом (глушение) внутри платной зоны
+    # подняла бы тревогу «оплатите», пока человек стоит совсем в другом районе.
+    if active_day is not None and result.sample_valid and settings.get_bool("parking_alerts", True):
+        # Сначала главное («вы встали — пора платить»), и только если его нет —
+        # заметка о въезде. Иначе въезд перебивал бы требование оплаты.
         alert = parking_check(
             db, work_day_id=active_day.id, lat=lat, lon=lon,
             speed_kmh=result.avg_speed_kmh, now=captured_at,
+        ) or parking_entry_check(
+            db, work_day_id=active_day.id, lat=lat, lon=lon, now=captured_at,
         )
         parking_alert = alert.payload() if alert else None
 

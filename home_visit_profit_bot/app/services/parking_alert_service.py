@@ -35,6 +35,9 @@ REPEAT_COOLDOWN_MINUTES = 60.0
 @dataclass(frozen=True)
 class ParkingAlert:
     hit: ParkingHit
+    # "parked" — встал в зоне, пора платить (главное).
+    # "entered" — только въехал: заметка, а не требование.
+    reason: str = "parked"
 
     def payload(self) -> dict[str, object]:
         zone = self.hit.zone
@@ -46,11 +49,19 @@ class ParkingAlert:
             details.append(self.hit.price_text)
         if self.hit.tariff is not None:
             details.append(f"оплата {self.hit.tariff.hours_text()}")
+        entered = self.reason == "entered"
+        title = "Вы в платной зоне" if entered else "Вы встали в платной зоне"
+        tail = ", ".join(details) if details else "Оплата — в приложении парковки."
+        if entered:
+            # При въезде платить ещё не за что — человек может просто проезжать
+            # насквозь. Поэтому это заметка «имей в виду», а не «оплати».
+            tail = f"{tail} Если встанете — нужно оплатить."
         return {
-            "title": "Вы встали в платной зоне",
-            "text": f"{where}. " + (", ".join(details) if details else "Оплата — в приложении парковки."),
+            "title": title,
+            "text": f"{where}. {tail}",
             "zone_id": zone.id,
             "city": zone.city,
+            "reason": self.reason,
         }
 
 
@@ -83,6 +94,54 @@ class ParkingStateRepository:
             (work_day_id, slow_since, notified_zone_id, notified_at),
         )
         self.connection.commit()
+
+    def save_entry(self, work_day_id: int, *, zone_id: int | None, entered_at: str | None) -> None:
+        """Отдельно от save(): состояние въезда не должно затираться логикой «встал»."""
+        self.connection.execute(
+            """
+            INSERT INTO parking_state(work_day_id, entered_zone_id, entered_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(work_day_id) DO UPDATE SET
+                entered_zone_id = excluded.entered_zone_id,
+                entered_at = excluded.entered_at
+            """,
+            (work_day_id, zone_id, entered_at),
+        )
+        self.connection.commit()
+
+
+def check_entry(
+    connection: Database,
+    *,
+    work_day_id: int,
+    lat: float,
+    lon: float,
+    now: datetime,
+) -> ParkingAlert | None:
+    """Въехал в платную зону — сказать один раз и тихо.
+
+    Модуль сознательно построен вокруг «вы ВСТАЛИ» (см. docstring файла): пугать
+    человека на каждом проезде через центр — верный способ добиться, чтобы
+    уведомления выключили насовсем. Поэтому у въезда:
+      * своя пара колонок состояния (entered_*), а не общая с «встал» — иначе
+        заметка о въезде съедала бы главное уведомление «пора платить»;
+      * тот же часовой карантин на ту же зону, что и у «встал»;
+      * условие `paid_now` — ночью парковка бесплатная, молчим.
+    """
+    hit = zone_at(connection, lat, lon, moment=now)
+    if hit is None or not hit.paid_now:
+        return None
+
+    repository = ParkingStateRepository(connection)
+    row = repository.get(work_day_id)
+    entered_zone = row["entered_zone_id"] if row else None
+    entered_at = _parse(row["entered_at"]) if row and row["entered_at"] else None
+    if entered_zone == hit.zone.id and entered_at is not None:
+        if (now - entered_at) < timedelta(minutes=REPEAT_COOLDOWN_MINUTES):
+            return None
+
+    repository.save_entry(work_day_id, zone_id=hit.zone.id, entered_at=now.isoformat())
+    return ParkingAlert(hit=hit, reason="entered")
 
 
 def check(

@@ -42,6 +42,7 @@ from app.services.mobile_report_service import MobileReportService
 from app.services.mobile_visit_service import MobileVisitService, candidate_result_payload
 from app.services.profile_service import ProfileService
 from app.services.parking_alert_service import check as parking_check
+from app.services.parking_alert_service import check_entry as parking_entry_check
 from app.services.settings_service import SettingsService
 from app.services.shift_service import ShiftService
 
@@ -254,13 +255,26 @@ def _handler_factory(config: AppConfig):
                 # не спрашиваем: он мог бы прислать что угодно, а решение отсюда идёт
                 # человеку в виде уведомления.
                 parking_alert = None
-                if active_day is not None and settings.get_bool("parking_alerts", True):
+                # Прыжок GPS (глушение) в парковку не пускаем: точка-фантом внутри
+                # платной зоны подняла бы ложное «оплатите» из другого района.
+                if (
+                    active_day is not None
+                    and result.sample_valid
+                    and settings.get_bool("parking_alerts", True)
+                ):
+                    # Сначала главное («встал — пора платить»), затем заметка о въезде.
                     alert = parking_check(
                         connection,
                         work_day_id=active_day.id,
                         lat=lat,
                         lon=lon,
                         speed_kmh=result.avg_speed_kmh,
+                        now=captured_at,
+                    ) or parking_entry_check(
+                        connection,
+                        work_day_id=active_day.id,
+                        lat=lat,
+                        lon=lon,
                         now=captured_at,
                     )
                     parking_alert = alert.payload() if alert else None

@@ -11,6 +11,32 @@ def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+# Возврат в геозону в пределах этого окна считаем продолжением той же стоянки,
+# а не новым приездом. Внутри здания GPS регулярно «выпрыгивает» за радиус
+# геозоны (120 м по умолчанию): одна такая точка помечала визит как покинутый,
+# и следующая точка внутри начинала выстаивание заново. Отсюда «Закрыть по GPS»
+# приходило через 20–30 минут вместо заложенных 12 — отсчёт бесконечно рестартовал.
+DWELL_RESUME_SECONDS = 300.0
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def _within_seconds(earlier: Any, later: Any, limit: float) -> bool:
+    """Прошло ли между метками не больше limit секунд (и время не пошло вспять)."""
+    first = _parse_iso(earlier)
+    second = _parse_iso(later)
+    if first is None or second is None:
+        return False
+    return 0 <= (second - first).total_seconds() <= limit
+
+
 def _work_day_from_row(row: Any | None) -> WorkDay | None:
     if row is None:
         return None
@@ -665,6 +691,19 @@ class LocationEventRepository:
                 (work_day_id, visit_id, seen_at, seen_at, distance_m, accuracy_m, seen_at, seen_at),
             )
         elif int(existing["is_inside"] or 0) == 0:
+            # Гистерезис: быстро вернулся внутрь — значит и не уходил, это дрожание
+            # GPS, а не отъезд. Сохраняем прежнее first_seen_at, иначе выстаивание
+            # обнуляется от каждой одиночной точки-выброса (см. DWELL_RESUME_SECONDS).
+            #
+            # Меряем от left_at — момента, когда его увели за геозону, то есть
+            # фактическую длительность отсутствия. От last_seen_at мерить нельзя: это
+            # «последний раз видели ВНУТРИ», и тогда результат зависел бы от частоты
+            # точек (в режиме экономии батареи телефон шлёт их реже, и honest дрейф
+            # выглядел бы как долгий отъезд).
+            resumed = _within_seconds(
+                existing["left_at"] or existing["last_seen_at"], seen_at, DWELL_RESUME_SECONDS
+            )
+            first_seen_at = existing["first_seen_at"] if resumed else seen_at
             self.connection.execute(
                 """
                 UPDATE visit_location_events
@@ -672,7 +711,7 @@ class LocationEventRepository:
                     last_distance_m = ?, last_accuracy_m = ?, updated_at = ?
                 WHERE visit_id = ?
                 """,
-                (seen_at, seen_at, distance_m, accuracy_m, seen_at, visit_id),
+                (first_seen_at, seen_at, distance_m, accuracy_m, seen_at, visit_id),
             )
         else:
             self.connection.execute(
@@ -690,23 +729,26 @@ class LocationEventRepository:
         return row
 
     def mark_outside_for_day(self, work_day_id: int, except_visit_id: int | None, seen_at: str) -> None:
+        # left_at пишется только на переходе «внутри → снаружи» (условие is_inside = 1),
+        # поэтому он и остаётся моментом ВЫХОДА: следующие точки снаружи его не сдвигают.
+        # По нему mark_inside отличает секундный дрейф GPS от настоящего отъезда.
         if except_visit_id is None:
             self.connection.execute(
                 """
                 UPDATE visit_location_events
-                SET is_inside = 0, updated_at = ?
+                SET is_inside = 0, left_at = ?, updated_at = ?
                 WHERE work_day_id = ? AND is_inside = 1
                 """,
-                (seen_at, work_day_id),
+                (seen_at, seen_at, work_day_id),
             )
         else:
             self.connection.execute(
                 """
                 UPDATE visit_location_events
-                SET is_inside = 0, updated_at = ?
+                SET is_inside = 0, left_at = ?, updated_at = ?
                 WHERE work_day_id = ? AND visit_id != ? AND is_inside = 1
                 """,
-                (seen_at, work_day_id, except_visit_id),
+                (seen_at, seen_at, work_day_id, except_visit_id),
             )
         self.connection.commit()
 
@@ -774,6 +816,24 @@ class LocationSampleRepository:
             """
             SELECT * FROM location_samples
             WHERE work_day_id = ? AND is_valid = 1
+            ORDER BY captured_at DESC, id DESC
+            LIMIT 1
+            """,
+            (work_day_id,),
+        ).fetchone()
+
+    def last_any(self, work_day_id: int) -> Any | None:
+        """Последняя ПРИСЛАННАЯ точка, достоверная или нет: когда мы видели человека.
+
+        Отличает глушение от честного перерыва GPS. При глушении поток точек не
+        прерывается — просто все они выбросы; после туннеля или выключенного телефона
+        точек нет вовсе. Разница решает, доверять ли далёкой точке (см.
+        `location_service._store_location_sample`).
+        """
+        return self.connection.execute(
+            """
+            SELECT * FROM location_samples
+            WHERE work_day_id = ?
             ORDER BY captured_at DESC, id DESC
             LIMIT 1
             """,

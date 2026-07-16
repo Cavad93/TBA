@@ -141,6 +141,10 @@ CREATE TABLE IF NOT EXISTS parking_state (
     slow_since TEXT,
     notified_zone_id INTEGER,
     notified_at TEXT,
+    -- Въезд в зону — отдельная пара от «встал» (notified_*): заметка о въезде не
+    -- должна съедать главное уведомление о том, что пора платить.
+    entered_zone_id INTEGER,
+    entered_at TEXT,
     UNIQUE(work_day_id)
 );
 
@@ -318,6 +322,9 @@ CREATE TABLE IF NOT EXISTS visit_location_events (
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     last_notified_at TEXT,
+    -- Когда человека увели за геозону. По нему меряется реальная длительность
+    -- отсутствия: кратковременный дрейф GPS не должен обнулять выстаивание.
+    left_at TEXT,
     is_inside INTEGER DEFAULT 1,
     last_distance_m REAL DEFAULT 0,
     last_accuracy_m REAL DEFAULT 0,
@@ -812,6 +819,9 @@ def _ensure_columns(db: Database) -> None:
     # parking_zones мог быть создан прошлым деплоем ещё без региона: CREATE TABLE
     # IF NOT EXISTS колонку в существующую таблицу не добавит, и индекс по ней упал бы
     # на старте. Поэтому колонка и индекс — здесь, после миграций, а не в SCHEMA.
+    _ensure_column(db, "visit_location_events", "left_at", "TEXT")
+    _ensure_column(db, "parking_state", "entered_zone_id", "INTEGER")
+    _ensure_column(db, "parking_state", "entered_at", "TEXT")
     _ensure_column(db, "parking_zones", "region", "TEXT DEFAULT ''")
     _ensure_column(db, "parking_tariffs", "price_text", "TEXT DEFAULT ''")
     db.execute("CREATE INDEX IF NOT EXISTS idx_parking_zones_region ON parking_zones(region)")
