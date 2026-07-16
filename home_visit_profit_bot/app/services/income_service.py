@@ -74,10 +74,11 @@ class IncomeModel:
     def _confirm_text(self) -> str:
         if not self.is_salary:
             return ""
-        return (
-            f"Оклад {self.monthly_salary:,.0f} ₽, премия {self.monthly_bonus:,.0f} ₽. "
-            "Всё так же в этом месяце?"
-        ).replace(",", " ")
+        # Разделители тысяч заменяем в ЧИСЛАХ, а не во всей фразе: глобальный
+        # replace съедал и грамматическую запятую («…₽, премия…» → «…₽  премия…»).
+        salary = f"{self.monthly_salary:,.0f}".replace(",", " ")
+        bonus = f"{self.monthly_bonus:,.0f}".replace(",", " ")
+        return f"Оклад {salary} ₽, премия {bonus} ₽. Всё так же в этом месяце?"
 
 
 def income_model(settings: SettingsRepository) -> IncomeModel:
