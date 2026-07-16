@@ -163,6 +163,7 @@ import com.homevisit.location.ui.RouteVisitUi
 import com.homevisit.location.ui.ShiftUiState
 import com.homevisit.location.ui.SyncUiState
 import java.util.Locale
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 
 @Composable
@@ -260,7 +261,17 @@ internal fun ShiftBarChart(bars: List<ShiftBar>) {
         CompactCard("Пока пусто", "Закрой первую смену — здесь появится график заработка.")
         return
     }
-    val maxValue = bars.maxOf { it.value }.coerceAtLeast(1.0)
+    // Пока ни одной закрытой смены — честно говорим об этом, а не рисуем семь обрубков.
+    if (bars.all { it.value == 0.0 }) {
+        CompactCard("Пока пусто", "Закрой первую смену — здесь появится график заработка.")
+        return
+    }
+    // Масштаб по МОДУЛЮ: день в минус — такой же полноценный столбец, как и в плюс.
+    // Раньше шкала бралась по максимуму, и на неделе вида [0, 0, −693, 0…] максимум
+    // выходил нулевым (→1.0), а coerceIn(0f, 1f) равнял и ноль, и убыток в один и тот
+    // же 2%-обрубок: убыток в 693 ₽ выглядел так же, как день, которого не было.
+    val scale = bars.maxOf { abs(it.value) }.coerceAtLeast(1.0)
+    val best = bars.maxOf { it.value }
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -272,9 +283,17 @@ internal fun ShiftBarChart(bars: List<ShiftBar>) {
             verticalAlignment = Alignment.Bottom,
         ) {
             bars.forEach { bar ->
-                val frac = (bar.value / maxValue).toFloat().coerceIn(0f, 1f)
+                val frac = (abs(bar.value) / scale).toFloat().coerceIn(0f, 1f)
+                val loss = bar.value < 0
+                val empty = bar.value == 0.0
                 Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(shortMoney(bar.value), style = MaterialTheme.typography.labelSmall, fontFamily = JetBrainsMono, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    Text(
+                        shortMoney(bar.value),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = JetBrainsMono,
+                        color = if (loss) VerdictColors.skip else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
                     Box(
                         Modifier.fillMaxWidth().weight(1f, fill = true),
                         contentAlignment = Alignment.BottomCenter,
@@ -282,7 +301,16 @@ internal fun ShiftBarChart(bars: List<ShiftBar>) {
                         Box(
                             Modifier.fillMaxWidth().fillMaxHeight(frac.coerceAtLeast(0.02f))
                                 .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
-                                .background(if (frac >= 0.999f) VerdictColors.go else MaterialTheme.colorScheme.primaryContainer),
+                                .background(
+                                    when {
+                                        // День без смены — не «маленький заработок», а
+                                        // отсутствие данных: рисуем нейтральной полоской.
+                                        empty -> MaterialTheme.colorScheme.surfaceContainerHighest
+                                        loss -> VerdictColors.skip
+                                        bar.value >= best -> VerdictColors.go
+                                        else -> MaterialTheme.colorScheme.primaryContainer
+                                    },
+                                ),
                         )
                     }
                     Text(bar.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)

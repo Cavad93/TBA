@@ -177,8 +177,10 @@ internal fun HomeScreen(
     onOpenWork: () -> Unit,
     onOpenReports: () -> Unit,
 ) {
-    // Тянем сводку при открытии и при смене статуса дня.
-    LaunchedEffect(Unit) { workActions.onRefreshHome() }
+    // Тянем сводку при открытии и при смене статуса дня. Один эффект, а не два:
+    // LaunchedEffect(shiftActive) сам срабатывает при первом запуске, поэтому пара с
+    // LaunchedEffect(Unit) давала ДВЕ параллельные загрузки — и обе приходились ровно
+    // на анимацию перехода после закрытия смены, добавляя ей заметный фриз.
     LaunchedEffect(shiftActive) { workActions.onRefreshHome() }
 
     val snapshot = home.snapshot

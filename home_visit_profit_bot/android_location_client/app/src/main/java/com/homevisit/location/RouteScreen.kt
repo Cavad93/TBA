@@ -200,6 +200,8 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
     // «Далее» списком → порядок маршрута → Финиш (редактируемый) → слайдер завершения.
     var reordering by rememberSaveable { mutableStateOf(false) }
     var wizardOpen by rememberSaveable { mutableStateOf(false) }
+    // Крупное окно очереди «Далее»: там заказ можно убрать, если клиент отменился.
+    var upNextOpen by rememberSaveable { mutableStateOf(false) }
     val templates = uiState.appSettings.addressTemplates()
     val orders = uiState.routeVisits
 
@@ -320,7 +322,11 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
                 onCancel = workActions.onCancelCurrentVisit,
                 onCancelInRoute = workActions.onCancelInRoute,
             )
-            UpNextList(orders = orders, activeLocalId = uiState.activeVisit?.localId)
+            UpNextList(
+                orders = orders,
+                activeLocalId = uiState.activeVisit?.localId,
+                onManage = { upNextOpen = true },
+            )
         }
         if (orders.size > 1) {
             ReorderToggle(
@@ -349,6 +355,14 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
                 workActions.onPrepareEndShift()
             },
         )
+        // Архив под ползунком: что закрыто и чем кончилось. Раскрывается по клику,
+        // как «Другие записи» на Оценке, — чтобы не загромождать Ленту.
+        ArchiveSection(
+            archive = uiState.archive,
+            onRange = workActions.onArchiveRange,
+            onSort = workActions.onArchiveSort,
+            onOpen = workActions.onOpenOrder,
+        )
     }
 
     if (wizardOpen) {
@@ -365,6 +379,18 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
             },
         )
     }
+
+    if (upNextOpen) {
+        UpNextManagerSheet(
+            orders = uiState.routeVisits.filter { it.localId != uiState.activeVisit?.localId },
+            onCancelVisit = workActions.onCancelVisitById,
+            onOpenOrder = workActions.onOpenOrder,
+            onDismiss = { upNextOpen = false },
+        )
+    }
+
+    // Подробности заказа — общий экран для архива и активных вызовов.
+    OrderDetailsSheet(details = uiState.openedOrder, onDismiss = workActions.onCloseOrder)
 }
 
 /**
@@ -682,22 +708,42 @@ internal fun FocusOrderCard(
     }
 }
 
-/** Список остальных принятых заказов — «Далее». */
+/**
+ * Список остальных принятых заказов — «Далее».
+ *
+ * Клик по карточке открывает крупное окно, где заказ можно убрать: клиент отменяется
+ * не только по текущему адресу, а строка списка слишком тесна, чтобы нажать на неё
+ * точно. Раньше убрать можно было лишь активный вызов, и отменённый заказ из середины
+ * очереди оставался в Ленте, продолжая тянуть километры и портить оценку дня.
+ */
 @Composable
-internal fun UpNextList(orders: List<RouteVisitUi>, activeLocalId: String?) {
+internal fun UpNextList(
+    orders: List<RouteVisitUi>,
+    activeLocalId: String?,
+    onManage: () -> Unit = {},
+) {
     val upcoming = orders.filter { it.localId != activeLocalId }
     if (upcoming.isEmpty()) return
     Card(
+        modifier = Modifier.clickable { onManage() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(
-                "Далее · ${upcoming.size}",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Далее · ${upcoming.size}",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "изменить",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             upcoming.forEachIndexed { index, v ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Box(

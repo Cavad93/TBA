@@ -109,6 +109,17 @@ class HomeVisitRepository private constructor(
 
     fun observeVisits(workDayId: String): Flow<List<VisitEntity>> = dao.observeVisits(workDayId)
 
+    /** Архив: закрытые заказы за период — по всем сменам, а не только за текущую. */
+    fun observeArchive(fromMillis: Long, toMillis: Long): Flow<List<VisitEntity>> =
+        dao.observeArchive(
+            statuses = listOf(VisitStatus.Completed, VisitStatus.Cancelled, VisitStatus.Rejected),
+            fromMillis = fromMillis,
+            toMillis = toMillis,
+        )
+
+    /** Один заказ: подробная карточка открывается одинаково из архива и из Ленты. */
+    fun observeVisit(id: String): Flow<VisitEntity?> = dao.observeVisit(id)
+
     fun observeOfficeEntries(workDayId: String): Flow<List<OfficeEntryEntity>> = dao.observeOfficeEntries(workDayId)
 
     fun observeTelemedEntries(workDayId: String): Flow<List<TelemedEntryEntity>> = dao.observeTelemedEntries(workDayId)

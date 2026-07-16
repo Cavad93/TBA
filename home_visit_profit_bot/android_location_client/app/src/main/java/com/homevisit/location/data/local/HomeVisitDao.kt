@@ -22,6 +22,32 @@ interface HomeVisitDao {
     @Query("SELECT * FROM visits WHERE workDayId = :workDayId ORDER BY createdAtEpochMillis ASC")
     fun observeVisits(workDayId: String): Flow<List<VisitEntity>>
 
+    /**
+     * Архив заказов: завершённые и отменённые за период — по всем сменам, не только за
+     * текущую. Границы включительные, время — момент смены статуса (когда заказ реально
+     * закрылся), поэтому «за сегодня» показывает то, что закрыто сегодня.
+     *
+     * Сортировку делаем в памяти (список за день-неделю короткий), чтобы не плодить
+     * четыре почти одинаковых запроса ради ORDER BY.
+     */
+    @Query(
+        """
+        SELECT * FROM visits
+        WHERE status IN (:statuses)
+          AND updatedAtEpochMillis BETWEEN :fromMillis AND :toMillis
+        ORDER BY updatedAtEpochMillis DESC
+        """,
+    )
+    fun observeArchive(
+        statuses: List<VisitStatus>,
+        fromMillis: Long,
+        toMillis: Long,
+    ): Flow<List<VisitEntity>>
+
+    /** Один заказ — для подробной карточки (архив и активные открываются одинаково). */
+    @Query("SELECT * FROM visits WHERE id = :id LIMIT 1")
+    fun observeVisit(id: String): Flow<VisitEntity?>
+
     @Query("SELECT * FROM office_entries WHERE workDayId = :workDayId ORDER BY createdAtEpochMillis ASC")
     fun observeOfficeEntries(workDayId: String): Flow<List<OfficeEntryEntity>>
 

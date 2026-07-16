@@ -12,6 +12,14 @@ import com.homevisit.location.OrderSource
 import com.homevisit.location.settingText
 import com.homevisit.location.data.HomeVisitRepository
 import com.homevisit.location.domain.AppSettingsSnapshot
+import com.homevisit.location.domain.ArchiveRange
+import com.homevisit.location.domain.ArchiveSort
+import com.homevisit.location.domain.ArchiveUiState
+import com.homevisit.location.domain.ArchivedVisit
+import com.homevisit.location.domain.OrderDetails
+import com.homevisit.location.domain.archiveBounds
+import com.homevisit.location.domain.archiveTimeText
+import com.homevisit.location.domain.sortArchive
 import com.homevisit.location.domain.AddressCandidate
 import com.homevisit.location.domain.CandidateEstimate
 import com.homevisit.location.domain.MinimumCheck
@@ -43,6 +51,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -86,6 +95,44 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     // список заказов — не состояние: по нему не отличить «ещё считаем» от «не нашли».
     private val shareImageState = MutableStateFlow(ShareImageUi())
     val shareImage: StateFlow<ShareImageUi> = shareImageState.asStateFlow()
+
+    // Архив закрытых заказов: период и сортировку выбирает человек, список тянется из
+    // локальной базы по всем сменам (а не только по текущей).
+    private val archiveRangeState = MutableStateFlow(ArchiveRange.Today)
+    private val archiveSortState = MutableStateFlow(ArchiveSort.ByClosed)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val archive: StateFlow<ArchiveUiState> =
+        combine(archiveRangeState, archiveSortState) { range, sort -> range to sort }
+            .flatMapLatest { (range, sort) ->
+                val (from, to) = archiveBounds(range)
+                repository.observeArchive(from, to).map { rows ->
+                    ArchiveUiState(
+                        range = range,
+                        sort = sort,
+                        visits = sortArchive(rows.map { it.toArchivedVisit() }, sort),
+                    )
+                }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ArchiveUiState())
+
+    fun setArchiveRange(range: ArchiveRange) { archiveRangeState.value = range }
+
+    fun setArchiveSort(sort: ArchiveSort) { archiveSortState.value = sort }
+
+    // Открытый заказ (подробная карточка). null — карточка закрыта.
+    private val openedOrderState = MutableStateFlow<String?>(null)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val openedOrder: StateFlow<OrderDetails?> = openedOrderState
+        .flatMapLatest { id ->
+            if (id == null) flowOf(null) else repository.observeVisit(id).map { it?.toOrderDetails() }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun openOrder(id: String) { openedOrderState.value = id }
+
+    fun closeOrder() { openedOrderState.value = null }
 
     private val syncState = combine(repository.observeSyncQueueStats(), syncMessageState, backupExportState, syncConflictState) { stats, message, backupJson, conflicts ->
         SyncUiState(stats = stats, message = message, backupJson = backupJson, conflicts = conflicts)
@@ -151,14 +198,16 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         AuxUiState(appSettings, clinics, home, shift, profile)
     }
 
-    // Оценка заказа и личная поездка делят одну форму — складываем их в пару, чтобы не
-    // превысить арность верхнего combine (максимум 5 источников).
-    private val evaluateState = combine(candidateState, personalState) { candidate, personal ->
-        candidate to personal
+    // Оценка заказа, личная поездка, архив и открытая карточка заказа складываются в
+    // один мешок: у верхнего combine максимум 5 источников, и он уже занят целиком.
+    private val evaluateState = combine(
+        candidateState, personalState, archive, openedOrder,
+    ) { candidate, personal, archiveUi, opened ->
+        EvaluateBundle(candidate, personal, archiveUi, opened)
     }
 
     val uiState: StateFlow<HomeVisitUiState> = combine(dayState, evaluateState, operationalState, syncState, auxState) { day, evaluate, operational, sync, aux ->
-        val candidate = evaluate.first
+        val candidate = evaluate.candidate
         // Порядок Ленты берём с сервера (order_number): он отражает и авто-оптимизацию,
         // и ручную перестановку. Без него список шёл бы по времени создания.
         val serverOrder = operational.route.snapshot?.order.orEmpty()
@@ -176,7 +225,9 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             // закрывала бы не тот заказ, который показан сверху.
             activeVisit = ordered.firstOrNull() ?: day.activeVisit,
             candidate = candidate,
-            personalTrip = evaluate.second,
+            personalTrip = evaluate.personal,
+            archive = evaluate.archive,
+            openedOrder = evaluate.opened,
             serverRoute = operational.route,
             gpsEstimate = operational.gpsEstimate,
             gpsHint = operational.gpsHint,
@@ -786,6 +837,25 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /**
+     * Отменить ЛЮБОЙ заказ из очереди «Далее», а не только текущий.
+     *
+     * Раньше убрать можно было лишь активный вызов: если клиент отменился по третьему
+     * адресу из очереди, заказ оставался в Ленте, тянул за собой километры и продолжал
+     * портить оценку дня — а человеку некуда было нажать.
+     */
+    fun cancelVisitById(serverUrl: String, apiKey: String, localId: String) {
+        viewModelScope.launch {
+            val visit = uiState.value.routeVisits.firstOrNull { it.localId == localId } ?: return@launch
+            val serverId = visit.serverId ?: return@launch
+            val ok = repository.cancelVisit(serverUrl, apiKey, serverId)
+            if (ok) {
+                repository.markVisitStatus(visit.localId, VisitStatus.Cancelled)
+                refreshRouteInternal(serverUrl, apiKey)
+            }
+        }
+    }
+
     /** Отмена в пути (Ф11.3): клиент отменил, когда уже ехали — фиксируем потери на сервере. */
     fun cancelInRouteCurrentVisit(serverUrl: String, apiKey: String) {
         viewModelScope.launch {
@@ -946,6 +1016,12 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             } else {
                 repository.updateLocalDayAddresses(finishAddress = address)
             }
+            // Запоминаем как адрес по умолчанию: следующая смена стартует с него.
+            // Раньше адреса жили только внутри одного дня, а новая смена бралась из
+            // настроек default_* — их никто не обновлял, и человек, задавший старт и
+            // финиш вчера, сегодня снова видел «не задан» и вводил всё заново.
+            val defaultKey = if (target == "start") "default_start_address" else "default_finish_address"
+            repository.queueAppSettingsUpdate(mapOf(defaultKey to address))
             refreshRouteInternal(serverUrl, apiKey)
             routeState.value = routeState.value.copy(
                 message = if (target == "start") "Старт изменён, маршрут пересчитан" else "Финиш изменён, маршрут пересчитан",
@@ -1042,7 +1118,12 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 endShiftState.value = EndShiftUiState(message = "Нет связи с сервером — введите значения вручную")
                 return@launch
             }
-            repository.syncPending(serverUrl, apiKey)
+            // Синк — фоном, НЕ на пути открытия мастера. Раньше он шёл первым и
+            // синхронно: очередь может нести десятки событий, у каждого свой таймаут,
+            // и всё это время человек смотрел в спиннер «Считаю итоги смены…», не имея
+            // возможности просто закрыть смену. Отсюда «при закрытии смены подвисает».
+            // Отправка догонит сама — очередь для того и есть.
+            launch { repository.syncPending(serverUrl, apiKey) }
             val preview = repository.fetchEndDayPreview(serverUrl, apiKey)
             endShiftState.value = if (preview == null) {
                 EndShiftUiState(message = "Не удалось получить расчёт — введите значения вручную")
@@ -1419,6 +1500,10 @@ data class HomeVisitUiState(
     val candidate: CandidateUiState = CandidateUiState(),
     /** Личная поездка (Ф11.5): минимальный чек без дохода и вердикта. */
     val personalTrip: PersonalTripUi = PersonalTripUi(),
+    /** Архив закрытых заказов под ползунком завершения смены. */
+    val archive: ArchiveUiState = ArchiveUiState(),
+    /** Открытая подробная карточка заказа. null — закрыта. */
+    val openedOrder: OrderDetails? = null,
     val activeVisit: RouteVisitUi? = null,
     val routeVisits: List<RouteVisitUi> = emptyList(),
     /** Недавние уникальные адреса дня (Ф13.1): чипы над полем адреса — ввод в один тап. */
@@ -1462,6 +1547,17 @@ private data class AuxUiState(
     val home: HomeUiState,
     val shift: ShiftUiState,
     val profile: ProfileUiState,
+)
+
+/**
+ * Мешок для верхнего combine: у типизированной перегрузки максимум 5 источников, а их
+ * больше. Сюда складываем то, что живёт вокруг оценки заказа.
+ */
+private data class EvaluateBundle(
+    val candidate: CandidateUiState,
+    val personal: PersonalTripUi,
+    val archive: ArchiveUiState,
+    val opened: OrderDetails?,
 )
 
 data class RouteVisitUi(
@@ -1642,4 +1738,49 @@ data class ProfileUiState(
     val loading: Boolean = false,
     val snapshot: ProfileSnapshot? = null,
     val error: Boolean = false,
+)
+
+/**
+ * Строка архива из записи локальной базы.
+ *
+ * `updatedAtEpochMillis` — момент последней смены статуса, то есть когда заказ реально
+ * закрылся: именно он и есть «время выполнения/отмены». Отклонённый заказ показываем
+ * вместе с отменённым: для человека это одно и то же — «не поехал».
+ */
+/** Подробности заказа для карточки. Текст статуса — словами, а не именем enum. */
+internal fun VisitEntity.toOrderDetails(): OrderDetails = OrderDetails(
+    id = id,
+    address = address,
+    clinic = clinic,
+    income = income,
+    statusText = when (status) {
+        VisitStatus.Completed -> "Выполнен"
+        VisitStatus.Cancelled -> "Отменён"
+        VisitStatus.Rejected -> "Отклонён при оценке"
+        VisitStatus.Accepted -> "В работе"
+        VisitStatus.Candidate -> "На оценке"
+    },
+    addedAtText = archiveTimeText(createdAtEpochMillis),
+    // У активного заказа закрытия ещё не было: updatedAt — это последняя правка, и
+    // показывать её как «закрыт» значило бы врать.
+    closedAtText = if (status == VisitStatus.Accepted || status == VisitStatus.Candidate) {
+        ""
+    } else {
+        archiveTimeText(updatedAtEpochMillis)
+    },
+    driveMinutes = actualDriveMinutes ?: estimatedDriveMinutes,
+    onSiteMinutes = onSiteMinutes,
+    plannedStartAt = plannedStartAt,
+)
+
+internal fun VisitEntity.toArchivedVisit(): ArchivedVisit = ArchivedVisit(
+    id = id,
+    address = address,
+    clinic = clinic,
+    income = income,
+    done = status == VisitStatus.Completed,
+    addedAtMillis = createdAtEpochMillis,
+    closedAtMillis = updatedAtEpochMillis,
+    addedAtText = archiveTimeText(createdAtEpochMillis),
+    closedAtText = archiveTimeText(updatedAtEpochMillis),
 )
