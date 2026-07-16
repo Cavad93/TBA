@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any
-from app.database import Database
+from app.database import Database, db_user_id
 
 from dataclasses import dataclass, replace
 
@@ -15,6 +15,7 @@ from app.repositories import (
     WorkDayRepository,
 )
 from app.services.address_resolver import expand_template
+from app.services.address_suggest_service import resolve_fuzzy_geo
 from app.services.schedule_service import late_warnings
 from app.services.address_building import canonical_building
 from app.services.arrival_window_service import arrival_windows
@@ -70,6 +71,38 @@ class MobileVisitService:
         self.visits = VisitRepository(connection)
         self.stats = DailyStatsRepository(connection)
 
+    def _geocode_layered(self, address: str):
+        """Слоёный геокодинг: Nominatim, при его молчании — learned-кеш + DaData.
+
+        Опечатка («Коменданский» без «т») не должна быть тупиком там, где DaData
+        уверенно знает точный дом. Если Nominatim упал по сети, но прощающие слои
+        ответили — ошибку не поднимаем: человеку важны координаты, а не слой.
+        Неоднозначность (несколько разных точек) сюда не просочится — resolve_fuzzy
+        отдаёт только уверенный вариант, остальное честно уходит в needs_coordinates.
+        """
+        error: GeocodingError | None = None
+        try:
+            geo = geocode_address(
+                address,
+                self.settings.base_districts(),
+                cache_repo=AddressCacheRepository(self.connection),
+                default_city=self.settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург",
+                default_region=self.settings.get("default_region", "Ленинградская область") or "Ленинградская область",
+                nominatim_url=server_nominatim_url(),
+                user_agent=self.settings.get("geo_user_agent", "home-visit-profit-bot/1.0") or "home-visit-profit-bot/1.0",
+                timeout_seconds=server_timeout(),
+            )
+        except GeocodingError as exc:
+            geo, error = None, exc
+        if geo is not None and geo.lat is not None and geo.lon is not None:
+            return geo
+        fuzzy = resolve_fuzzy_geo(address, self.connection, self.settings, db_user_id(self.connection))
+        if fuzzy is not None:
+            return fuzzy
+        if error is not None:
+            raise error
+        return None
+
     def create_candidate(self, payload: dict[str, Any]) -> CandidateApiResult:
         day = self.days.active()
         if day is None:
@@ -99,16 +132,7 @@ class MobileVisitService:
             geo = manual_geocoding_result(address, lat, lon, None if manual_district == "-" else manual_district)
         else:
             try:
-                geo = geocode_address(
-                    address,
-                    base_districts,
-                    cache_repo=AddressCacheRepository(self.connection),
-                    default_city=self.settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург",
-                    default_region=self.settings.get("default_region", "Ленинградская область") or "Ленинградская область",
-                    nominatim_url=server_nominatim_url(),
-                    user_agent=self.settings.get("geo_user_agent", "home-visit-profit-bot/1.0") or "home-visit-profit-bot/1.0",
-                    timeout_seconds=server_timeout(),
-                )
+                geo = self._geocode_layered(address)
             except GeocodingError as error:
                 return CandidateApiResult(ok=False, reason="geocoding_failed", detail=str(error))
 
@@ -336,16 +360,7 @@ class MobileVisitService:
         lon = _optional_float(payload.get("lon"))
         if lat is None or lon is None:
             try:
-                geo = geocode_address(
-                    address,
-                    self.settings.base_districts(),
-                    cache_repo=AddressCacheRepository(self.connection),
-                    default_city=self.settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург",
-                    default_region=self.settings.get("default_region", "Ленинградская область") or "Ленинградская область",
-                    nominatim_url=server_nominatim_url(),
-                    user_agent=self.settings.get("geo_user_agent", "home-visit-profit-bot/1.0") or "home-visit-profit-bot/1.0",
-                    timeout_seconds=server_timeout(),
-                )
+                geo = self._geocode_layered(address)
             except GeocodingError as error:
                 return {"ok": False, "reason": "geocoding_failed", "detail": str(error)}
             if geo is None or geo.lat is None or geo.lon is None:
@@ -367,16 +382,7 @@ class MobileVisitService:
         lon = _optional_float(payload.get("lon"))
         if lat is None or lon is None:
             try:
-                geo = geocode_address(
-                    address,
-                    self.settings.base_districts(),
-                    cache_repo=AddressCacheRepository(self.connection),
-                    default_city=self.settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург",
-                    default_region=self.settings.get("default_region", "Ленинградская область") or "Ленинградская область",
-                    nominatim_url=server_nominatim_url(),
-                    user_agent=self.settings.get("geo_user_agent", "home-visit-profit-bot/1.0") or "home-visit-profit-bot/1.0",
-                    timeout_seconds=server_timeout(),
-                )
+                geo = self._geocode_layered(address)
             except GeocodingError as error:
                 return {"ok": False, "reason": "geocoding_failed", "detail": str(error)}
             if geo is None or geo.lat is None or geo.lon is None:
@@ -410,16 +416,7 @@ class MobileVisitService:
         normalized = address
         if lat is None or lon is None:
             try:
-                geo = geocode_address(
-                    address,
-                    base_districts,
-                    cache_repo=AddressCacheRepository(self.connection),
-                    default_city=self.settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург",
-                    default_region=self.settings.get("default_region", "Ленинградская область") or "Ленинградская область",
-                    nominatim_url=server_nominatim_url(),
-                    user_agent=self.settings.get("geo_user_agent", "home-visit-profit-bot/1.0") or "home-visit-profit-bot/1.0",
-                    timeout_seconds=server_timeout(),
-                )
+                geo = self._geocode_layered(address)
             except GeocodingError as error:
                 return {"ok": False, "reason": "geocoding_failed", "detail": str(error)}
             if geo is None or geo.lat is None or geo.lon is None:

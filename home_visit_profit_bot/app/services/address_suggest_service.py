@@ -35,7 +35,12 @@ from app.repositories_osm_streets import OsmStreetRepository
 from app.services import dadata_service
 from app.services.address_building import canonical_building
 from app.services.address_resolver import looks_like_address
-from app.services.geocoding_service import GeocodingError, geocode_address, parse_coordinates
+from app.services.geocoding_service import (
+    GeocodingError,
+    GeocodingResult,
+    geocode_address,
+    parse_coordinates,
+)
 from app.services.server_settings import (
     dadata_daily_limit_per_user,
     dadata_token,
@@ -131,6 +136,27 @@ def resolve_fuzzy(text: str, connection, settings: SettingsRepository, user_id: 
     if decision is not None:
         return decision.get("resolved")
     return None
+
+
+def resolve_fuzzy_geo(text: str, connection, settings: SettingsRepository, user_id: int | None,
+                      lat: float | None = None, lon: float | None = None) -> GeocodingResult | None:
+    """То же, что resolve_fuzzy, но в виде GeocodingResult — для мест, где дальше
+    работают с результатом геокодера (мобильные сервисы). Без user_id (нечем считать
+    квоту DaData) — честно None."""
+    if user_id is None:
+        return None
+    resolved = resolve_fuzzy(text, connection, settings, user_id, lat=lat, lon=lon)
+    if resolved is None:
+        return None
+    return GeocodingResult(
+        input_text=text,
+        normalized_address=str(resolved.get("address") or text),
+        district=resolved.get("district"),
+        lat=float(resolved["lat"]),
+        lon=float(resolved["lon"]),
+        confidence=1.0,
+        source=str(resolved.get("source") or "dadata"),
+    )
 
 
 def _fetch_dadata(text: str, connection, city: str, user_id: int) -> list:

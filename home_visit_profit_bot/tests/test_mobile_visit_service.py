@@ -42,6 +42,43 @@ def test_mobile_candidate_manual_route_can_be_accepted_and_completed(config) -> 
     assert completed_visit.status == "completed"
 
 
+def test_candidate_typo_address_rescued_by_fuzzy_layers(config, monkeypatch) -> None:
+    """Nominatim молчит на опечатке — DaData-слой даёт точный дом, заказ не тупик."""
+    from app.services import mobile_visit_service as mvs
+    from app.services.geocoding_service import GeocodingResult
+
+    monkeypatch.setattr(mvs, "geocode_address", lambda *a, **k: None)
+    monkeypatch.setattr(
+        mvs, "resolve_fuzzy_geo",
+        lambda *a, **k: GeocodingResult(
+            input_text="Коменданский проспект 17к1",
+            normalized_address="г Санкт-Петербург, Комендантский пр-кт, д 17 к 1",
+            district=None, lat=60.011329, lon=30.25701, confidence=1.0, source="dadata",
+        ),
+    )
+    with connect(config) as connection:
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        result = MobileVisitService(connection).create_candidate(
+            {"address": "Коменданский проспект 17к1", "income": 2500, "clinic": "Династия"}
+        )
+    assert result.reason not in ("needs_coordinates", "geocoding_failed")
+
+
+def test_candidate_unresolvable_address_stays_needs_coordinates(config, monkeypatch) -> None:
+    """Оба слоя молчат — честный needs_coordinates, а не выдуманная точка."""
+    from app.services import mobile_visit_service as mvs
+
+    monkeypatch.setattr(mvs, "geocode_address", lambda *a, **k: None)
+    monkeypatch.setattr(mvs, "resolve_fuzzy_geo", lambda *a, **k: None)
+    with connect(config) as connection:
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        result = MobileVisitService(connection).create_candidate(
+            {"address": "абракадабра 999", "income": 2500, "clinic": "Династия"}
+        )
+    assert not result.ok
+    assert result.reason == "needs_coordinates"
+
+
 def test_mobile_candidate_can_be_cancelled_after_accept(config) -> None:
 
     with connect(config) as connection:

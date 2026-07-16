@@ -124,8 +124,10 @@ def resolve_address(
             timeout_seconds=server_timeout(),
         )
     except GeocodingError:
-        return ResolvedAddress(address=expanded)
+        geo = None
 
+    if geo is None or geo.lat is None or geo.lon is None:
+        geo = _fuzzy_fallback(expanded, connection, settings)
     if geo is None or geo.lat is None or geo.lon is None:
         return ResolvedAddress(address=expanded)
 
@@ -135,3 +137,13 @@ def resolve_address(
         lon=geo.lon,
         district=geo.district,
     )
+
+
+def _fuzzy_fallback(expanded: str, connection: Any, settings: SettingsRepository):
+    """Nominatim промолчал — «прощающие» слои (learned + DaData): старт/финиш дня с
+    опечаткой не должен молча оставаться без координат. Импорт ленивый: оркестратор
+    подсказок сам импортирует looks_like_address отсюда — иначе цикл."""
+    from app.database import db_user_id
+    from app.services.address_suggest_service import resolve_fuzzy_geo
+
+    return resolve_fuzzy_geo(expanded, connection, settings, db_user_id(connection))

@@ -50,6 +50,14 @@ def test_full_word_corpus_collapses_to_osm_short_form() -> None:
     assert "комендантский проспект 17к1" in variants
 
 
+def test_komendantsky_typo_is_normalized() -> None:
+    """«Коменданский» без «т» — частая опечатка; Nominatim её не прощает сам."""
+    variants = _address_query_variants("Коменданский проспект 17к1")
+
+    assert "комендантский проспект 17 к1" in variants
+    assert "комендантский проспект 17к1" in variants
+
+
 def test_abbreviated_corpus_forms_produce_all_spellings() -> None:
     for raw in ("пример 17 корп. 1", "пример 17 к.1", "пример 17к1"):
         variants = _address_query_variants(raw)

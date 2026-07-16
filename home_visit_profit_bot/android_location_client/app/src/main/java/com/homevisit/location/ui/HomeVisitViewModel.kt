@@ -319,6 +319,9 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     // параметров у экранного колбэка.
     private var pendingCandidate: PendingCandidate? = null
 
+    /** Отложенная личная оценка: ждёт, пока человек выберет вариант адреса. */
+    private var pendingPersonal: PendingPersonal? = null
+
     fun calculateVisitCandidate(
         serverUrl: String,
         apiKey: String,
@@ -377,20 +380,64 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             personalState.value = PersonalTripUi(isLoading = true)
             val gps = lastKnownGps()
-            // mode=personal — по нему сервер решает, уместно ли сравнение с билетами (Ф11.6).
-            val result = repository.quickEstimate(
-                serverUrl, apiKey, address, gps?.first, gps?.second, mode = "personal",
+            // Слоёные подсказки (Ф2) и здесь: DaData прощает опечатки, а неоднозначность
+            // («Коменданский 17к1» похож и на Комендантский, и на Коломяжский) отдаём
+            // человеку на выбор — как в рабочем режиме, а не тупик «не распознан».
+            val suggestion = repository.suggestAddress(
+                serverUrl, apiKey, address, lat = gps?.first, lon = gps?.second,
             )
-            personalState.value = if (result.check != null) {
-                PersonalTripUi(result = result.check)
-            } else {
-                PersonalTripUi(message = personalEstimateMessage(result.reason))
+            if (suggestion.resolved == null && suggestion.candidates.isNotEmpty()) {
+                pendingPersonal = PendingPersonal(serverUrl, apiKey, address)
+                personalState.value = PersonalTripUi(
+                    message = "Уточните адрес — выберите вариант",
+                    addressCandidates = suggestion.candidates,
+                )
+                return@launch
             }
+            runPersonalQuick(
+                serverUrl, apiKey, address, gps,
+                suggestion.resolved?.lat, suggestion.resolved?.lon,
+            )
+        }
+    }
+
+    /** Достроить личную оценку: адрес и координаты, если слой подсказок их уже дал. */
+    private suspend fun runPersonalQuick(
+        serverUrl: String,
+        apiKey: String,
+        address: String,
+        gps: Pair<Double, Double>?,
+        destLat: Double?,
+        destLon: Double?,
+    ) {
+        // mode=personal — по нему сервер решает, уместно ли сравнение с билетами (Ф11.6).
+        val result = repository.quickEstimate(
+            serverUrl, apiKey, address, gps?.first, gps?.second,
+            mode = "personal", lat = destLat, lon = destLon,
+        )
+        personalState.value = if (result.check != null) {
+            PersonalTripUi(result = result.check)
+        } else {
+            PersonalTripUi(message = personalEstimateMessage(result.reason))
+        }
+    }
+
+    /** Тап по варианту адреса в личном режиме — докрутить оценку по его координатам. */
+    private fun pickPersonalCandidate(candidate: AddressCandidate) {
+        val pending = pendingPersonal ?: return
+        pendingPersonal = null
+        viewModelScope.launch {
+            personalState.value = PersonalTripUi(isLoading = true)
+            runPersonalQuick(
+                pending.serverUrl, pending.apiKey, candidate.label,
+                lastKnownGps(), candidate.lat, candidate.lon,
+            )
         }
     }
 
     /** Сбросить результат личной поездки (переключение режима/новый адрес). */
     fun clearPersonalEstimate() {
+        pendingPersonal = null
         personalState.value = PersonalTripUi()
     }
 
@@ -447,6 +494,11 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
      * выбранного варианта (уходят как ручная точка).
      */
     fun pickAddressCandidate(candidate: AddressCandidate) {
+        // Кандидаты бывают из двух потоков: рабочая оценка и личная поездка.
+        if (pendingPersonal != null) {
+            pickPersonalCandidate(candidate)
+            return
+        }
         val pending = pendingCandidate ?: return
         pendingCandidate = null
         viewModelScope.launch {
@@ -1346,6 +1398,15 @@ data class PersonalTripUi(
     val isLoading: Boolean = false,
     val result: MinimumCheck? = null,
     val message: String = "",
+    /** Сервер не уверен в адресе — 2–3 варианта на выбор (Фаза 2), как в рабочем режиме. */
+    val addressCandidates: List<AddressCandidate> = emptyList(),
+)
+
+/** Отложенная личная поездка: всё, чтобы докрутить оценку после выбора варианта адреса. */
+private data class PendingPersonal(
+    val serverUrl: String,
+    val apiKey: String,
+    val address: String,
 )
 
 /** Отложенный до выбора адреса запрос оценки: всё, чтобы докрутить расчёт после тапа. */

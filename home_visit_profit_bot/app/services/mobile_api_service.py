@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any
-from app.database import Database
+from app.database import Database, db_user_id
 
 import json
 from dataclasses import dataclass
@@ -25,6 +25,7 @@ from app.services.settings_service import (
     allowed_telemed_clinics,
 )
 from app.services.address_resolver import resolve_address
+from app.services.address_suggest_service import resolve_fuzzy_geo
 from app.services.day_summary_service import reconcile_end_day_data
 from app.services.rest_service import rest_facts
 from app.services.formula_parity_service import check_visit_parity
@@ -391,9 +392,11 @@ class MobileApiService:
 
     def _geocode(self, address: str, base_districts: list[str]):
         """Координаты точки нужны, чтобы посчитать дорогу до неё. Без них заказ всё
-        равно сохраняем — он просто не попадёт в оптимизацию маршрута."""
+        равно сохраняем — он просто не попадёт в оптимизацию маршрута. Nominatim
+        промолчал — пробуем «прощающие» слои (learned + DaData): опечатка не должна
+        выкидывать заказ из оптимизации маршрута."""
         try:
-            return geocode_address(
+            geo = geocode_address(
                 address,
                 base_districts,
                 cache_repo=AddressCacheRepository(self.connection),
@@ -404,7 +407,10 @@ class MobileApiService:
                 timeout_seconds=server_timeout(),
             )
         except GeocodingError:
-            return None
+            geo = None
+        if geo is not None and geo.lat is not None and geo.lon is not None:
+            return geo
+        return resolve_fuzzy_geo(address, self.connection, self.settings, db_user_id(self.connection))
 
     def _save_telemed(self, client_entity_id: str, payload: dict[str, Any]) -> int:
         mapped = self._mapped(client_entity_id, "telemed_entry")

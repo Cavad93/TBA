@@ -810,6 +810,8 @@ class HomeVisitRepository private constructor(
         fromLat: Double? = null,
         fromLon: Double? = null,
         mode: String? = null,
+        lat: Double? = null,
+        lon: Double? = null,
     ): QuickEstimateResult = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("address", address.trim())
         if (fromLat != null && fromLon != null) {
@@ -818,6 +820,12 @@ class HomeVisitRepository private constructor(
         }
         if (!mode.isNullOrBlank()) {
             payload.put("mode", mode)
+        }
+        // Координаты назначения уже известны (resolved-подсказка или выбранный
+        // кандидат) — сервер тогда не геокодит текст заново.
+        if (lat != null && lon != null) {
+            payload.put("lat", lat)
+            payload.put("lon", lon)
         }
         val response = postJson(normalizeApiUrl(serverUrl, "/api/estimate/quick"), apiKey, payload)
             ?: return@withContext QuickEstimateResult(reason = "network_error")

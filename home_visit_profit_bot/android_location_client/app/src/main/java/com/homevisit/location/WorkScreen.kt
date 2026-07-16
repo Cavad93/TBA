@@ -644,6 +644,11 @@ internal fun EvaluateForm(
             }
         }
         if (personalMode) {
+            // Сервер не уверен в адресе (опечатка, два похожих проспекта) — те же
+            // 2–3 кандидата одним тапом, что и в рабочем режиме. Молча не подставляем.
+            if (personalTrip.addressCandidates.isNotEmpty()) {
+                AddressCandidatesList(personalTrip.addressCandidates, onPickCandidate)
+            }
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = address.isNotBlank() && !personalTrip.isLoading,
