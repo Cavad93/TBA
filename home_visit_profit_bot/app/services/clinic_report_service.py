@@ -16,6 +16,8 @@ class ClinicBreakdown:
     visit_income: float
     telemed_income: float
     telemed_minutes: float
+    office_income: float
+    office_minutes: float
     work_minutes: float
     gross_income: float
     net_income: float
@@ -30,6 +32,7 @@ def build_active_clinic_breakdown(
     total_expenses: float,
     total_telemed_income: float,
     total_telemed_minutes: float,
+    office_entries: list[Any] | None = None,
 ) -> list[ClinicBreakdown]:
     buckets: dict[str, dict[str, float]] = {}
     for visit in visits:
@@ -60,6 +63,15 @@ def build_active_clinic_breakdown(
         bucket["telemed_minutes"] += unassigned_minutes
         bucket["work_minutes"] += unassigned_minutes
 
+    for entry in office_entries or []:
+        clinic = _clinic_name(_field(entry, "clinic"))
+        income = float(_field(entry, "income") or 0)
+        minutes = float(_field(entry, "minutes") or 0)
+        bucket = buckets.setdefault(clinic, _empty_bucket())
+        bucket["office_income"] += income
+        bucket["office_minutes"] += minutes
+        bucket["work_minutes"] += minutes
+
     return _finalize_breakdown(buckets, total_expenses)
 
 
@@ -68,6 +80,7 @@ def build_period_clinic_breakdown(
     visit_totals: list[Any],
     telemed_totals: list[Any],
     total_expenses: float,
+    office_totals: list[Any] | None = None,
 ) -> list[ClinicBreakdown]:
     buckets: dict[str, dict[str, float]] = {}
     for row in visit_totals:
@@ -89,15 +102,24 @@ def build_period_clinic_breakdown(
         bucket["telemed_minutes"] += telemed_minutes
         bucket["work_minutes"] += telemed_minutes
 
+    for row in office_totals or []:
+        clinic = _clinic_name(_field(row, "clinic"))
+        bucket = buckets.setdefault(clinic, _empty_bucket())
+        office_income = float(_field(row, "office_income") or 0)
+        office_minutes = float(_field(row, "office_minutes") or 0)
+        bucket["office_income"] += office_income
+        bucket["office_minutes"] += office_minutes
+        bucket["work_minutes"] += office_minutes
+
     return _finalize_breakdown(buckets, total_expenses)
 
 
 def _finalize_breakdown(buckets: dict[str, dict[str, float]], total_expenses: float) -> list[ClinicBreakdown]:
     total_minutes = sum(bucket["work_minutes"] for bucket in buckets.values())
-    total_gross = sum(bucket["visit_income"] + bucket["telemed_income"] for bucket in buckets.values())
+    total_gross = sum(bucket["visit_income"] + bucket["telemed_income"] + bucket["office_income"] for bucket in buckets.values())
     result: list[ClinicBreakdown] = []
     for clinic, bucket in buckets.items():
-        gross = bucket["visit_income"] + bucket["telemed_income"]
+        gross = bucket["visit_income"] + bucket["telemed_income"] + bucket["office_income"]
         expense_share = _expense_share(bucket, total_expenses, total_minutes, total_gross, gross)
         net = gross - expense_share
         work_minutes = bucket["work_minutes"]
@@ -108,6 +130,8 @@ def _finalize_breakdown(buckets: dict[str, dict[str, float]], total_expenses: fl
                 visit_income=bucket["visit_income"],
                 telemed_income=bucket["telemed_income"],
                 telemed_minutes=bucket["telemed_minutes"],
+                office_income=bucket["office_income"],
+                office_minutes=bucket["office_minutes"],
                 work_minutes=work_minutes,
                 gross_income=gross,
                 net_income=net,
@@ -139,6 +163,8 @@ def _empty_bucket() -> dict[str, float]:
         "visit_income": 0.0,
         "telemed_income": 0.0,
         "telemed_minutes": 0.0,
+        "office_income": 0.0,
+        "office_minutes": 0.0,
         "work_minutes": 0.0,
     }
 

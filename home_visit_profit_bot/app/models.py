@@ -31,6 +31,11 @@ class WorkDay:
     food_expenses: float
     clinic_compensation: float
     other_expenses: float
+    office_income: float = 0.0
+    office_minutes: float = 0.0
+    food_meal_expenses: float = 0.0
+    coffee_expenses: float = 0.0
+    drinks_expenses: float = 0.0
     planned_route_time_factor: float = 1.0
     start_odometer: float = 0.0
     end_odometer: float = 0.0
@@ -42,6 +47,9 @@ class WorkDay:
     fuel_liters: float = 0.0
     odometer_km: float = 0.0
     personal_km: float = 0.0
+    sleep_hours: float = 0.0
+    sleep_quality: float = 0.0
+    break_hours_before: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -130,6 +138,16 @@ class CandidateCalculation:
     required_extra_for_outside_zone: float = 0.0
     target_day_hourly: float = 0.0
     target_marginal_hourly: float = 0.0
+    fatigue_score_before: float = 0.0
+    fatigue_score_after: float = 0.0
+    fatigue_weekly_average: float = 0.0
+    fatigue_extra_payment: float = 0.0
+    fatigue_level: str = ""
+    fatigue_reason: str = ""
+    recovery_debt_before: float = 0.0
+    recovery_debt_after: float = 0.0
+    circadian_risk_minutes: float = 0.0
+    burnout_score: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -147,9 +165,14 @@ class EndDayData:
     telemed_income: float
     telemed_minutes: float
     parking_expenses: float
-    food_expenses: float
-    clinic_compensation: float
-    other_expenses: float
+    food_expenses: float = 0.0
+    office_income: float = 0.0
+    office_minutes: float = 0.0
+    food_meal_expenses: float = 0.0
+    coffee_expenses: float = 0.0
+    drinks_expenses: float = 0.0
+    clinic_compensation: float = 0.0
+    other_expenses: float = 0.0
     fuel_compensation: float = 0.0
     parking_compensation: float = 0.0
     toll_expenses: float = 0.0
@@ -175,6 +198,8 @@ class DailyStats:
     end_odometer: float = 0.0
     visit_income: float = 0.0
     telemed_income: float = 0.0
+    office_income: float = 0.0
+    office_minutes: float = 0.0
     fuel_compensation: float = 0.0
     parking_compensation: float = 0.0
     clinic_compensation: float = 0.0
@@ -191,9 +216,47 @@ class DailyStats:
     amortization_expenses: float = 0.0
     parking_expenses: float = 0.0
     food_expenses: float = 0.0
+    food_meal_expenses: float = 0.0
+    coffee_expenses: float = 0.0
+    drinks_expenses: float = 0.0
     toll_expenses: float = 0.0
     toll_compensation: float = 0.0
     other_expenses: float = 0.0
+    fatigue_score: float = 0.0
+    fatigue_weekly_average: float = 0.0
+    fatigue_long_stop_count: int = 0
+    fatigue_pause_minutes: float = 0.0
+    fatigue_heavy_visit_count: int = 0
+    recovery_debt: float = 0.0
+    sleep_hours: float = 0.0
+    sleep_quality: float = 0.0
+    break_hours_before: float = 0.0
+    circadian_risk_minutes: float = 0.0
+    burnout_score: float = 0.0
+
+
+@dataclass(frozen=True)
+class DrivingBehaviorDaily:
+    work_day_id: int
+    date: str
+    samples_count: int = 0
+    sensor_minutes: float = 0.0
+    harsh_acceleration_count: int = 0
+    harsh_braking_count: int = 0
+    hard_cornering_count: int = 0
+    lane_change_proxy_count: int = 0
+    stop_go_count: int = 0
+    jerk_score: float = 0.0
+    speed_variability_score: float = 0.0
+    aggressive_score: float = 0.0
+
+
+@dataclass(frozen=True)
+class FatigueFeedback:
+    work_day_id: int
+    predicted_score: float
+    user_score: float
+    feedback_type: str
 
 
 @dataclass(frozen=True)

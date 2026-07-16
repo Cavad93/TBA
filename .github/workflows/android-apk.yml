@@ -6,9 +6,17 @@ on:
     paths:
       - "home_visit_profit_bot/android_location_client/**"
       - ".github/workflows/android-apk.yml"
+  pull_request:
+    paths:
+      - "home_visit_profit_bot/android_location_client/**"
+      - ".github/workflows/android-apk.yml"
+
+permissions:
+  contents: read
 
 jobs:
   build:
+    name: Build debug APK
     runs-on: ubuntu-latest
 
     steps:
@@ -31,10 +39,10 @@ jobs:
 
       - name: Build debug APK
         working-directory: home_visit_profit_bot/android_location_client
-        run: gradle :app:assembleDebug
+        run: gradle :app:assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: home-visit-gps-debug-apk
+          name: home-visit-android-debug-apk
           path: home_visit_profit_bot/android_location_client/app/build/outputs/apk/debug/app-debug.apk

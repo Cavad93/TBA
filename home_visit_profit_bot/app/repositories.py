@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
-from app.models import DailyStats, Visit, WorkDay
+from app.models import DailyStats, DrivingBehaviorDaily, Visit, WorkDay
 
 
 def now_iso() -> str:
@@ -38,8 +38,13 @@ def _work_day_from_row(row: sqlite3.Row | None) -> WorkDay | None:
         actual_service_minutes_per_visit=row["actual_service_minutes_per_visit"],
         telemed_income=float(row["telemed_income"] or 0),
         telemed_minutes=float(row["telemed_minutes"] or 0),
+        office_income=float(row["office_income"] or 0),
+        office_minutes=float(row["office_minutes"] or 0),
         parking_expenses=float(row["parking_expenses"] or 0),
         food_expenses=float(row["food_expenses"] or 0),
+        food_meal_expenses=float(row["food_meal_expenses"] or 0),
+        coffee_expenses=float(row["coffee_expenses"] or 0),
+        drinks_expenses=float(row["drinks_expenses"] or 0),
         fuel_compensation=float(row["fuel_compensation"] or 0),
         parking_compensation=float(row["parking_compensation"] or 0),
         clinic_compensation=float(row["clinic_compensation"] or 0),
@@ -48,6 +53,9 @@ def _work_day_from_row(row: sqlite3.Row | None) -> WorkDay | None:
         toll_compensation=float(row["toll_compensation"] or 0),
         fuel_expenses=float(row["fuel_expenses"] or 0),
         fuel_liters=float(row["fuel_liters"] or 0),
+        sleep_hours=float(row["sleep_hours"] or 0),
+        sleep_quality=float(row["sleep_quality"] or 0),
+        break_hours_before=float(row["break_hours_before"] or 0),
     )
 
 
@@ -72,6 +80,25 @@ def _visit_from_row(row: sqlite3.Row) -> Visit:
         estimated_day_hourly_before=row["estimated_day_hourly_before"],
         estimated_day_hourly_after=row["estimated_day_hourly_after"],
         completed_at=row["completed_at"],
+    )
+
+
+def _driving_from_row(row: sqlite3.Row | None) -> DrivingBehaviorDaily | None:
+    if row is None:
+        return None
+    return DrivingBehaviorDaily(
+        work_day_id=int(row["work_day_id"]),
+        date=str(row["date"]),
+        samples_count=int(row["samples_count"] or 0),
+        sensor_minutes=float(row["sensor_minutes"] or 0),
+        harsh_acceleration_count=int(row["harsh_acceleration_count"] or 0),
+        harsh_braking_count=int(row["harsh_braking_count"] or 0),
+        hard_cornering_count=int(row["hard_cornering_count"] or 0),
+        lane_change_proxy_count=int(row["lane_change_proxy_count"] or 0),
+        stop_go_count=int(row["stop_go_count"] or 0),
+        jerk_score=float(row["jerk_score"] or 0),
+        speed_variability_score=float(row["speed_variability_score"] or 0),
+        aggressive_score=float(row["aggressive_score"] or 0),
     )
 
 
@@ -132,6 +159,9 @@ class WorkDayRepository:
         finish_lon: float | None = None,
         route_time_factor: float = 1.0,
         start_odometer: float = 0.0,
+        sleep_hours: float = 0.0,
+        sleep_quality: float = 0.0,
+        break_hours_before: float = 0.0,
     ) -> WorkDay:
         self.connection.execute("UPDATE work_days SET status = 'closed', ended_at = ? WHERE status = 'active'", (now_iso(),))
         cursor = self.connection.execute(
@@ -140,8 +170,8 @@ class WorkDayRepository:
                 date, status, start_address, start_lat, start_lon,
                 finish_address, finish_lat, finish_lon, started_at,
                 planned_avg_speed_kmh, planned_service_minutes, planned_route_time_factor,
-                start_odometer, created_at
-            ) VALUES (date('now'), 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                start_odometer, sleep_hours, sleep_quality, break_hours_before, created_at
+            ) VALUES (date('now'), 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 start_address,
@@ -155,6 +185,9 @@ class WorkDayRepository:
                 service_minutes,
                 route_time_factor,
                 start_odometer,
+                sleep_hours,
+                sleep_quality,
+                break_hours_before,
                 now_iso(),
             ),
         )
@@ -168,10 +201,15 @@ class WorkDayRepository:
         allowed = {
             "telemed_income",
             "telemed_minutes",
+            "office_income",
+            "office_minutes",
             "fuel_expenses",
             "fuel_liters",
             "parking_expenses",
             "food_expenses",
+            "food_meal_expenses",
+            "coffee_expenses",
+            "drinks_expenses",
             "fuel_compensation",
             "parking_compensation",
             "toll_expenses",
@@ -188,10 +226,15 @@ class WorkDayRepository:
         allowed = {
             "telemed_income",
             "telemed_minutes",
+            "office_income",
+            "office_minutes",
             "fuel_expenses",
             "fuel_liters",
             "parking_expenses",
             "food_expenses",
+            "food_meal_expenses",
+            "coffee_expenses",
+            "drinks_expenses",
             "fuel_compensation",
             "parking_compensation",
             "toll_expenses",
@@ -209,9 +252,17 @@ class WorkDayRepository:
 
     def close(self, day_id: int, values: dict[str, Any]) -> None:
         assignments = ", ".join(f"{key} = ?" for key in values)
-        params = list(values.values()) + [day_id]
-        self.connection.execute(f"UPDATE work_days SET {assignments}, status = 'closed' WHERE id = ?", params)
+        self.connection.execute(
+            f"UPDATE work_days SET {assignments}, status = 'closed', ended_at = COALESCE(ended_at, ?) WHERE id = ?",
+            list(values.values()) + [now_iso(), day_id],
+        )
         self.connection.commit()
+
+    def latest_closed(self) -> WorkDay | None:
+        row = self.connection.execute(
+            "SELECT * FROM work_days WHERE status = 'closed' ORDER BY ended_at DESC, id DESC LIMIT 1"
+        ).fetchone()
+        return _work_day_from_row(row)
 
     def update_finish(self, day_id: int, address: str, lat: float | None, lon: float | None) -> None:
         self.connection.execute(
@@ -507,6 +558,24 @@ class LocationEventRepository:
         )
         self.connection.commit()
 
+    def duration_minutes(self, visit_id: int) -> float:
+        row = self.connection.execute(
+            """
+            SELECT (julianday(last_seen_at) - julianday(first_seen_at)) * 24 * 60 AS minutes
+            FROM visit_location_events
+            WHERE visit_id = ?
+            """,
+            (visit_id,),
+        ).fetchone()
+        return max(0.0, float(row["minutes"] or 0)) if row else 0.0
+
+    def set_fatigue_label(self, visit_id: int, label: str) -> None:
+        self.connection.execute(
+            "UPDATE visit_location_events SET fatigue_label = ?, updated_at = ? WHERE visit_id = ?",
+            (label, now_iso(), visit_id),
+        )
+        self.connection.commit()
+
 
 class LocationSampleRepository:
     def __init__(self, connection: sqlite3.Connection):
@@ -742,6 +811,203 @@ class TelemedRepository:
         ).fetchall()
 
 
+class OfficeRepository:
+    def __init__(self, connection: sqlite3.Connection):
+        self.connection = connection
+
+    def add(self, day_id: int, address: str, clinic: str, income: float, minutes: float) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO office_entries(work_day_id, address, clinic, income, minutes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (day_id, address, clinic, income, minutes, now_iso()),
+        )
+        self.connection.commit()
+
+    def list_for_day(self, day_id: int) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            "SELECT * FROM office_entries WHERE work_day_id = ? ORDER BY id",
+            (day_id,),
+        ).fetchall()
+
+    def aggregate_between(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            """
+            SELECT
+                clinic,
+                COALESCE(SUM(income), 0) AS office_income,
+                COALESCE(SUM(minutes), 0) AS office_minutes,
+                COUNT(*) AS office_count
+            FROM office_entries
+            JOIN work_days ON work_days.id = office_entries.work_day_id
+            WHERE work_days.date >= ? AND work_days.date < ?
+            GROUP BY clinic
+            ORDER BY clinic
+            """,
+            (start_date, end_date),
+        ).fetchall()
+
+
+class BurnoutSurveyRepository:
+    def __init__(self, connection: sqlite3.Connection):
+        self.connection = connection
+
+    def add(self, score: float, answers_json: str) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO burnout_surveys(date, score, answers_json, created_at)
+            VALUES (date('now'), ?, ?, ?)
+            """,
+            (score, answers_json, now_iso()),
+        )
+        self.connection.commit()
+
+    def latest(self) -> sqlite3.Row | None:
+        return self.connection.execute(
+            "SELECT * FROM burnout_surveys ORDER BY created_at DESC, id DESC LIMIT 1"
+        ).fetchone()
+
+
+class DrivingBehaviorRepository:
+    def __init__(self, connection: sqlite3.Connection):
+        self.connection = connection
+
+    def upsert(
+        self,
+        *,
+        work_day_id: int,
+        date: str,
+        samples_count: int = 0,
+        sensor_minutes: float = 0.0,
+        harsh_acceleration_count: int = 0,
+        harsh_braking_count: int = 0,
+        hard_cornering_count: int = 0,
+        lane_change_proxy_count: int = 0,
+        stop_go_count: int = 0,
+        jerk_score: float = 0.0,
+        speed_variability_score: float = 0.0,
+        aggressive_score: float = 0.0,
+    ) -> None:
+        updated_at = now_iso()
+        self.connection.execute(
+            """
+            INSERT INTO driving_behavior_daily(
+                work_day_id, date, samples_count, sensor_minutes,
+                harsh_acceleration_count, harsh_braking_count, hard_cornering_count,
+                lane_change_proxy_count, stop_go_count, jerk_score,
+                speed_variability_score, aggressive_score, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(work_day_id) DO UPDATE SET
+                date = excluded.date,
+                samples_count = excluded.samples_count,
+                sensor_minutes = excluded.sensor_minutes,
+                harsh_acceleration_count = excluded.harsh_acceleration_count,
+                harsh_braking_count = excluded.harsh_braking_count,
+                hard_cornering_count = excluded.hard_cornering_count,
+                lane_change_proxy_count = excluded.lane_change_proxy_count,
+                stop_go_count = excluded.stop_go_count,
+                jerk_score = excluded.jerk_score,
+                speed_variability_score = excluded.speed_variability_score,
+                aggressive_score = excluded.aggressive_score,
+                updated_at = excluded.updated_at
+            """,
+            (
+                work_day_id,
+                date,
+                samples_count,
+                sensor_minutes,
+                harsh_acceleration_count,
+                harsh_braking_count,
+                hard_cornering_count,
+                lane_change_proxy_count,
+                stop_go_count,
+                jerk_score,
+                speed_variability_score,
+                aggressive_score,
+                updated_at,
+                updated_at,
+            ),
+        )
+        self.connection.commit()
+
+    def get(self, work_day_id: int) -> DrivingBehaviorDaily | None:
+        row = self.connection.execute(
+            "SELECT * FROM driving_behavior_daily WHERE work_day_id = ?",
+            (work_day_id,),
+        ).fetchone()
+        return _driving_from_row(row)
+
+    def joined_recent(self, days: int = 28) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            """
+            SELECT
+                daily_stats.*,
+                driving_behavior_daily.samples_count,
+                driving_behavior_daily.sensor_minutes,
+                driving_behavior_daily.harsh_acceleration_count,
+                driving_behavior_daily.harsh_braking_count,
+                driving_behavior_daily.hard_cornering_count,
+                driving_behavior_daily.lane_change_proxy_count,
+                driving_behavior_daily.stop_go_count,
+                driving_behavior_daily.jerk_score,
+                driving_behavior_daily.speed_variability_score,
+                driving_behavior_daily.aggressive_score,
+                feedback.user_score AS user_fatigue_score
+            FROM daily_stats
+            LEFT JOIN driving_behavior_daily
+              ON driving_behavior_daily.work_day_id = daily_stats.work_day_id
+            LEFT JOIN (
+                SELECT fatigue_feedback.work_day_id, fatigue_feedback.user_score
+                FROM fatigue_feedback
+                JOIN (
+                    SELECT work_day_id, MAX(id) AS max_id
+                    FROM fatigue_feedback
+                    GROUP BY work_day_id
+                ) latest_feedback ON latest_feedback.max_id = fatigue_feedback.id
+            ) AS feedback
+              ON feedback.work_day_id = daily_stats.work_day_id
+            ORDER BY daily_stats.date DESC, daily_stats.id DESC
+            LIMIT ?
+            """,
+            (days,),
+        ).fetchall()
+
+
+class FatigueFeedbackRepository:
+    def __init__(self, connection: sqlite3.Connection):
+        self.connection = connection
+
+    def add(self, work_day_id: int, predicted_score: float, user_score: float, feedback_type: str) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO fatigue_feedback(work_day_id, predicted_score, user_score, feedback_type, error, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                work_day_id,
+                predicted_score,
+                user_score,
+                feedback_type,
+                user_score - predicted_score,
+                now_iso(),
+            ),
+        )
+        self.connection.commit()
+
+    def latest_for_day(self, work_day_id: int) -> sqlite3.Row | None:
+        return self.connection.execute(
+            "SELECT * FROM fatigue_feedback WHERE work_day_id = ? ORDER BY id DESC LIMIT 1",
+            (work_day_id,),
+        ).fetchone()
+
+    def recent(self, limit: int = 28) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            "SELECT * FROM fatigue_feedback ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+
 class DailyStatsRepository:
     def __init__(self, connection: sqlite3.Connection):
         self.connection = connection
@@ -757,14 +1023,20 @@ class DailyStatsRepository:
                 net_hourly_income, actual_km, start_odometer, end_odometer,
                 odometer_km, personal_km, actual_avg_speed_kmh,
                 actual_service_minutes_per_visit, visit_income, telemed_income,
+                office_income, office_minutes,
                 fuel_compensation, parking_compensation, clinic_compensation,
                 fuel_expenses, fuel_purchase_expenses, fuel_used_liters,
                 fuel_liters, fuel_price_per_liter, fuel_cost_per_km,
                 fuel_consumption_l_per_100km, fuel_liters_per_100km,
                 amortization_expenses, parking_expenses,
-                food_expenses, toll_expenses, toll_compensation,
-                other_expenses, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                food_expenses, food_meal_expenses, coffee_expenses,
+                drinks_expenses, toll_expenses, toll_compensation,
+                other_expenses, fatigue_score, fatigue_weekly_average,
+                fatigue_long_stop_count, fatigue_pause_minutes,
+                fatigue_heavy_visit_count, recovery_debt, sleep_hours,
+                sleep_quality, break_hours_before, circadian_risk_minutes,
+                burnout_score, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 day_id,
@@ -788,6 +1060,8 @@ class DailyStatsRepository:
                 stats.actual_service_minutes_per_visit,
                 stats.visit_income,
                 stats.telemed_income,
+                stats.office_income,
+                stats.office_minutes,
                 stats.fuel_compensation,
                 stats.parking_compensation,
                 stats.clinic_compensation,
@@ -802,9 +1076,23 @@ class DailyStatsRepository:
                 stats.amortization_expenses,
                 stats.parking_expenses,
                 stats.food_expenses,
+                stats.food_meal_expenses,
+                stats.coffee_expenses,
+                stats.drinks_expenses,
                 stats.toll_expenses,
                 stats.toll_compensation,
                 stats.other_expenses,
+                stats.fatigue_score,
+                stats.fatigue_weekly_average,
+                stats.fatigue_long_stop_count,
+                stats.fatigue_pause_minutes,
+                stats.fatigue_heavy_visit_count,
+                stats.recovery_debt,
+                stats.sleep_hours,
+                stats.sleep_quality,
+                stats.break_hours_before,
+                stats.circadian_risk_minutes,
+                stats.burnout_score,
                 now_iso(),
             ),
         )
@@ -815,6 +1103,12 @@ class DailyStatsRepository:
             "SELECT * FROM daily_stats ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
+
+    def get_by_day(self, work_day_id: int) -> sqlite3.Row | None:
+        return self.connection.execute(
+            "SELECT * FROM daily_stats WHERE work_day_id = ? ORDER BY id DESC LIMIT 1",
+            (work_day_id,),
+        ).fetchone()
 
     def aggregate_between(self, start_date: str, end_date: str) -> dict[str, float | int | str]:
         row = self.connection.execute(
@@ -833,6 +1127,8 @@ class DailyStatsRepository:
                 COALESCE(SUM(personal_km), 0) AS personal_km,
                 COALESCE(SUM(visit_income), 0) AS visit_income,
                 COALESCE(SUM(telemed_income), 0) AS telemed_income,
+                COALESCE(SUM(office_income), 0) AS office_income,
+                COALESCE(SUM(office_minutes), 0) AS office_minutes,
                 COALESCE(SUM(fuel_compensation), 0) AS fuel_compensation,
                 COALESCE(SUM(parking_compensation), 0) AS parking_compensation,
                 COALESCE(SUM(clinic_compensation), 0) AS clinic_compensation,
@@ -843,9 +1139,23 @@ class DailyStatsRepository:
                 COALESCE(SUM(amortization_expenses), 0) AS amortization_expenses,
                 COALESCE(SUM(parking_expenses), 0) AS parking_expenses,
                 COALESCE(SUM(food_expenses), 0) AS food_expenses,
+                COALESCE(SUM(food_meal_expenses), 0) AS food_meal_expenses,
+                COALESCE(SUM(coffee_expenses), 0) AS coffee_expenses,
+                COALESCE(SUM(drinks_expenses), 0) AS drinks_expenses,
                 COALESCE(SUM(toll_expenses), 0) AS toll_expenses,
                 COALESCE(SUM(toll_compensation), 0) AS toll_compensation,
                 COALESCE(SUM(other_expenses), 0) AS other_expenses,
+                COALESCE(AVG(NULLIF(fatigue_score, 0)), 0) AS avg_fatigue_score,
+                COALESCE(AVG(NULLIF(fatigue_weekly_average, 0)), 0) AS avg_fatigue_weekly_average,
+                COALESCE(SUM(fatigue_long_stop_count), 0) AS fatigue_long_stop_count,
+                COALESCE(SUM(fatigue_pause_minutes), 0) AS fatigue_pause_minutes,
+                COALESCE(SUM(fatigue_heavy_visit_count), 0) AS fatigue_heavy_visit_count,
+                COALESCE(AVG(NULLIF(recovery_debt, 0)), 0) AS avg_recovery_debt,
+                COALESCE(AVG(NULLIF(sleep_hours, 0)), 0) AS avg_sleep_hours,
+                COALESCE(AVG(NULLIF(sleep_quality, 0)), 0) AS avg_sleep_quality,
+                COALESCE(AVG(NULLIF(break_hours_before, 0)), 0) AS avg_break_hours_before,
+                COALESCE(SUM(circadian_risk_minutes), 0) AS circadian_risk_minutes,
+                COALESCE(AVG(NULLIF(burnout_score, 0)), 0) AS avg_burnout_score,
                 COALESCE(AVG(NULLIF(actual_avg_speed_kmh, 0)), 0) AS avg_speed_kmh,
                 COALESCE(AVG(NULLIF(actual_service_minutes_per_visit, 0)), 0) AS avg_service_minutes_per_visit,
                 COALESCE(AVG(NULLIF(actual_route_time_factor, 0)), 0) AS avg_route_time_factor,

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta
 
-from telegram import Update
+from telegram import KeyboardButton, ReplyKeyboardMarkup, Update
 from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
@@ -15,19 +16,26 @@ from telegram.ext import (
 from app.db import connect
 from app.repositories import (
     AddressCacheRepository,
+    BurnoutSurveyRepository,
     DailyStatsRepository,
+    DrivingBehaviorRepository,
     ExpenseRepository,
+    FatigueFeedbackRepository,
+    LocationEventRepository,
+    OfficeRepository,
     SettingsRepository,
     TelemedRepository,
     VisitRepository,
     WorkDayRepository,
 )
+from app.services.correlation_service import apply_feedback_learning, build_correlation_report
+from app.services.fatigue_service import estimate_active_day_fatigue
 from app.services.geocoding_service import GeocodingError, geocode_address, parse_coordinates
 from app.services.phrase_service import clinic_phrase
 from app.services.clinic_report_service import build_active_clinic_breakdown, build_period_clinic_breakdown
 from app.services.profitability_service import calculate_candidate_impact, calculate_remaining_route_summary
-from app.telegram_bot.keyboards import main_menu_keyboard, telemed_clinic_keyboard
-from app.telegram_bot.messages import optimized_route_message, stats_period_message, summary_message
+from app.telegram_bot.keyboards import clinic_keyboard, main_menu_keyboard, stop_classification_keyboard, telemed_clinic_keyboard
+from app.telegram_bot.messages import fatigue_correlation_message, optimized_route_message, stats_period_message, summary_message
 from app.telegram_bot.conversations import (
     ADD_ADDRESS,
     ADD_CLINIC,
@@ -39,6 +47,8 @@ from app.telegram_bot.conversations import (
     END_COMP,
     END_COUNT,
     END_FOOD,
+    END_COFFEE,
+    END_DRINKS,
     END_FUEL,
     END_FUEL_CONSUMPTION,
     END_FUEL_COMP,
@@ -58,6 +68,8 @@ from app.telegram_bot.conversations import (
     NEW_FINISH_COORDS,
     NEW_ODOMETER,
     NEW_SERVICE,
+    NEW_SLEEP,
+    NEW_SLEEP_QUALITY,
     NEW_SPEED,
     NEW_START,
     NEW_START_COORDS,
@@ -73,6 +85,8 @@ from app.telegram_bot.conversations import (
     end_comp,
     end_count,
     end_food,
+    end_coffee,
+    end_drinks,
     end_fuel,
     end_fuel_consumption,
     end_fuel_comp,
@@ -93,6 +107,8 @@ from app.telegram_bot.conversations import (
     newday_finish_point,
     newday_odometer,
     newday_service,
+    newday_sleep,
+    newday_sleep_quality,
     newday_speed,
     newday_start,
     newday_start_coords,
@@ -104,7 +120,19 @@ from app.utils.text_utils import parse_amount_command, parse_float
 
 FINISH_ADDRESS, FINISH_COORDS = range(100, 102)
 TELEMED_AMOUNT, TELEMED_CLINIC = range(200, 202)
+CBI_QUESTION = 300
+OFFICE_ADDRESS, OFFICE_MINUTES, OFFICE_INCOME, OFFICE_CLINIC = range(400, 404)
 TELEMED_CLINICS = {"пск": "ПСК", "днд": "ДНД"}
+OFFICE_CLINICS = {"династия": "Династия", "пск": "ПСК", "витамед": "ВИТАМЕД", "днд": "ДНД"}
+CBI_QUESTIONS = [
+    "Физическое истощение за последнюю неделю?",
+    "Было трудно восстановиться после рабочего дня?",
+    "Работа эмоционально выматывала?",
+    "Раздражали пациенты, клиники или организация процесса?",
+    "Хотелось избегать новых вызовов?",
+    "Было ощущение, что работа забирает слишком много сил?",
+    "Было ощущение, что в таком темпе сложно продолжать ещё неделю?",
+]
 
 
 def _repos(context: ContextTypes.DEFAULT_TYPE):
@@ -116,6 +144,26 @@ def _repos(context: ContextTypes.DEFAULT_TYPE):
         WorkDayRepository(connection),
         VisitRepository(connection),
         ExpenseRepository(connection),
+    )
+
+
+def _stop_classification_markup(connection, visit_id: int):
+    events = LocationEventRepository(connection)
+    minutes = events.duration_minutes(visit_id)
+    if minutes <= 40:
+        return None, ""
+    return (
+        stop_classification_keyboard(visit_id),
+        f"\n\nGPS-остановка у адреса: {minutes:.0f} мин. Уточните, что это было:",
+    )
+
+
+def _cbi_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton("0"), KeyboardButton("1"), KeyboardButton("2"), KeyboardButton("3"), KeyboardButton("4")]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+        input_field_placeholder="0-4",
     )
 
 
@@ -181,10 +229,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/newday — начать день\n"
         "/add адрес | доход — добавить кандидат с авторасчётом маршрута, затем бот спросит клинику\n"
         "/telemed — добавить телемедицину с выбором ПСК/ДНД\n"
+        "/office — добавить приём в офисе предприятия\n"
         "/accept или /reject — принять/отклонить последний кандидат\n"
         "/complete <номер> — завершить адрес\n"
         "/cancel_visit <номер> — отменить активный адрес\n"
         "/finish — изменить точку финиша\n"
+        "/cbi — короткий недельный опрос выгорания\n"
+        "/fatigue_corr 14 или 28 — матрица корреляций усталости\n"
+        "/fatigue_feedback 0-100 — ручная оценка усталости последнего дня\n"
         "/endday — завершить день вопросами\n"
         "/summary — сводка\n"
         "/stats — статистика за месяц\n"
@@ -268,6 +320,7 @@ async def complete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     all_visits, route_summary = _rebuild_active_route(day, settings, visits)
     next_visit = next((visit for visit in all_visits if visit.status == "accepted" and visit.order_number == 1), None)
+    stop_markup, stop_text = _stop_classification_markup(connection, cancelled.id)
     connection.close()
 
     message = f"Адрес завершён: {completed.address}."
@@ -278,7 +331,7 @@ async def complete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     else:
         message += "\nПринятых незавершённых адресов больше нет."
-    await update.effective_message.reply_text(message)
+    await update.effective_message.reply_text(message + stop_text, reply_markup=stop_markup)
 
 
 async def complete_next(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -299,6 +352,7 @@ async def complete_next(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     completed = visits.complete_visit(current.id)
     all_visits, route_summary = _rebuild_active_route(day, settings, visits)
     next_visit = next((visit for visit in all_visits if visit.status == "accepted" and visit.order_number == 1), None)
+    stop_markup, stop_text = _stop_classification_markup(connection, completed.id if completed else current.id)
     connection.close()
 
     message = f"Адрес завершён: {completed.address if completed else current.address}."
@@ -309,7 +363,7 @@ async def complete_next(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
     else:
         message += "\nПринятых незавершённых адресов больше нет."
-    await update.effective_message.reply_text(message, reply_markup=main_menu_keyboard())
+    await update.effective_message.reply_text(message + stop_text, reply_markup=stop_markup or main_menu_keyboard())
 
 
 async def cancel_visit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -345,6 +399,7 @@ async def cancel_visit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     all_visits, route_summary = _rebuild_active_route(day, settings, visits)
     next_visit = next((visit for visit in all_visits if visit.status == "accepted" and visit.order_number == 1), None)
+    stop_markup, stop_text = _stop_classification_markup(connection, cancelled.id)
     connection.close()
 
     message = f"Адрес отменён: {cancelled.address}."
@@ -355,7 +410,7 @@ async def cancel_visit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
     else:
         message += "\nПринятых незавершённых адресов больше нет."
-    await update.effective_message.reply_text(message, reply_markup=main_menu_keyboard())
+    await update.effective_message.reply_text(message + stop_text, reply_markup=stop_markup or main_menu_keyboard())
 
 
 async def location_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -388,6 +443,7 @@ async def location_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     all_visits, route_summary = _rebuild_active_route(day, settings, visits)
     next_visit = next((visit for visit in all_visits if visit.status == "accepted" and visit.order_number == 1), None)
+    stop_markup, stop_text = _stop_classification_markup(connection, completed.id)
     connection.close()
 
     message = f"Адрес закрыт по GPS-подсказке: {completed.address}."
@@ -398,7 +454,36 @@ async def location_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
     else:
         message += "\nПринятых незавершённых адресов больше нет."
-    await query.edit_message_text(message)
+    await query.edit_message_text(message + stop_text, reply_markup=stop_markup)
+
+
+async def fatigue_stop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split(":")
+    if len(parts) != 3:
+        await query.edit_message_text("Не смог распознать уточнение остановки.")
+        return
+    _, label, visit_id_text = parts
+    labels = {
+        "pause": "обед/пауза",
+        "waiting": "ожидание",
+        "normal": "обычный вызов",
+        "heavy": "тяжёлый вызов",
+        "conflict": "конфликтный/эмоционально тяжёлый вызов",
+    }
+    if label not in labels:
+        await query.edit_message_text("Не понял тип остановки.")
+        return
+    try:
+        visit_id = int(visit_id_text)
+    except ValueError:
+        await query.edit_message_text("Не смог распознать адрес.")
+        return
+    connection = connect(context.application.bot_data["config"].database_path)
+    LocationEventRepository(connection).set_fatigue_label(visit_id, label)
+    connection.close()
+    await query.edit_message_text(f"Остановка учтена как: {labels[label]}.")
 
 
 async def finish_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -495,6 +580,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     day_visits = visits.list_for_day(day.id)
     active_visits = [visit for visit in day_visits if visit.status in {"accepted", "completed"}]
     telemed_entries = TelemedRepository(connection).list_for_day(day.id)
+    office_entries = OfficeRepository(connection).list_for_day(day.id)
     fuel_cost_per_km = settings.get_float("car_cost_per_km", 17.05)
     amortization_factor = settings.get_float("amortization_factor", 0.8)
     km = sum(visit.estimated_extra_km for visit in active_visits)
@@ -504,6 +590,9 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         + fuel_expenses * amortization_factor
         + day.parking_expenses
         + day.food_expenses
+        + day.food_meal_expenses
+        + day.coffee_expenses
+        + day.drinks_expenses
         + day.toll_expenses
         + day.other_expenses
     )
@@ -514,6 +603,14 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         total_expenses=total_expenses,
         total_telemed_income=day.telemed_income,
         total_telemed_minutes=day.telemed_minutes,
+        office_entries=office_entries,
+    )
+    fatigue = estimate_active_day_fatigue(
+        day=day,
+        visits=active_visits,
+        settings_repo=settings,
+        stats_repo=DailyStatsRepository(connection),
+        location_events=LocationEventRepository(connection),
     )
     message = summary_message(
         day,
@@ -521,6 +618,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         fuel_cost_per_km,
         amortization_factor,
         clinic_breakdown,
+        fatigue,
     )
     connection.close()
     await update.effective_message.reply_text(message)
@@ -539,6 +637,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     clinic_breakdown = build_period_clinic_breakdown(
         visit_totals=repo.clinic_visit_totals_between(start_date, end_date),
         telemed_totals=TelemedRepository(connection).aggregate_between(start_date, end_date),
+        office_totals=OfficeRepository(connection).aggregate_between(start_date, end_date),
         total_expenses=float(aggregate.get("total_expenses") or 0),
     )
     connection.close()
@@ -561,6 +660,9 @@ async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ("Минимум адреса", f"{values.get('min_marginal_hourly_income', '600')} ₽/час"),
         ("Минимум вне зоны", f"{values.get('outside_zone_min_hourly_income', '600')} ₽/час"),
         ("Надбавка вне зоны", f"{values.get('outside_zone_min_extra_payment', '0')} ₽"),
+        ("Учёт усталости", values.get("fatigue_enabled", "true")),
+        ("Автообучение усталости", values.get("fatigue_learning_enabled", "true")),
+        ("Последний CBI", f"{values.get('latest_cbi_score', '0')} / 100"),
         ("Скорость по умолчанию", f"{values.get('default_avg_speed_kmh', '30')} км/ч"),
         ("Время на адресе", f"{values.get('default_service_minutes', '20')} мин"),
         ("Телемедицина по умолчанию", f"{values.get('default_telemed_minutes', '3')} мин"),
@@ -675,6 +777,18 @@ async def set_routing_fallback(update: Update, context: ContextTypes.DEFAULT_TYP
     repo.set("routing_fallback_to_estimate", str(enabled).lower())
     connection.close()
     await update.effective_message.reply_text(f"Fallback без OSRM: {str(enabled).lower()}")
+
+
+async def set_fatigue_enabled(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    value = update.effective_message.text.partition(" ")[2].strip().lower()
+    if value not in {"true", "false", "1", "0", "yes", "no", "да", "нет", "on", "off"}:
+        await update.effective_message.reply_text("Формат: /set_fatigue true или /set_fatigue false")
+        return
+    enabled = value in {"true", "1", "yes", "да", "on"}
+    connection, repo, _, _, _ = _repos(context)
+    repo.set("fatigue_enabled", str(enabled).lower())
+    connection.close()
+    await update.effective_message.reply_text(f"Учёт усталости: {str(enabled).lower()}")
 
 
 async def money_command(update: Update, context: ContextTypes.DEFAULT_TYPE, field: str, label: str) -> None:
@@ -818,12 +932,119 @@ def _normalize_telemed_clinic(value: str | None) -> str | None:
     return TELEMED_CLINICS.get(value.strip().lower().replace("ё", "е"))
 
 
+async def office_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    connection, _, days, _, _ = _repos(context)
+    day = days.active()
+    connection.close()
+    if day is None:
+        await update.effective_message.reply_text("Сейчас нет активного рабочего дня. Сначала выполните /newday.", reply_markup=main_menu_keyboard())
+        return ConversationHandler.END
+    context.user_data["office"] = {}
+    await update.effective_message.reply_text("Адрес офиса предприятия?")
+    return OFFICE_ADDRESS
+
+
+async def office_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    address = update.effective_message.text.strip()
+    if not address:
+        await update.effective_message.reply_text("Введите адрес офиса.")
+        return OFFICE_ADDRESS
+    context.user_data["office"]["address"] = address
+    await update.effective_message.reply_text("Сколько минут длился приём в офисе?")
+    return OFFICE_MINUTES
+
+
+async def office_minutes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    try:
+        minutes = parse_float(update.effective_message.text)
+    except ValueError:
+        await update.effective_message.reply_text("Длительность должна быть числом минут.")
+        return OFFICE_MINUTES
+    if minutes <= 0:
+        await update.effective_message.reply_text("Длительность должна быть больше 0.")
+        return OFFICE_MINUTES
+    context.user_data["office"]["minutes"] = minutes
+    await update.effective_message.reply_text("Сколько оплатили за офисный приём?")
+    return OFFICE_INCOME
+
+
+async def office_income(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    try:
+        income = parse_float(update.effective_message.text)
+    except ValueError:
+        await update.effective_message.reply_text("Стоимость должна быть числом.")
+        return OFFICE_INCOME
+    if income <= 0:
+        await update.effective_message.reply_text("Стоимость должна быть больше 0.")
+        return OFFICE_INCOME
+    context.user_data["office"]["income"] = income
+    await update.effective_message.reply_text("В рамках какой клиники офисный приём?", reply_markup=clinic_keyboard())
+    return OFFICE_CLINIC
+
+
+async def office_clinic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    clinic = _normalize_office_clinic(update.effective_message.text)
+    if clinic is None:
+        await update.effective_message.reply_text("Выберите клинику из списка.", reply_markup=clinic_keyboard())
+        return OFFICE_CLINIC
+    data = context.user_data.get("office", {})
+    connection, _, days, _, _ = _repos(context)
+    day = days.active()
+    if day is None:
+        connection.close()
+        context.user_data.pop("office", None)
+        await update.effective_message.reply_text("Активный день уже не найден.", reply_markup=main_menu_keyboard())
+        return ConversationHandler.END
+    address = str(data.get("address", "")).strip()
+    minutes = float(data.get("minutes", 0) or 0)
+    income = float(data.get("income", 0) or 0)
+    if not address or minutes <= 0 or income <= 0:
+        connection.close()
+        context.user_data.pop("office", None)
+        await update.effective_message.reply_text("Данные офиса неполные. Начните заново через кнопку ОФИС.", reply_markup=main_menu_keyboard())
+        return ConversationHandler.END
+    days.add_money(day.id, "office_income", income)
+    days.add_money(day.id, "office_minutes", minutes)
+    OfficeRepository(connection).add(day.id, address, clinic, income, minutes)
+    updated = days.get(day.id)
+    connection.close()
+    context.user_data.pop("office", None)
+    total_income = updated.office_income if updated else day.office_income + income
+    total_minutes = updated.office_minutes if updated else day.office_minutes + minutes
+    await update.effective_message.reply_text(
+        f"Офис добавлен: {clinic}, {address}, {rub(income)} / {minutes:.0f} мин.\n"
+        f"Итого офис за день: {rub(total_income)} / {total_minutes:.0f} мин.",
+        reply_markup=main_menu_keyboard(),
+    )
+    return ConversationHandler.END
+
+
+def _normalize_office_clinic(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower().replace("ё", "е")
+    by_number = {"1": "Династия", "2": "ПСК", "3": "ВИТАМЕД", "4": "ДНД"}
+    return by_number.get(normalized) or OFFICE_CLINICS.get(normalized)
+
+
 async def parking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await money_command(update, context, "parking_expenses", "Парковки учтены")
 
 
 async def food(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await money_command(update, context, "food_expenses", "Еда учтена")
+
+
+async def meal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await money_command(update, context, "food_meal_expenses", "Еда учтена")
+
+
+async def coffee(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await money_command(update, context, "coffee_expenses", "Кофе/энергетики учтены")
+
+
+async def drinks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await money_command(update, context, "drinks_expenses", "Вода/напитки учтены")
 
 
 async def compensation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -876,7 +1097,14 @@ async def phrase(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         connection.close()
         await update.effective_message.reply_text("Нет кандидата для фразы. Сначала добавьте адрес через /add.")
         return
-    calculation = calculate_candidate_impact(day, candidate, visits, settings_repo)
+    calculation = calculate_candidate_impact(
+        day,
+        candidate,
+        visits,
+        settings_repo,
+        DailyStatsRepository(connection),
+        LocationEventRepository(connection),
+    )
     text = clinic_phrase(calculation, settings_repo.get_float("min_hourly_income", 600))
     connection.close()
     await update.effective_message.reply_text(text)
@@ -899,6 +1127,173 @@ async def clear_address_cache(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.effective_message.reply_text("Такого адреса в кэше не было.")
 
 
+async def cbi_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data["cbi"] = {"answers": [], "index": 0}
+    await update.effective_message.reply_text(
+        "CBI/выгорание за последнюю неделю.\n"
+        "0 = совсем нет, 4 = почти всегда.\n\n"
+        f"1/{len(CBI_QUESTIONS)}. {CBI_QUESTIONS[0]}",
+        reply_markup=_cbi_keyboard(),
+    )
+    return CBI_QUESTION
+
+
+async def cbi_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    try:
+        value = int(update.effective_message.text.strip())
+    except ValueError:
+        await update.effective_message.reply_text("Выберите число от 0 до 4.", reply_markup=_cbi_keyboard())
+        return CBI_QUESTION
+    if value < 0 or value > 4:
+        await update.effective_message.reply_text("Ответ должен быть от 0 до 4.", reply_markup=_cbi_keyboard())
+        return CBI_QUESTION
+    data = context.user_data.setdefault("cbi", {"answers": [], "index": 0})
+    answers = list(data.get("answers", []))
+    answers.append(value)
+    index = int(data.get("index", 0)) + 1
+    if index < len(CBI_QUESTIONS):
+        data["answers"] = answers
+        data["index"] = index
+        await update.effective_message.reply_text(
+            f"{index + 1}/{len(CBI_QUESTIONS)}. {CBI_QUESTIONS[index]}",
+            reply_markup=_cbi_keyboard(),
+        )
+        return CBI_QUESTION
+    score = round(sum(answers) / (4 * len(answers)) * 100, 1) if answers else 0.0
+    connection, settings, _, _, _ = _repos(context)
+    BurnoutSurveyRepository(connection).add(score, json.dumps(answers, ensure_ascii=False))
+    settings.set("latest_cbi_score", str(score))
+    settings.set("latest_cbi_date", date.today().isoformat())
+    connection.close()
+    context.user_data.pop("cbi", None)
+    await update.effective_message.reply_text(
+        f"CBI сохранён: {score:.0f}/100 ({_burnout_level(score)}).\n"
+        "Этот показатель будет учитываться в долге восстановления и усталостной надбавке.",
+        reply_markup=main_menu_keyboard(),
+    )
+    return ConversationHandler.END
+
+
+def _burnout_level(score: float) -> str:
+    if score >= 75:
+        return "высокий риск"
+    if score >= 50:
+        return "умеренный риск"
+    if score >= 25:
+        return "лёгкий риск"
+    return "низкий риск"
+
+
+async def fatigue_corr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    parts = update.effective_message.text.split()
+    days = 28
+    if parts and parts[0].startswith("/") and len(parts) >= 2:
+        try:
+            days = int(parts[1])
+        except ValueError:
+            await update.effective_message.reply_text("Формат: /fatigue_corr 14 или /fatigue_corr 28")
+            return
+    if days not in {14, 28}:
+        await update.effective_message.reply_text("Пока поддерживаю 14 или 28 дней: /fatigue_corr 14")
+        return
+    connection = connect(context.application.bot_data["config"].database_path)
+    report = build_correlation_report(DrivingBehaviorRepository(connection), days)
+    connection.close()
+    await update.effective_message.reply_text(fatigue_correlation_message(report))
+
+
+async def fatigue_feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    parts = update.effective_message.text.split()
+    if len(parts) != 2:
+        await update.effective_message.reply_text("Формат: /fatigue_feedback <оценка 0-100>")
+        return
+    try:
+        user_score = parse_float(parts[1])
+    except ValueError:
+        await update.effective_message.reply_text("Оценка должна быть числом от 0 до 100.")
+        return
+    if user_score < 0 or user_score > 100:
+        await update.effective_message.reply_text("Оценка должна быть от 0 до 100.")
+        return
+    connection, settings_repo, days_repo, _, _ = _repos(context)
+    day = days_repo.latest_closed()
+    if day is None:
+        connection.close()
+        await update.effective_message.reply_text("Нет завершённого дня для обратной связи.")
+        return
+    stats_repo = DailyStatsRepository(connection)
+    stats_row = stats_repo.get_by_day(day.id)
+    predicted = float(stats_row["fatigue_score"] or 0) if stats_row else user_score
+    weights = apply_feedback_learning(
+        work_day_id=day.id,
+        predicted_score=predicted,
+        user_score=user_score,
+        feedback_type="manual",
+        settings_repo=settings_repo,
+        driving_repo=DrivingBehaviorRepository(connection),
+        feedback_repo=FatigueFeedbackRepository(connection),
+        stats_row=stats_row,
+    )
+    connection.close()
+    await update.effective_message.reply_text(
+        f"Оценка сохранена: {user_score:.0f}/100. Ошибка модели: {user_score - predicted:+.0f}.\n"
+        f"Активных весов обучения: {sum(1 for value in weights.values() if abs(value) >= 0.1)}."
+    )
+
+
+async def fatigue_feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split(":")
+    if len(parts) != 4:
+        await query.edit_message_text("Не смог распознать ответ по усталости.")
+        return
+    _, action, day_id_text, predicted_text = parts
+    try:
+        work_day_id = int(day_id_text)
+        predicted = float(predicted_text)
+    except ValueError:
+        await query.edit_message_text("Не смог распознать день или оценку.")
+        return
+    if action == "manual":
+        await query.edit_message_text(
+            f"Введите точную оценку командой: /fatigue_feedback {int(round(predicted))}\n"
+            "Например: /fatigue_feedback 72"
+        )
+        return
+    if action == "agree":
+        user_score = predicted
+    elif action == "lower":
+        user_score = max(0.0, predicted - 15)
+    elif action == "higher":
+        user_score = min(100.0, predicted + 15)
+    else:
+        await query.edit_message_text("Не понял вариант ответа.")
+        return
+
+    connection, settings_repo, _, _, _ = _repos(context)
+    stats_repo = DailyStatsRepository(connection)
+    stats_row = stats_repo.get_by_day(work_day_id)
+    if stats_row is not None:
+        predicted = float(stats_row["fatigue_score"] or predicted)
+    weights = apply_feedback_learning(
+        work_day_id=work_day_id,
+        predicted_score=predicted,
+        user_score=user_score,
+        feedback_type=action,
+        settings_repo=settings_repo,
+        driving_repo=DrivingBehaviorRepository(connection),
+        feedback_repo=FatigueFeedbackRepository(connection),
+        stats_row=stats_row,
+    )
+    connection.close()
+    await query.edit_message_text(
+        f"Спасибо, учёл обратную связь: {user_score:.0f}/100.\n"
+        f"Отклонение от оценки бота: {user_score - predicted:+.0f}.\n"
+        f"Весов с заметным обучением: {sum(1 for value in weights.values() if abs(value) >= 0.1)}."
+    )
+
+
 async def candidate_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -919,6 +1314,8 @@ def build_handlers() -> list:
         ],
         states={
             NEW_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, newday_start_point)],
+            NEW_SLEEP: [MessageHandler(filters.TEXT & ~filters.COMMAND, newday_sleep)],
+            NEW_SLEEP_QUALITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, newday_sleep_quality)],
             NEW_START_COORDS: [MessageHandler(filters.TEXT & ~filters.COMMAND, newday_start_coords)],
             NEW_FINISH: [MessageHandler(filters.TEXT & ~filters.COMMAND, newday_finish_point)],
             NEW_FINISH_COORDS: [MessageHandler(filters.TEXT & ~filters.COMMAND, newday_finish_coords)],
@@ -962,6 +1359,8 @@ def build_handlers() -> list:
             END_TELEMED_MINUTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, end_telemed_minutes)],
             END_PARKING: [MessageHandler(filters.TEXT & ~filters.COMMAND, end_parking)],
             END_FOOD: [MessageHandler(filters.TEXT & ~filters.COMMAND, end_food)],
+            END_COFFEE: [MessageHandler(filters.TEXT & ~filters.COMMAND, end_coffee)],
+            END_DRINKS: [MessageHandler(filters.TEXT & ~filters.COMMAND, end_drinks)],
             END_FUEL_COMP: [MessageHandler(filters.TEXT & ~filters.COMMAND, end_fuel_comp)],
             END_PARKING_COMP: [MessageHandler(filters.TEXT & ~filters.COMMAND, end_parking_comp)],
             END_TOLL: [MessageHandler(filters.TEXT & ~filters.COMMAND, end_toll)],
@@ -993,6 +1392,29 @@ def build_handlers() -> list:
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
+    cbi_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("cbi", cbi_start),
+            MessageHandler(filters.Regex("^CBI/выгорание$"), cbi_start),
+        ],
+        states={
+            CBI_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, cbi_answer)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    office_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("office", office_start),
+            MessageHandler(filters.Regex("^ОФИС$"), office_start),
+        ],
+        states={
+            OFFICE_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, office_address)],
+            OFFICE_MINUTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, office_minutes)],
+            OFFICE_INCOME: [MessageHandler(filters.TEXT & ~filters.COMMAND, office_income)],
+            OFFICE_CLINIC: [MessageHandler(filters.TEXT & ~filters.COMMAND, office_clinic)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
     return [
         CommandHandler("start", start),
         newday_conv,
@@ -1000,6 +1422,8 @@ def build_handlers() -> list:
         endday_conv,
         finish_conv,
         telemed_conv,
+        cbi_conv,
+        office_conv,
         CommandHandler("accept", accept),
         CommandHandler("reject", reject),
         CommandHandler("complete", complete),
@@ -1008,6 +1432,8 @@ def build_handlers() -> list:
         CommandHandler("route", route),
         CommandHandler("summary", summary),
         CommandHandler("stats", stats),
+        CommandHandler("fatigue_corr", fatigue_corr),
+        CommandHandler("fatigue_feedback", fatigue_feedback_command),
         CommandHandler("settings", settings),
         CommandHandler("set_car_cost", set_car_cost),
         CommandHandler("set_amortization_factor", set_amortization_factor),
@@ -1025,8 +1451,12 @@ def build_handlers() -> list:
         CommandHandler("set_straight_line_factor", set_straight_line_factor),
         CommandHandler("set_route_time_factor", set_route_time_factor),
         CommandHandler("set_routing_fallback", set_routing_fallback),
+        CommandHandler("set_fatigue", set_fatigue_enabled),
         CommandHandler("parking", parking),
         CommandHandler("food", food),
+        CommandHandler("meal", meal),
+        CommandHandler("coffee", coffee),
+        CommandHandler("drinks", drinks),
         CommandHandler("compensation", compensation),
         CommandHandler("fuel_compensation", fuel_compensation),
         CommandHandler("parking_compensation", parking_compensation),
@@ -1042,7 +1472,10 @@ def build_handlers() -> list:
         MessageHandler(filters.Regex("^Отменить адрес$"), cancel_visit),
         MessageHandler(filters.Regex("^Сводка$"), summary),
         MessageHandler(filters.Regex("^Статистика$"), stats),
+        MessageHandler(filters.Regex("^Корреляции усталости$"), fatigue_corr),
         MessageHandler(filters.Regex("^Настройки$"), settings),
         CallbackQueryHandler(location_callback, pattern="^location_(complete|ignore):"),
+        CallbackQueryHandler(fatigue_stop_callback, pattern="^fatigue_stop:"),
+        CallbackQueryHandler(fatigue_feedback_callback, pattern="^fatigue_feedback:"),
         CallbackQueryHandler(candidate_callback, pattern="^(accept_candidate|reject_candidate|candidate_phrase)$"),
     ]
