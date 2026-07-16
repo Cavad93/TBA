@@ -132,12 +132,12 @@ def calculate_day_profitability(
     # Цена отклика (платные лиды Профи/Авито) — прямой расход дня. Раньше она
     # вычиталась только у оцениваемого кандидата и «испарялась» после принятия:
     # ₽/час дня и «до» всех следующих оценок были завышены на сумму лидов смены.
-    # Статусы — ровно те же, что в calculate_day_income: чей доход считаем,
-    # того и расход на лид.
+    # Статусы дохода (accepted/completed/candidate) + cancelled: лид отменённого
+    # заказа оплачен, а дохода не будет — это и есть потеря, её нельзя прятать.
     lead_costs = sum(
         visit.response_cost
         for visit in visits
-        if visit.status in {"accepted", "completed", "candidate"}
+        if visit.status in {"accepted", "completed", "candidate", "cancelled"}
     )
     net_profit = total_income - total_expenses - lead_costs
     total_minutes = route.total_minutes + route.visits_count * service_minutes + day.telemed_minutes + day.office_minutes
@@ -267,6 +267,12 @@ def calculate_candidate_impact(
     outside_min_extra = settings_repo.get_float("outside_zone_min_extra_payment", 0)
     service_minutes = day.planned_service_minutes
     existing_visits = visit_repo.list_for_day(day.id, ("accepted", "completed"))
+    # Лиды отменённых заказов: деньги на отклик потрачены, дохода уже не будет.
+    # В маршрут и нагрузку отменённые не входят, но из чистого дня («до» и «после»)
+    # их лид честно вычитается — иначе потери смены прятались бы из ₽/час.
+    cancelled_lead_costs = sum(
+        visit.response_cost for visit in visit_repo.list_for_day(day.id, ("cancelled",))
+    )
 
     before_net_profit, before_minutes, _, _, before_route = calculate_day_profitability(
         day, existing_visits, settings_repo, stats_repo, strict_routing=strict_routing
@@ -274,6 +280,8 @@ def calculate_candidate_impact(
     after_net_profit, after_minutes, _, _, after_route = calculate_day_profitability(
         day, existing_visits + [candidate], settings_repo, stats_repo, strict_routing=strict_routing
     )
+    before_net_profit -= cancelled_lead_costs
+    after_net_profit -= cancelled_lead_costs
     # Парковка у точки кандидата (Фаза 9.4): нижняя граница — реальный расход дня С
     # заказом, поэтому вычитается из чистого «после». «До» её не платит (заказа нет),
     # значит разница after−before честно относит парковку на кандидата.

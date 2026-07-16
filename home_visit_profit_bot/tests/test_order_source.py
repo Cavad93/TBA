@@ -87,6 +87,26 @@ def replace_response_cost(visit):
     return replace(visit, response_cost=0.0)
 
 
+def test_cancelled_paid_lead_still_costs_the_day(config) -> None:
+    """Лид отменённого заказа оплачен — потеря не прячется из ₽/час дня."""
+    with connect(config) as conn:
+        days = WorkDayRepository(conn)
+        visits = VisitRepository(conn)
+        settings = SettingsRepository(conn)
+        day = days.create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        wasted = visits.create_candidate(
+            day.id, "Отменённый", 2000, 5, 15, None, True, lat=59.95, lon=30.36,
+            order_source="Профи", response_cost=500.0,
+        )
+        visits.accept(wasted.id)
+        visits.cancel_visit(wasted.id)
+        fresh = visits.create_candidate(day.id, "Новый", 2000, 0, 0, None, True, lat=59.95, lon=30.36)
+        calc = calculate_candidate_impact(day, fresh, visits, settings)
+    # День пуст (отменённый не в маршруте и не в доходе), но лид потрачен:
+    # чистый «до» — ровно минус цена отклика.
+    assert round(calc.before_net_profit, 2) == -500.0
+
+
 def test_response_cost_lowers_candidate_margin(config) -> None:
     with connect(config) as conn:
         days = WorkDayRepository(conn)
