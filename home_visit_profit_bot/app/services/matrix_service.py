@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from app.models import Point
 from app.repositories import DailyStatsRepository, SettingsRepository
+from app.services.overwork_pricing_service import build_pricing
 from app.services.profitability_service import vehicle_km_cost
 from app.services.routing_service import (
     OutsideCoverageError,
@@ -46,6 +47,7 @@ def build_matrix_response(
     profile: str = "driving",
     route_time_factor: float = 1.0,
     service_minutes: float = 20.0,
+    debt: float = 0.0,
 ) -> dict:
     """Собрать ответ /api/route/matrix: матрица + коэффициенты + флаг fallback.
 
@@ -58,6 +60,18 @@ def build_matrix_response(
     min_marginal_hourly = settings_repo.get_float("min_marginal_hourly_income", min_hourly)
     outside_min_hourly = settings_repo.get_float("outside_zone_min_hourly_income", min_hourly)
     outside_min_extra = settings_repo.get_float("outside_zone_min_extra_payment", 0)
+    # Пороги — ЭФФЕКТИВНЫЕ (с надбавкой за переработку): живая серверная оценка судит
+    # по ним, и офлайн-вердикт телефона обязан судить теми же цифрами, а не базовыми —
+    # иначе в самолётном режиме при высоком долге заказы выглядели бы выгоднее.
+    pricing = build_pricing(
+        debt=debt,
+        min_hourly=min_hourly,
+        outside_min_hourly=outside_min_hourly,
+        min_marginal_hourly=min_marginal_hourly,
+    )
+    min_hourly = pricing.effective_min_hourly
+    min_marginal_hourly = pricing.effective_min_marginal_hourly
+    outside_min_hourly = pricing.effective_outside_min_hourly
     avg_speed = settings_repo.get_float("avg_speed_kmh", 30)
     straight_line_factor = settings_repo.get_float("straight_line_factor", 1.35)
 

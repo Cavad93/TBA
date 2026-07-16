@@ -181,6 +181,30 @@ def estimate_active_day_workload(
     )
 
 
+def day_overwork_debt(
+    day: WorkDay,
+    visits: list[Visit],
+    settings_repo: SettingsRepository,
+    stats_repo: DailyStatsRepository | None = None,
+    location_events: LocationEventRepository | None = None,
+) -> float:
+    """Текущий долг восстановления дня (без кандидата).
+
+    Нужен матрице дня: пороги для офлайн-вердикта должны быть ЭФФЕКТИВНЫМИ
+    (с надбавкой за переработку), как при живой серверной оценке — иначе телефон
+    в самолётном режиме судит по базовым и расходится с сервером при высоком долге.
+    """
+    if not _workload_tracking_enabled(settings_repo):
+        return 0.0
+    return estimate_active_day_workload(
+        day=day,
+        visits=visits,
+        settings_repo=settings_repo,
+        stats_repo=stats_repo,
+        location_events=location_events,
+    ).overwork_index
+
+
 def calculate_candidate_workload(
     *,
     day: WorkDay,

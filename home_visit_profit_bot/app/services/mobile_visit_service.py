@@ -41,6 +41,7 @@ from app.services.matrix_service import build_matrix_response
 from app.services.routing_service import OutsideCoverageError, RoutingError
 from app.services.settings_service import allowed_clinics
 from app.services.visit_navigation import attach_navigation, navigation_settings
+from app.services.workload_service import day_overwork_debt
 from app.services.visit_parking import hint_from_hit, zone_at
 from app.services.parking_cost_service import parking_money
 from app.services.vehicle_service import osrm_profile, transport_type
@@ -390,6 +391,12 @@ class MobileVisitService:
             points.append(Point(label="финиш", lat=finish.lat, lon=finish.lon))
 
         profile = osrm_profile(self.settings)
+        # Долг восстановления дня: пороги в снимке должны быть эффективными (с
+        # надбавкой за переработку), как при живой оценке — офлайн судит теми же.
+        debt = day_overwork_debt(
+            day, completed + accepted, self.settings, self.stats,
+            LocationEventRepository(self.connection),
+        )
         response = build_matrix_response(
             points,
             self.settings,
@@ -397,6 +404,7 @@ class MobileVisitService:
             profile=profile,
             route_time_factor=day.planned_route_time_factor,
             service_minutes=day.planned_service_minutes,
+            debt=debt,
         )
         response["points"] = [
             {"lat": p.lat, "lon": p.lon, "label": p.label, "visit_id": p.visit_id}

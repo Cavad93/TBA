@@ -8,8 +8,31 @@ OSRM (сервер 2 через SSH-туннель).
 from __future__ import annotations
 
 from app.db import connect
+from app.services.matrix_service import build_matrix_response
 from app.services.mobile_visit_service import MobileVisitService
-from app.repositories import VisitRepository, WorkDayRepository
+from app.repositories import SettingsRepository, VisitRepository, WorkDayRepository
+
+
+def test_matrix_thresholds_are_effective_under_overwork(config) -> None:
+    """Пороги снимка — эффективные (с надбавкой за переработку), как у живой оценки.
+
+    Раньше матрица несла базовые пороги, и офлайн-вердикт при высоком долге судил
+    мягче серверного. Долг 70 → ступень +25%.
+    """
+    with connect(config) as connection:
+        settings = SettingsRepository(connection)
+        settings.set("min_hourly_income", "600")
+        response = build_matrix_response([], settings, None, debt=70.0)
+    assert response["coefficients"]["min_hourly_income"] == 750.0
+
+
+def test_matrix_thresholds_stay_base_without_debt(config) -> None:
+    """Без долга пороги остаются базовыми — поведение прежнее."""
+    with connect(config) as connection:
+        settings = SettingsRepository(connection)
+        settings.set("min_hourly_income", "600")
+        response = build_matrix_response([], settings, None)
+    assert response["coefficients"]["min_hourly_income"] == 600.0
 
 
 def test_day_matrix_returns_points_incomes_and_square_matrix(config) -> None:
