@@ -1,16 +1,19 @@
 [Unit]
-# ASR-микросервис (Фаза 14.1) на сервере 2. Слушает ТОЛЬКО 127.0.0.1:5100 — снаружи
-# недоступен, сервер 1 ходит шифрованным SSH-туннелем. Не мешает OSRM (свой venv/порт).
+# ASR-микросервис (Фаза 14.1) на сервере 2. Слушает ТОЛЬКО приватный wg-адрес
+# 10.8.0.2:5100 — снаружи недоступен, сервер 1 ходит шифрованным каналом WireGuard
+# (Ф14.2). Не мешает OSRM (свой venv/порт). Requires wg-quick@wg0: без канала адреса
+# 10.8.0.2 нет, а без канала сервис всё равно бесполезен — стартуем строго после него.
 Description=Vizitorkrut ASR (faster-whisper) microservice
-After=network-online.target
+After=network-online.target wg-quick@wg0.service
 Wants=network-online.target
+Requires=wg-quick@wg0.service
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/opt/asr
 EnvironmentFile=/opt/asr/asr.env
-ExecStart=/opt/asr/.venv/bin/uvicorn asr_service:app --host 127.0.0.1 --port 5100 --workers 1
+ExecStart=/opt/asr/.venv/bin/uvicorn asr_service:app --host 10.8.0.2 --port 5100 --workers 1
 Restart=on-failure
 RestartSec=5
 # Лимит памяти: small int8 ~1–1,5 ГБ; 2 ГБ с запасом. На пике пересборки графа OSRM
