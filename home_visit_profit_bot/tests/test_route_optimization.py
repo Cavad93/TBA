@@ -39,6 +39,80 @@ def test_estimated_route_optimizes_with_coordinates_without_osrm() -> None:
     assert route.legs
 
 
+def _feed_worse_than_optimal() -> tuple[Point, list[Visit], Point]:
+    """Лента расставлена ХУЖЕ оптимального: сначала дальний заказ, потом ближний.
+
+    Старт на юге, финиш на севере. Заказ 1 (первый в Ленте) — у финиша,
+    заказ 2 — у старта. Объезд по Ленте (1→2) гоняет через весь город и обратно,
+    оптимальный (2→1) идёт по пути. Так видно, что вердикт считается по разным
+    маршрутам.
+    """
+    start = Point("start", 59.93, 30.31)
+    finish = Point("finish", 60.10, 30.31)
+    visits = [
+        Visit(1, 1, "accepted", 1, "дальний", "дальний", None, False, 60.05, 30.31, 1000, 0, 0),
+        Visit(2, 1, "accepted", 2, "ближний", "ближний", None, False, 59.94, 30.31, 1000, 0, 0),
+    ]
+    return start, visits, finish
+
+
+def test_feed_order_route_keeps_user_order_and_is_longer_than_optimal() -> None:
+    """Порядок Ленты не переставляется, и его дорога честно длиннее оптимальной.
+
+    Раньше день считался ВСЕГДА по оптимальному маршруту: человек, отключивший
+    авто-оптимизацию, видел чужой (короткий) километраж и завышенный ₽/час.
+    """
+    start, visits, finish = _feed_worse_than_optimal()
+
+    feed = optimize_route_estimated(
+        start, visits, finish, avg_speed_kmh=30, straight_line_factor=1.35,
+        respect_feed_order=True,
+    )
+    optimal = optimize_route_estimated(
+        start, visits, finish, avg_speed_kmh=30, straight_line_factor=1.35,
+    )
+
+    assert feed.order == [1, 2]        # ровно как в Ленте, без перестановки
+    assert optimal.order == [2, 1]     # оптимизатор разворачивает объезд
+    assert feed.total_km > optimal.total_km
+    assert feed.total_minutes > optimal.total_minutes
+
+
+def test_feed_order_matches_optimal_when_feed_is_already_optimal() -> None:
+    """Если Лента уже оптимальна (авто-оптимизация включена) — цифры не меняются."""
+    start, visits, finish = _feed_worse_than_optimal()
+    already_optimal = [visits[1], visits[0]]  # 2 → 1: тот же порядок, что выберет оптимизатор
+
+    feed = optimize_route_estimated(
+        start, already_optimal, finish, avg_speed_kmh=30, straight_line_factor=1.35,
+        respect_feed_order=True,
+    )
+    optimal = optimize_route_estimated(
+        start, already_optimal, finish, avg_speed_kmh=30, straight_line_factor=1.35,
+    )
+
+    assert feed.order == optimal.order == [2, 1]
+    assert feed.total_km == optimal.total_km
+    assert feed.total_minutes == optimal.total_minutes
+
+
+def test_feed_order_puts_new_candidate_last() -> None:
+    """Новый кандидат оценивается последним — как он и встанет в Ленте.
+
+    В Ленте у кандидата ещё нет order_number, поэтому он сортируется в конец;
+    оценка обязана считать его там же, а не втискивать в середину «как удобнее».
+    """
+    start, visits, finish = _feed_worse_than_optimal()
+    candidate = Visit(3, 1, "candidate", None, "новый", "новый", None, False, 59.95, 30.31, 700, 0, 0)
+
+    feed = optimize_route_estimated(
+        start, visits + [candidate], finish, avg_speed_kmh=30, straight_line_factor=1.35,
+        respect_feed_order=True,
+    )
+
+    assert feed.order == [1, 2, 3]
+
+
 def test_osrm_null_matrix_values_raise_instead_of_becoming_zero(monkeypatch) -> None:
     def fake_get_json(url: str, timeout_seconds: float) -> dict:
         return {

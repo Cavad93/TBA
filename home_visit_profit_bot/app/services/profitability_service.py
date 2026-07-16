@@ -193,6 +193,15 @@ def calculate_remaining_route_summary(
     # то, какой граф загрузил.
     profile = osrm_profile(settings_repo)
 
+    # Порядок объезда — тот, который человек реально видит в Ленте. Настройка
+    # `auto_optimize` («Сам строить порядок заказов») — это и есть его решение:
+    # включена → порядок строит приложение, и Лента уже показывает оптимальный;
+    # выключена → порядок расставил он сам, и считать день по ОПТИМАЛЬНОМУ маршруту
+    # значит врать в свою пользу: реальная дорога длиннее, ₽/час ниже, а вердикт
+    # «стоит ехать» — завышен. Раньше маршрут оптимизировался ВСЕГДА, независимо от
+    # этой настройки.
+    respect_feed_order = not settings_repo.get_bool("auto_optimize", True)
+
     # Заказ без координат (дорогу дали руками) не должен ломать автомаршрут всем
     # остальным: раньше ОДИН такой визит переводил весь день в RoutingError, и каждый
     # следующий заказ требовал «км/мин вручную», хотя его адрес прекрасно распознан.
@@ -210,6 +219,7 @@ def calculate_remaining_route_summary(
                 profile=profile,
                 timeout_seconds=server_timeout(),
                 duration_factor=day.planned_route_time_factor,
+                respect_feed_order=respect_feed_order,
             )
             return _merge_manual_visits(future_route, future_manual)
         except RoutingError:
@@ -223,6 +233,7 @@ def calculate_remaining_route_summary(
                         finish_point,
                         avg_speed_kmh=day.planned_avg_speed_kmh,
                         straight_line_factor=settings_repo.get_float("straight_line_factor", 1.35),
+                        respect_feed_order=respect_feed_order,
                     ),
                     future_manual,
                 )

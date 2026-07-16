@@ -19,6 +19,14 @@ class FakeSettings:
         except (TypeError, ValueError):
             return default
 
+    def get_bool(self, key: str, default: bool) -> bool:
+        # Повторяет SettingsRepository.get_bool: заглушка обязана отвечать так же,
+        # как настоящий репозиторий, иначе тест зелёный там, где бой падает.
+        value = self.values.get(key)
+        if value is None:
+            return default
+        return str(value).strip().lower() in {"1", "true", "yes", "on", "да"}
+
 
 def test_outside_base_can_be_accepted_when_hourly_does_not_drop() -> None:
     candidate = Visit(

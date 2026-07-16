@@ -26,6 +26,7 @@ def optimize_route(
     profile: str = "driving",
     timeout_seconds: float = 10,
     duration_factor: float = 1.0,
+    respect_feed_order: bool = False,
 ) -> RouteSummary:
     route_visits = [
         visit
@@ -66,7 +67,7 @@ def optimize_route(
         timeout_seconds=timeout_seconds,
         duration_factor=duration_factor,
     )
-    order_indices = _best_order(matrix, len(route_visits), _anchor_indices(route_visits))
+    order_indices = _order_indices(matrix, route_visits, respect_feed_order=respect_feed_order)
     return _summary_from_order(points, matrix, order_indices)
 
 
@@ -77,6 +78,7 @@ def optimize_route_estimated(
     *,
     avg_speed_kmh: float,
     straight_line_factor: float,
+    respect_feed_order: bool = False,
 ) -> RouteSummary:
     route_visits = [
         visit
@@ -95,8 +97,29 @@ def optimize_route_estimated(
     # estimated=True: дорога по прямой — человек должен видеть, что цифры примерные.
     if not route_visits:
         return replace(_summary_from_order(points, matrix, []), estimated=True)
-    order_indices = _best_order(matrix, len(route_visits), _anchor_indices(route_visits))
+    order_indices = _order_indices(matrix, route_visits, respect_feed_order=respect_feed_order)
     return replace(_summary_from_order(points, matrix, order_indices), estimated=True)
+
+
+def _order_indices(
+    matrix: DistanceMatrix,
+    route_visits: list[Visit],
+    *,
+    respect_feed_order: bool,
+) -> list[int]:
+    """Порядок объезда: либо оптимальный, либо ровно тот, что человек видит в Ленте.
+
+    Когда авто-оптимизация выключена, порядок заказов выбирает человек, и вердикт
+    обязан считаться по ЕГО маршруту: более длинная реальная дорога иначе влияет на
+    доход, а оптимальный порядок нарисовал бы завышенный ₽/час — заказ выглядел бы
+    выгоднее, чем он есть. Визиты приходят уже в порядке Ленты
+    (`VisitRepository.list_for_day`: ORDER BY COALESCE(order_number, id), id), поэтому
+    «порядок Ленты» — это просто их текущая последовательность, а новый кандидат
+    (order_number пуст) встаёт последним — ровно так же, как он встанет в самой Ленте.
+    """
+    if respect_feed_order:
+        return list(range(1, len(route_visits) + 1))
+    return _best_order(matrix, len(route_visits), _anchor_indices(route_visits))
 
 
 def _anchor_indices(route_visits: list[Visit]) -> list[int]:
