@@ -1,0 +1,26 @@
+[Unit]
+# OCR-микросервис (Фаза 15.4) на сервере 2. Слушает ТОЛЬКО приватный wg-адрес
+# 10.8.0.2:5101 — снаружи недоступен, сервер 1 ходит шифрованным каналом WireGuard
+# (Ф14.2). Свой venv/порт, OSRM/ASR не трогает. Requires wg-quick@wg0: без канала адреса
+# 10.8.0.2 нет, а без канала сервис всё равно бесполезен — стартуем строго после него.
+Description=Vizitorkrut OCR (PaddleOCR cyrillic) microservice
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target
+Requires=wg-quick@wg0.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ocr
+EnvironmentFile=/opt/ocr/ocr.env
+ExecStart=/opt/ocr/.venv/bin/uvicorn ocr_service:app --host 10.8.0.2 --port 5101 --workers 1
+Restart=on-failure
+RestartSec=5
+# PaddleOCR mobile-модели на CPU: пик ~1,5–2 ГБ. 3 ГБ с запасом (детект+распознавание).
+MemoryMax=3G
+# Кеши моделей/шрифтов PaddleOCR внутри рабочей папки, чтобы не разрастался $HOME.
+Environment=PADDLE_PDX_MODEL_SOURCE=BOS
+Environment=HOME=/opt/ocr
+
+[Install]
+WantedBy=multi-user.target

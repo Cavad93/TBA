@@ -115,6 +115,18 @@ def asr_token() -> str:
     return os.getenv("ASR_TOKEN", "")
 
 
+def ocr_url() -> str | None:
+    """URL OCR-микросервиса на сервере 2 (Ф15.4). None — распознавание скриншотов
+    выключено (клиент вводит вручную). Значение указывает на локальный конец
+    шифрованного канала WireGuard сервер1↔сервер2 (10.8.0.2:5101)."""
+    return (os.getenv("OCR_URL") or None)
+
+
+def ocr_token() -> str:
+    """Bearer-токен OCR-микросервиса (общий секрет сервер1↔сервер2). В чат/логи не выводить."""
+    return os.getenv("OCR_TOKEN", "")
+
+
 def request_timeout_seconds() -> float:
     raw = os.getenv("REQUEST_TIMEOUT_SECONDS")
     if raw:
