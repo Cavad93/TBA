@@ -40,3 +40,19 @@ def test_kurortny_district_zelenogorsk_query_variant() -> None:
     variants = _address_query_variants("курортный район зеленогорск привокзальная 3")
 
     assert "привокзальная улица 3, зеленогорск, Санкт-Петербург" in variants
+
+
+def test_full_word_corpus_collapses_to_osm_short_form() -> None:
+    """Голосовой ввод диктует «корпус» словом, а в OSM дом хранится как «17 к1»."""
+    variants = _address_query_variants("Комендантский проспект 17 корпус 1")
+
+    assert "комендантский проспект 17 к1" in variants
+    assert "комендантский проспект 17к1" in variants
+
+
+def test_abbreviated_corpus_forms_produce_all_spellings() -> None:
+    for raw in ("пример 17 корп. 1", "пример 17 к.1", "пример 17к1"):
+        variants = _address_query_variants(raw)
+        assert "пример 17 к1" in variants, raw
+        assert "пример 17к1" in variants, raw
+        assert "пример 17 корпус 1" in variants, raw

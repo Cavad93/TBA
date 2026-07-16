@@ -216,6 +216,11 @@ def _best_nominatim_item(payload: list[dict]) -> dict:
     return max(payload, key=lambda item: float(item.get("importance") or 0))
 
 
+# Номер дома с корпусом: «17к1», «17 к 1», «17 к.1», «17 корп. 1», «17 корпус 1».
+# Порядок альтернатив важен: сначала длинные формы, иначе «к» съест начало «корпус».
+_HOUSE_WITH_CORPUS = re.compile(r"\b(\d+)\s*(?:корпус|корп\.?|[кk]\.?)\s*(\d+)\b", re.IGNORECASE)
+
+
 def _address_query_variants(input_text: str) -> list[str]:
     normalized = _normalize_address_text(input_text)
     variants = [input_text.strip()]
@@ -224,12 +229,12 @@ def _address_query_variants(input_text: str) -> list[str]:
     for variant in _suburb_address_variants(normalized):
         if variant not in variants:
             variants.append(variant)
-    expanded_house = re.sub(r"\b(\d+)\s*[кk]\s*(\d+)\b", r"\1 корпус \2", normalized, flags=re.IGNORECASE)
-    if expanded_house not in variants:
-        variants.append(expanded_house)
-    spaced_house = re.sub(r"\b(\d+)\s*[кk]\s*(\d+)\b", r"\1 к\2", normalized, flags=re.IGNORECASE)
-    if spaced_house not in variants:
-        variants.append(spaced_house)
+    # В OSM по Петербургу дом с корпусом чаще всего записан как «17 к1», а голосовой
+    # ввод диктует «17 корпус 1» — поэтому спрашиваем все написания, короткое первым.
+    for replacement in (r"\1 к\2", r"\1к\2", r"\1 корпус \2"):
+        candidate = _HOUSE_WITH_CORPUS.sub(replacement, normalized)
+        if candidate not in variants:
+            variants.append(candidate)
     return variants
 
 
