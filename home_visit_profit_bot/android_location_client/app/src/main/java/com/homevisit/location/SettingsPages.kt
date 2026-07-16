@@ -60,7 +60,10 @@ internal fun BaseZonesPage(appSettings: AppSettingsUiState, workActions: WorkAct
 
     // Держим зоны JSON-строкой: так состояние переживает поворот экрана без своего Saver.
     var zonesJson by rememberSaveable(field?.textValue) { mutableStateOf(field?.textValue ?: "[]") }
-    val zones = parseBaseZones(zonesJson)
+    // dropBlank = false: только что добавленная зона пуста по определению, и выброси мы
+    // её здесь — карточка исчезала бы на следующем кадре, а «Добавить зону» выглядела бы
+    // сломанной. Пустые отсекаются ниже, на сохранении (и ещё раз на сервере).
+    val zones = parseBaseZones(zonesJson, dropBlank = false)
 
     ScreenColumn {
         ZonesIntroCard()

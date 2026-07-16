@@ -1324,7 +1324,13 @@ class HomeVisitRepository private constructor(
                         type = type,
                         textValue = when (type) {
                             SettingType.Number -> formatSettingNumber(fieldJson.optDouble("value", 0.0))
-                            SettingType.Text, SettingType.Zones, SettingType.Date -> fieldJson.optString("value")
+                            // Choice сюда обязан входить: без него значение выпадающего
+                            // списка не читалось (else -> ""), список рисовался пустым, а
+                            // при возврате на экран — снова пустым. Выглядело как «ничего
+                            // не сохраняется», хотя сервер честно хранил выбор: пустой был
+                            // не ответ сервера, а то, что клиент из него взял.
+                            SettingType.Text, SettingType.Zones, SettingType.Date, SettingType.Choice ->
+                                fieldJson.optString("value")
                             else -> ""
                         },
                         boolValue = type == SettingType.Bool && fieldJson.optBoolean("value", false),

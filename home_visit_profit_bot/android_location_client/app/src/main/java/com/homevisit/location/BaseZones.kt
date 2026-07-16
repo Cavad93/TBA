@@ -15,7 +15,16 @@ data class BaseZone(
     val districts: List<String> = emptyList(),
 )
 
-internal fun parseBaseZones(raw: String): List<BaseZone> {
+/**
+ * Разбор зон обслуживания.
+ *
+ * [dropBlank] — выбрасывать ли пустые зоны. При СОХРАНЕНИИ выбрасывать надо (пустая
+ * зона на сервере не нужна), а при РЕДАКТИРОВАНИИ нельзя: только что добавленная зона
+ * пуста по определению. Экран заново разбирает JSON на каждой перерисовке, поэтому
+ * свежедобавленная карточка исчезала на следующем кадре — кнопка «Добавить зону»
+ * выглядела мёртвой, хотя честно отрабатывала.
+ */
+internal fun parseBaseZones(raw: String, dropBlank: Boolean = true): List<BaseZone> {
     if (raw.isBlank()) return emptyList()
     return runCatching {
         val array = JSONArray(raw)
@@ -30,7 +39,8 @@ internal fun parseBaseZones(raw: String): List<BaseZone> {
                 city = item.optString("city").trim(),
                 districts = districts,
             )
-            if (zone.city.isBlank() && zone.region.isBlank() && zone.districts.isEmpty()) null else zone
+            val blank = zone.city.isBlank() && zone.region.isBlank() && zone.districts.isEmpty()
+            if (dropBlank && blank) null else zone
         }
     }.getOrDefault(emptyList())
 }
