@@ -239,6 +239,7 @@ class MainActivity : ComponentActivity() {
                     onRejectCandidate = viewModel::rejectCandidate,
                     onCompleteCurrentVisit = viewModel::completeCurrentVisit,
                     onCancelCurrentVisit = viewModel::cancelCurrentVisit,
+                    onCancelInRoute = viewModel::cancelInRouteCurrentVisit,
                     onCheckAutoClose = viewModel::checkAutoClose,
                     onUndoAutoClose = viewModel::undoAutoClose,
                     onDismissAutoClose = viewModel::dismissAutoClose,
@@ -470,6 +471,8 @@ internal data class WorkActions(
     val onRejectCandidate: () -> Unit,
     val onCompleteCurrentVisit: () -> Unit,
     val onCancelCurrentVisit: () -> Unit,
+    /** Клиент отменил, когда уже ехали (Ф11.3): фиксируем потери. */
+    val onCancelInRoute: () -> Unit,
     /** Проверить, не пора ли закрыть заказ самому (человек долго стоит у адреса). */
     val onCheckAutoClose: () -> Unit,
     /** Вернуть заказ, который приложение закрыло само. */
@@ -535,6 +538,7 @@ internal fun HomeVisitApp(
     onRejectCandidate: (String, String) -> Unit,
     onCompleteCurrentVisit: (String, String) -> Unit,
     onCancelCurrentVisit: (String, String) -> Unit,
+    onCancelInRoute: (String, String) -> Unit,
     onCheckAutoClose: (String, String) -> Unit,
     onUndoAutoClose: (String, String) -> Unit,
     onDismissAutoClose: () -> Unit,
@@ -617,6 +621,7 @@ internal fun HomeVisitApp(
         onRejectCandidate = { onRejectCandidate(serverUrl, apiKey) },
         onCompleteCurrentVisit = { onCompleteCurrentVisit(serverUrl, apiKey) },
         onCancelCurrentVisit = { onCancelCurrentVisit(serverUrl, apiKey) },
+        onCancelInRoute = { onCancelInRoute(serverUrl, apiKey) },
         onCheckAutoClose = { onCheckAutoClose(serverUrl, apiKey) },
         onUndoAutoClose = { onUndoAutoClose(serverUrl, apiKey) },
         onDismissAutoClose = onDismissAutoClose,

@@ -624,6 +624,20 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /** Отмена в пути (Ф11.3): клиент отменил, когда уже ехали — фиксируем потери на сервере. */
+    fun cancelInRouteCurrentVisit(serverUrl: String, apiKey: String) {
+        viewModelScope.launch {
+            val activeVisit = uiState.value.activeVisit ?: return@launch
+            val serverId = activeVisit.serverId ?: return@launch
+            val ok = repository.cancelInRoute(serverUrl, apiKey, serverId)
+            if (ok) {
+                repository.markVisitStatus(activeVisit.localId, VisitStatus.Cancelled)
+                gpsHintState.value = GpsHintUiState(message = "Отменён в пути — потери зафиксированы")
+                refreshRouteInternal(serverUrl, apiKey)
+            }
+        }
+    }
+
     fun refreshRoute(serverUrl: String, apiKey: String) {
         viewModelScope.launch {
             refreshRouteInternal(serverUrl, apiKey)

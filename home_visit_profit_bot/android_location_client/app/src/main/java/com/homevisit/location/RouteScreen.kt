@@ -315,6 +315,7 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
                 onCopyCoordinates = { navTarget?.let(copyCoordinates) },
                 onComplete = workActions.onCompleteCurrentVisit,
                 onCancel = workActions.onCancelCurrentVisit,
+                onCancelInRoute = workActions.onCancelInRoute,
             )
             UpNextList(orders = orders, activeLocalId = uiState.activeVisit?.localId)
         }
@@ -562,6 +563,7 @@ internal fun FocusOrderCard(
     onCopyCoordinates: () -> Unit,
     onComplete: () -> Unit,
     onCancel: () -> Unit,
+    onCancelInRoute: () -> Unit,
 ) {
     // GPS зафиксировал стоянку у этого адреса — значит человек доехал.
     val arrived = gpsHint.hint != null
@@ -626,6 +628,15 @@ internal fun FocusOrderCard(
                     OutlinedButton(modifier = Modifier.weight(1f), enabled = active.serverId != null, onClick = onCancel) {
                         Text("Отмена")
                     }
+                }
+                // Клиент отменил, когда уже ехали (Ф11.3): фиксируем реальные потери одним
+                // тапом, ничего не спрашивая в моменте — человек за рулём.
+                TextButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = active.serverId != null,
+                    onClick = onCancelInRoute,
+                ) {
+                    Text("Клиент отменил (я уже ехал)", color = VerdictColors.skip)
                 }
             }
         }

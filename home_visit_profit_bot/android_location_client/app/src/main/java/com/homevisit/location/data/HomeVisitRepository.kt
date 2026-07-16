@@ -773,6 +773,26 @@ class HomeVisitRepository private constructor(
         response.optBoolean("ok", false)
     }
 
+    /**
+     * Отмена в пути (Ф11.3): клиент отменил, когда уже ехали. Сервер фиксирует потери
+     * (км×себестоимость + время×норма). driven_km/minutes по GPS-треку — опционально;
+     * не прислали — сервер оценит по плановому подъезду.
+     */
+    suspend fun cancelInRoute(
+        serverUrl: String,
+        apiKey: String,
+        visitId: Int,
+        drivenKm: Double? = null,
+        drivenMinutes: Double? = null,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val payload = JSONObject()
+        if (drivenKm != null) payload.put("driven_km", drivenKm)
+        if (drivenMinutes != null) payload.put("driven_minutes", drivenMinutes)
+        val response = postJson(normalizeApiUrl(serverUrl, "/api/visits/$visitId/cancel-in-route"), apiKey, payload)
+            ?: return@withContext false
+        response.optBoolean("ok", false)
+    }
+
     suspend fun updateDayFinish(serverUrl: String, apiKey: String, address: String): String? = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("finish_address", address)
         val response = postJson(normalizeApiUrl(serverUrl, "/api/day/finish"), apiKey, payload) ?: return@withContext null
