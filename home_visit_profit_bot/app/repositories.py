@@ -53,6 +53,11 @@ def _work_day_from_row(row: Any | None) -> WorkDay | None:
         toll_compensation=float(row["toll_compensation"] or 0),
         fuel_expenses=float(row["fuel_expenses"] or 0),
         fuel_liters=float(row["fuel_liters"] or 0),
+        # Расходы на машину и аренда НЕ читались в модель — оставались дефолтным
+        # нулём у всех читателей WorkDay (live-экономика, безубыточность, отчёты),
+        # хотя колонки в БД есть и с Этапа 6 в них реально пишутся деньги.
+        vehicle_expenses=float(row["vehicle_expenses"] or 0),
+        vehicle_rent=float(row["vehicle_rent"] or 0),
         break_hours_before=float(row["break_hours_before"] or 0),
     )
 

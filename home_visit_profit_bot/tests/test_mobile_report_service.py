@@ -6,6 +6,29 @@ from app.repositories import OfficeRepository, TelemedRepository, VisitRepositor
 from app.services.mobile_report_service import MobileReportService, parse_report_period
 
 
+def test_active_report_counts_vehicle_costs_and_leads(config) -> None:
+    """Активный отчёт видит аренду/расходы машины (Этап 6) и лиды (Этапы 4/7).
+
+    Раньше он считал себестоимость своей формулой («заправка или км×настройка»
+    + топливо×0.8) и не знал ни vehicle_rent, ни цены откликов.
+    """
+    with connect(config) as connection:
+        days = WorkDayRepository(connection)
+        visits = VisitRepository(connection)
+        day = days.create("Дом", "Дом", 30, 20)
+        paid = visits.create_candidate(
+            day.id, "Профи-заказ", 2000, 5, 15, None, True,
+            order_source="Профи", response_cost=500.0,
+        )
+        visits.accept(paid.id)
+        days.add_money(day.id, "vehicle_rent", 1200.0)
+
+        payload = MobileReportService(connection).active_summary()
+
+    # Аренда 1200 + лид 500 вошли в расходы дня (плюс дорожная себестоимость).
+    assert payload["summary"]["total_expenses"] >= 1700.0
+
+
 def test_active_mobile_report_includes_clinic_breakdown(config) -> None:
 
     with connect(config) as connection:

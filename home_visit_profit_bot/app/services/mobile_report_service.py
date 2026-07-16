@@ -19,7 +19,7 @@ from app.repositories import (
 )
 from app.services.cancel_stats_service import cancel_lead_stats
 from app.services.clinic_report_service import ClinicBreakdown, build_active_clinic_breakdown, build_period_clinic_breakdown
-from app.services.profitability_service import fuel_cost_per_km as settings_fuel_cost_per_km
+from app.services.profitability_service import calculate_car_expenses, vehicle_km_cost
 from app.services.workload_service import estimate_active_day_workload
 
 
@@ -51,13 +51,22 @@ class MobileReportService:
         telemed_entries = self.telemed.list_for_day(day.id)
         office_entries = self.office.list_for_day(day.id)
 
-        fuel_cost_per_km = settings_fuel_cost_per_km(self.settings)
-        amortization_factor = self.settings.get_float("amortization_factor", 0.8)
         route_km = sum(visit.estimated_extra_km for visit in active_visits)
         route_minutes = sum(visit.estimated_extra_minutes for visit in active_visits)
-        fuel_expenses = day.fuel_expenses if day.fuel_expenses > 0 else route_km * fuel_cost_per_km
-        amortization_expenses = fuel_expenses * amortization_factor
-        total_expenses = _active_expenses(day, fuel_expenses, amortization_expenses)
+        # Себестоимость — ТОЙ ЖЕ моделью, что вердикты и live-день (vehicle_km_cost:
+        # измеренные заправки/расходы, надбавки, кто платит). Раньше здесь жила своя
+        # арифметика («заправка дня или км×настройка» + топливо×0.8) — активный отчёт
+        # расходился с оценками, а полный бак считался расходом одной смены.
+        cost = vehicle_km_cost(self.settings, self.stats, route_time_factor=day.planned_route_time_factor)
+        fuel_expenses, amortization_expenses, _ = calculate_car_expenses(route_km, cost)
+        # Лиды (цена отклика) — расход дня, как в live-экономике и истории
+        # (Этапы 4/7/12 аудита): оплачены и у отменённых.
+        lead_costs = sum(
+            visit.response_cost
+            for visit in day_visits
+            if visit.status in {"accepted", "completed", "candidate", "cancelled"}
+        )
+        total_expenses = _active_expenses(day, fuel_expenses, amortization_expenses) + lead_costs
         visit_income = sum(visit.income for visit in active_visits)
         gross_income = (
             visit_income
@@ -227,6 +236,10 @@ def _active_expenses(day: WorkDay, fuel_expenses: float, amortization_expenses: 
     return (
         fuel_expenses
         + amortization_expenses
+        # Расходы на машину и аренда: с Этапа 6 аудита они реально записываются
+        # в день — активный отчёт обязан их видеть, как видит их закрытие смены.
+        + day.vehicle_expenses
+        + day.vehicle_rent
         + day.parking_expenses
         + day.food_expenses
         + day.food_meal_expenses
