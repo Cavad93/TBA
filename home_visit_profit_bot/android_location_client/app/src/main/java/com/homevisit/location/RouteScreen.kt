@@ -606,6 +606,24 @@ internal fun FocusOrderCard(
                     onCopyCoordinates = onCopyCoordinates,
                 )
                 GpsHintBlock(gpsHint = gpsHint, onRefresh = onRefreshGpsHint, onComplete = onComplete)
+                // Таймер простоя на точке (Ф10.4): пока ждёте, ₽/час тает на глазах —
+                // ожидание молча съедает выгодность, и это должно быть видно.
+                val dwell = gpsHint.hint?.dwellMinutes ?: 0.0
+                if (arrived && dwell > 0.5 && active.income > 0) {
+                    val ratePerHour = (active.income / (dwell / 60.0)).toInt()
+                    Text(
+                        "Ждёте ${dwell.toInt()} мин · пока выходит $ratePerHour ₽/час (тает)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = VerdictColors.edge,
+                    )
+                    // Живой пересчёт раз в минуту — только пока экран открыт и мы на точке.
+                    LaunchedEffect(active.localId) {
+                        while (true) {
+                            kotlinx.coroutines.delay(60_000)
+                            onRefreshGpsHint()
+                        }
+                    }
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (arrived) {
                         Button(
