@@ -1,0 +1,23 @@
+[Unit]
+# ASR-микросервис (Фаза 14.1) на сервере 2. Слушает ТОЛЬКО 127.0.0.1:5100 — снаружи
+# недоступен, сервер 1 ходит шифрованным SSH-туннелем. Не мешает OSRM (свой venv/порт).
+Description=Vizitorkrut ASR (faster-whisper) microservice
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/asr
+EnvironmentFile=/opt/asr/asr.env
+ExecStart=/opt/asr/.venv/bin/uvicorn asr_service:app --host 127.0.0.1 --port 5100 --workers 1
+Restart=on-failure
+RestartSec=5
+# Лимит памяти: small int8 ~1–1,5 ГБ; 2 ГБ с запасом. На пике пересборки графа OSRM
+# (раз в 2 месяца) refresh.sh останавливает этот юнит и поднимает после.
+MemoryMax=2G
+# Кеш моделей HuggingFace внутри рабочей папки, чтобы не разрастался $HOME.
+Environment=HF_HOME=/opt/asr/hf_cache
+
+[Install]
+WantedBy=multi-user.target
