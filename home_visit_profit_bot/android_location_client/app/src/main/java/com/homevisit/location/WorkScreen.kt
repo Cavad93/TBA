@@ -4,6 +4,10 @@ package com.homevisit.location
 
 import android.Manifest
 import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.Mic
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
@@ -475,6 +479,21 @@ internal fun EvaluateForm(
     val routeMinutes = parseNumber(routeMinutesText)
     val hasManualRoute = routeKm != null && routeMinutes != null
 
+    // Голосовой ввод адреса (Ф14.4): системный распознаватель телефона — мгновенно, на
+    // устройстве, без нашего сервера. Распознанный текст ложится в поле и правится до
+    // подтверждения (контроль у человека). На телефонах без Google-сервисов кнопки может
+    // не быть — там ручной ввод (серверный ASR-фолбэк подключится по готовности канала Ф14.2).
+    val voiceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val spoken = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+            if (!spoken.isNullOrBlank()) address = spoken
+        }
+    }
+
     InputCard("Оценить заказ") {
         OutlinedTextField(
             modifier = Modifier.fillMaxWidth(),
@@ -482,6 +501,18 @@ internal fun EvaluateForm(
             onValueChange = { address = it },
             label = { Text("Адрес") },
             singleLine = false,
+            trailingIcon = {
+                IconButton(onClick = {
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Назовите адрес")
+                    }
+                    runCatching { voiceLauncher.launch(intent) }
+                }) {
+                    Icon(Icons.Filled.Mic, contentDescription = "Голосовой ввод адреса")
+                }
+            },
         )
         // Чипы недавних адресов (Ф13.1): тап = адрес в один тап, повторный резолвится
         // мгновенно из learned-кеша (Ф13.2). Показываем, только когда поле пустое.
