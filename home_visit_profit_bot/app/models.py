@@ -132,6 +132,9 @@ class RouteSummary:
     total_minutes: float
     order: list[int]
     legs: list[RouteLeg] | None = None
+    # Дорога посчитана по прямой (сервис карт молчал или адрес вне покрытия) —
+    # цифры приблизительные, и человек должен об этом знать, а не верить им слепо.
+    estimated: bool = False
 
 
 @dataclass(frozen=True)

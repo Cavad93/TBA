@@ -209,8 +209,13 @@ internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions)
         return
     }
 
-    var startAddress by rememberSaveable { mutableStateOf("Дом") }
-    var finishAddress by rememberSaveable { mutableStateOf("Дом") }
+    // Дефолты — из настроек (default_start/finish_address); литерал «Дом» — лишь
+    // последний фолбэк, и он срабатывает только у тех, кто завёл одноимённый шаблон.
+    // Ключ rememberSaveable — сам дефолт: настройки догрузились → поле обновилось.
+    val defaultStart = uiState.appSettings.settingText("default_start_address").ifBlank { "Дом" }
+    val defaultFinish = uiState.appSettings.settingText("default_finish_address").ifBlank { "Дом" }
+    var startAddress by rememberSaveable(defaultStart) { mutableStateOf(defaultStart) }
+    var finishAddress by rememberSaveable(defaultFinish) { mutableStateOf(defaultFinish) }
     var startOdometerText by rememberSaveable { mutableStateOf("") }
     val startOdometer = parseNumber(startOdometerText) ?: 0.0
 
@@ -624,8 +629,9 @@ internal fun EvaluateForm(
             // просьбе — проводка на бэкенде (order_source/response_cost) сохранена, вернуть
             // = добавить сюда два поля и передать их в onCalculate вместо null.
             // Сервер не уверен в адресе — предлагаем 2–3 варианта. Тап = подтверждение,
-            // координаты выбранного уходят в расчёт как ручная точка. Молча ничего не берём.
-            if (candidate.addressCandidates.isNotEmpty()) {
+            // координаты выбранного уходят в расчёт как ручная точка. Молча ничего не
+            // берём. Адрес исправили — старый список неактуален и прячется.
+            if (candidate.addressCandidates.isNotEmpty() && resolved == candidate.candidatesForAddress) {
                 AddressCandidatesList(candidate.addressCandidates, onPickCandidate)
             }
             // Плашка живёт, пока в поле тот же адрес, что не распознался. Исправили
@@ -648,7 +654,8 @@ internal fun EvaluateForm(
         if (personalMode) {
             // Сервер не уверен в адресе (опечатка, два похожих проспекта) — те же
             // 2–3 кандидата одним тапом, что и в рабочем режиме. Молча не подставляем.
-            if (personalTrip.addressCandidates.isNotEmpty()) {
+            // Адрес исправили — старый список неактуален и прячется.
+            if (personalTrip.addressCandidates.isNotEmpty() && resolved == personalTrip.candidatesForAddress) {
                 AddressCandidatesList(personalTrip.addressCandidates, onPickCandidate)
             }
             Button(
@@ -706,7 +713,7 @@ internal fun EvaluateForm(
  * как ручная точка; сервер молча ничего не подставлял.
  */
 @Composable
-private fun AddressCandidatesList(
+internal fun AddressCandidatesList(
     candidates: List<AddressCandidate>,
     onPick: (AddressCandidate) -> Unit,
 ) {

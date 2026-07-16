@@ -328,6 +328,9 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     /** Отложенная личная оценка: ждёт, пока человек выберет вариант адреса. */
     private var pendingPersonal: PendingPersonal? = null
 
+    /** Отложенная смена старта/финиша: ждёт выбора варианта адреса в Ленте. */
+    private var pendingAnchor: PendingAnchor? = null
+
     fun calculateVisitCandidate(
         serverUrl: String,
         apiKey: String,
@@ -356,10 +359,15 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                     // Не уверены — пусть выберет человек (даже единственный вариант
                     // подтверждается одним тапом, а не подставляется молча и не
                     // теряется). Расчёт откладываем.
+                    // Один взведённый выбор за раз: старое ожидание якоря/личной
+                    // поездки не должно перехватить тап по кандидату заказа.
+                    pendingAnchor = null
+                    pendingPersonal = null
                     pendingCandidate = PendingCandidate(serverUrl, apiKey, address, income, clinic, orderSource, responseCost)
                     candidateState.value = CandidateUiState(
                         message = "Уточните адрес — выберите вариант",
                         addressCandidates = suggestion.candidates,
+                        candidatesForAddress = address,
                     )
                     return@launch
                 }
@@ -393,10 +401,14 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 serverUrl, apiKey, address, lat = gps?.first, lon = gps?.second,
             )
             if (suggestion.resolved == null && suggestion.candidates.isNotEmpty()) {
+                // Один взведённый выбор за раз (см. pickAddressCandidate).
+                pendingAnchor = null
+                pendingCandidate = null
                 pendingPersonal = PendingPersonal(serverUrl, apiKey, address)
                 personalState.value = PersonalTripUi(
                     message = "Уточните адрес — выберите вариант",
                     addressCandidates = suggestion.candidates,
+                    candidatesForAddress = address,
                 )
                 return@launch
             }
@@ -500,7 +512,16 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
      * выбранного варианта (уходят как ручная точка).
      */
     fun pickAddressCandidate(candidate: AddressCandidate) {
-        // Кандидаты бывают из двух потоков: рабочая оценка и личная поездка.
+        // Кандидаты бывают из трёх потоков: смена старта/финиша в Ленте, личная
+        // поездка и рабочая оценка. Взведён может быть только один одновременно.
+        pendingAnchor?.let { anchor ->
+            pendingAnchor = null
+            viewModelScope.launch {
+                routeState.value = routeState.value.copy(isLoading = true, anchorCandidates = emptyList(), anchorTarget = "")
+                applyAnchorUpdate(anchor.serverUrl, anchor.apiKey, anchor.target, candidate.label, candidate.lat, candidate.lon)
+            }
+            return
+        }
         if (pendingPersonal != null) {
             pickPersonalCandidate(candidate)
             return
@@ -579,6 +600,13 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 // Сервер принимает ручные км/мин и без координат — предлагаем оба пути:
                 // уточнить адрес (снова пройдёт через подсказки) или дать дорогу руками.
                 message = "Сервер не нашёл адрес. Уточните его или введите километры и минуты вручную.",
+                needsManualRoute = true,
+                warnings = result.warnings,
+            )
+            result.reason == "geocoding_failed" -> CandidateUiState(
+                // Сервис карт лёг по сети — раньше это был глухой тупик без плашки.
+                // Ручные км/мин сервер примет и без геокодера.
+                message = "Сервис карт недоступен. Введите километры и минуты вручную или повторите позже.",
                 needsManualRoute = true,
                 warnings = result.warnings,
             )
@@ -824,56 +852,95 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun updateFinish(serverUrl: String, apiKey: String, address: String) {
+    fun updateFinish(serverUrl: String, apiKey: String, address: String) =
+        updateAnchor(serverUrl, apiKey, target = "finish", address = address)
+
+    fun updateStart(serverUrl: String, apiKey: String, address: String) =
+        updateAnchor(serverUrl, apiKey, target = "start", address = address)
+
+    /**
+     * Смена старта/финиша через слой подсказок (Ф2), как у заказов: DaData прощает
+     * опечатки, неоднозначность («Ленина 40» в двух городах) отдаём человеку на выбор,
+     * а координаты resolved-варианта уходят на сервер — он тогда не может ответить
+     * needs_coordinates, и адрес гарантированно сохраняется.
+     */
+    private fun updateAnchor(serverUrl: String, apiKey: String, target: String, address: String) {
         viewModelScope.launch {
+            val what = if (target == "start") "старта" else "финиша"
             if (serverUrl.isBlank() || apiKey.isBlank()) {
                 routeState.value = routeState.value.copy(message = "Заполните URL сервера и API ключ")
                 return@launch
             }
             if (address.isBlank()) {
-                routeState.value = routeState.value.copy(message = "Введите новый адрес финиша")
+                routeState.value = routeState.value.copy(message = "Введите новый адрес $what")
                 return@launch
             }
-            routeState.value = routeState.value.copy(isLoading = true, message = "Меняю финиш...")
-            when (repository.updateDayFinish(serverUrl, apiKey, address)) {
-                "finish_updated" -> {
-                    // Локальная база — источник адреса для карточек Ленты: без этого
-                    // успешная правка выглядела «не сохранившейся».
-                    repository.updateLocalDayAddresses(finishAddress = address)
-                    refreshRouteInternal(serverUrl, apiKey)
-                    routeState.value = routeState.value.copy(message = "Финиш изменён, маршрут пересчитан")
-                }
-                "needs_coordinates" -> routeState.value = routeState.value.copy(isLoading = false, message = "Сервер не нашёл адрес финиша. Уточните адрес.")
-                "geocoding_failed" -> routeState.value = routeState.value.copy(isLoading = false, message = "Не удалось геокодировать финиш")
-                else -> routeState.value = routeState.value.copy(isLoading = false, message = "Не удалось изменить финиш")
+            pendingAnchor = null
+            routeState.value = routeState.value.copy(
+                isLoading = true,
+                message = if (target == "start") "Меняю старт..." else "Меняю финиш...",
+                anchorCandidates = emptyList(),
+                anchorTarget = "",
+            )
+            val gps = lastKnownGps()
+            val suggestion = repository.suggestAddress(serverUrl, apiKey, address, lat = gps?.first, lon = gps?.second)
+            if (suggestion.resolved == null && suggestion.candidates.isNotEmpty()) {
+                // Один взведённый выбор за раз (см. pickAddressCandidate).
+                pendingCandidate = null
+                pendingPersonal = null
+                pendingAnchor = PendingAnchor(serverUrl, apiKey, target)
+                routeState.value = routeState.value.copy(
+                    isLoading = false,
+                    message = "Уточните адрес $what — выберите вариант",
+                    anchorCandidates = suggestion.candidates,
+                    anchorTarget = target,
+                )
+                return@launch
             }
+            applyAnchorUpdate(serverUrl, apiKey, target, address, suggestion.resolved?.lat, suggestion.resolved?.lon)
         }
     }
 
-    fun updateStart(serverUrl: String, apiKey: String, address: String) {
-        viewModelScope.launch {
-            if (serverUrl.isBlank() || apiKey.isBlank()) {
-                routeState.value = routeState.value.copy(message = "Заполните URL сервера и API ключ")
-                return@launch
-            }
-            if (address.isBlank()) {
-                routeState.value = routeState.value.copy(message = "Введите новый адрес старта")
-                return@launch
-            }
-            routeState.value = routeState.value.copy(isLoading = true, message = "Меняю старт...")
-            when (repository.updateDayStart(serverUrl, apiKey, address)) {
-                "start_updated" -> {
-                    // Локальная база — источник адреса для карточек Ленты: без этого
-                    // успешная правка выглядела «не сохранившейся».
-                    repository.updateLocalDayAddresses(startAddress = address)
-                    refreshRouteInternal(serverUrl, apiKey)
-                    routeState.value = routeState.value.copy(message = "Старт изменён, маршрут пересчитан")
-                }
-                "needs_coordinates" -> routeState.value = routeState.value.copy(isLoading = false, message = "Сервер не нашёл адрес старта. Уточните адрес.")
-                "geocoding_failed" -> routeState.value = routeState.value.copy(isLoading = false, message = "Не удалось геокодировать старт")
-                else -> routeState.value = routeState.value.copy(isLoading = false, message = "Не удалось изменить старт")
-            }
+    /** Достроить смену старта/финиша: адрес и координаты (если слой подсказок их дал). */
+    private suspend fun applyAnchorUpdate(
+        serverUrl: String,
+        apiKey: String,
+        target: String,
+        address: String,
+        lat: Double?,
+        lon: Double?,
+    ) {
+        val what = if (target == "start") "старта" else "финиша"
+        val reason = if (target == "start") {
+            repository.updateDayStart(serverUrl, apiKey, address, lat, lon)
+        } else {
+            repository.updateDayFinish(serverUrl, apiKey, address, lat, lon)
         }
+        val expected = if (target == "start") "start_updated" else "finish_updated"
+        if (reason == expected) {
+            // Локальная база — источник адреса для карточек Ленты: без этого успешная
+            // правка выглядела «не сохранившейся».
+            if (target == "start") {
+                repository.updateLocalDayAddresses(startAddress = address)
+            } else {
+                repository.updateLocalDayAddresses(finishAddress = address)
+            }
+            refreshRouteInternal(serverUrl, apiKey)
+            routeState.value = routeState.value.copy(
+                message = if (target == "start") "Старт изменён, маршрут пересчитан" else "Финиш изменён, маршрут пересчитан",
+                anchorCandidates = emptyList(),
+                anchorTarget = "",
+            )
+            return
+        }
+        routeState.value = routeState.value.copy(
+            isLoading = false,
+            message = when (reason) {
+                "needs_coordinates" -> "Сервер не нашёл адрес $what. Уточните адрес."
+                "geocoding_failed" -> "Сервис карт недоступен — не удалось проверить адрес $what. Попробуйте позже."
+                else -> "Не удалось изменить адрес $what"
+            },
+        )
     }
 
     /** Ручная перестановка заказов (↑↓ в Ленте): сохраняем порядок и обновляем маршрут. */
@@ -1123,7 +1190,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             val workDayId = ensureActiveDay()
             routeState.value = routeState.value.copy(isLoading = true, message = "Добавляю работу на точке...")
-            val ok = repository.addOnSiteVisit(
+            val reason = repository.addOnSiteVisit(
                 serverUrl = serverUrl,
                 apiKey = apiKey,
                 workDayId = workDayId,
@@ -1136,9 +1203,17 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             )
             routeState.value = routeState.value.copy(
                 isLoading = false,
-                message = if (ok) "Работа на точке добавлена в Ленту" else "Не удалось добавить: проверьте адрес и связь",
+                // «Адрес не распознан» и «нет сети» — разные проблемы: раньше обе
+                // сливались в одно сообщение, и человек не знал, что чинить.
+                message = when (reason) {
+                    "ok" -> "Работа на точке добавлена в Ленту"
+                    "needs_coordinates" -> "Адрес точки не распознан — уточните его (например, добавьте город)."
+                    "geocoding_failed" -> "Сервис карт недоступен — попробуйте добавить точку позже."
+                    "network_error" -> "Нет связи с сервером — попробуйте позже."
+                    else -> "Не удалось добавить: проверьте адрес и связь"
+                },
             )
-            if (ok) {
+            if (reason == "ok") {
                 refreshRoute(serverUrl, apiKey)
             }
         }
@@ -1408,6 +1483,8 @@ data class CandidateUiState(
     val parking: ParkingHint? = null,
     /** Сервер не уверен в адресе — 2–3 варианта на выбор (Фаза 2). Пусто = выбирать нечего. */
     val addressCandidates: List<AddressCandidate> = emptyList(),
+    /** Для какого ввода даны кандидаты: правка адреса делает старый список неактуальным. */
+    val candidatesForAddress: String = "",
     /** Оговорки честности оценки с сервера: нет старта смены, мало заказов в ленте. */
     val warnings: List<String> = emptyList(),
 )
@@ -1422,6 +1499,8 @@ data class PersonalTripUi(
     val message: String = "",
     /** Сервер не уверен в адресе — 2–3 варианта на выбор (Фаза 2), как в рабочем режиме. */
     val addressCandidates: List<AddressCandidate> = emptyList(),
+    /** Для какого ввода даны кандидаты: правка адреса делает старый список неактуальным. */
+    val candidatesForAddress: String = "",
 )
 
 /** Отложенная личная поездка: всё, чтобы докрутить оценку после выбора варианта адреса. */
@@ -1429,6 +1508,13 @@ private data class PendingPersonal(
     val serverUrl: String,
     val apiKey: String,
     val address: String,
+)
+
+/** Отложенная смена старта/финиша: чей адрес меняем и куда слать выбор. */
+private data class PendingAnchor(
+    val serverUrl: String,
+    val apiKey: String,
+    val target: String,
 )
 
 /** Отложенный до выбора адреса запрос оценки: всё, чтобы докрутить расчёт после тапа. */
@@ -1450,6 +1536,10 @@ data class RouteUiState(
     val pendingNav: PendingNav? = null,
     /** Заказ закрылся сам по GPS — пока это здесь, закрытие можно откатить. */
     val autoClosed: AutoClosed? = null,
+    /** Сервер не уверен в адресе старта/финиша — варианты на выбор одним тапом. */
+    val anchorCandidates: List<AddressCandidate> = emptyList(),
+    /** Чей это выбор: "start" или "finish" (пусто = вариантов нет). */
+    val anchorTarget: String = "",
 )
 
 /** Отсчёт до автозапуска навигатора на следующий адрес. */

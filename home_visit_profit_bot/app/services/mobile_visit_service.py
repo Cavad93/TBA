@@ -162,7 +162,14 @@ class MobileVisitService:
             try:
                 geo = self._geocode_layered(address)
             except GeocodingError as error:
-                return CandidateApiResult(ok=False, reason="geocoding_failed", detail=str(error))
+                # Сервис карт недоступен по сети. Если дорога уже задана руками —
+                # это не тупик: создаём заказ без координат, как при молчании
+                # геокодера, а не отбрасываем ручной ввод.
+                if route_km is None or route_minutes is None:
+                    return CandidateApiResult(
+                        ok=False, reason="geocoding_failed", detail=str(error), warnings=estimate_warnings,
+                    )
+                geo = None
 
         if geo is None or geo.lat is None or geo.lon is None:
             if route_km is None or route_minutes is None:
@@ -243,6 +250,13 @@ class MobileVisitService:
                 detail=str(error),
                 warnings=estimate_warnings,
             )
+        # Дорога считалась по прямой (карты молчали или адрес вне покрытия) — цифры
+        # приблизительные. Молчать нельзя: раньше это выглядело как точный расчёт.
+        if calculation.after_route.estimated:
+            estimate_warnings = estimate_warnings + [
+                "Дорога посчитана по прямой (сервис карт недоступен или адрес вне "
+                "покрытия) — километры и время приблизительные."
+            ]
         # Сохраняем вердикт заказа ('go'|'edge'|'skip'), чтобы экраны «Смена» и
         # история могли показывать его без повторного пересчёта профитабельности.
         verdict = decision_to_verdict(calculation.decision)

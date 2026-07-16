@@ -135,6 +135,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.homevisit.location.data.HomeVisitRepository
+import com.homevisit.location.domain.AddressCandidate
 import com.homevisit.location.domain.AuthUser
 import com.homevisit.location.ui.AuthFlow
 import com.homevisit.location.ui.AuthViewModel
@@ -296,6 +297,8 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
             templates = templates,
             isLoading = uiState.serverRoute.isLoading,
             onSave = workActions.onUpdateStart,
+            candidates = if (uiState.serverRoute.anchorTarget == "start") uiState.serverRoute.anchorCandidates else emptyList(),
+            onPickCandidate = workActions.onPickAddressCandidate,
         )
         LateWarningsCard(uiState.serverRoute.snapshot?.lateWarnings.orEmpty())
         FixTimePricesCard(uiState.serverRoute.snapshot?.fixTimePrices.orEmpty())
@@ -334,6 +337,8 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
             templates = templates,
             isLoading = uiState.serverRoute.isLoading,
             onSave = workActions.onUpdateFinish,
+            candidates = if (uiState.serverRoute.anchorTarget == "finish") uiState.serverRoute.anchorCandidates else emptyList(),
+            onPickCandidate = workActions.onPickAddressCandidate,
         )
         // Единственная точка завершения смены — внизу Ленты (модель «двухэтажного дома»).
         // Слайдер не закрывает день сразу: сначала мастер уточняет итоги, и уже он
@@ -460,6 +465,8 @@ internal fun RouteAnchor(
     templates: List<AddressTemplate>,
     isLoading: Boolean,
     onSave: (String) -> Unit,
+    candidates: List<AddressCandidate> = emptyList(),
+    onPickCandidate: (AddressCandidate) -> Unit = {},
 ) {
     var editing by rememberSaveable(title) { mutableStateOf(false) }
     var text by rememberSaveable(title) { mutableStateOf("") }
@@ -534,6 +541,15 @@ internal fun RouteAnchor(
                     label = { Text("Новый адрес") },
                     singleLine = true,
                 )
+                // Сервер не уверен в адресе — 2–3 варианта одним тапом, как у заказов.
+                // Тап подставляет выбранный текст в поле, чтобы редактор свернулся,
+                // когда адрес реально сохранится.
+                if (candidates.isNotEmpty()) {
+                    AddressCandidatesList(candidates) { picked ->
+                        text = picked.label
+                        onPickCandidate(picked)
+                    }
+                }
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading && text.isNotBlank(),

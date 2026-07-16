@@ -156,6 +156,7 @@ def calculate_route_summary(
         total_minutes=completed_route.total_minutes + future_route.total_minutes,
         order=completed_route.order + future_route.order,
         legs=future_route.legs,
+        estimated=future_route.estimated,
     )
 
 
@@ -233,6 +234,7 @@ def _merge_manual_visits(route: RouteSummary, manual_visits: list[Visit]) -> Rou
         total_minutes=route.total_minutes + manual.total_minutes,
         order=route.order + manual.order,
         legs=route.legs,
+        estimated=route.estimated,
     )
 
 

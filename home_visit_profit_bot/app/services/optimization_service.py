@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from itertools import permutations
 
 from app.models import Point, RouteLeg, RouteSummary, Visit
@@ -91,10 +92,11 @@ def optimize_route_estimated(
         avg_speed_kmh=avg_speed_kmh,
         straight_line_factor=straight_line_factor,
     )
+    # estimated=True: дорога по прямой — человек должен видеть, что цифры примерные.
     if not route_visits:
-        return _summary_from_order(points, matrix, [])
+        return replace(_summary_from_order(points, matrix, []), estimated=True)
     order_indices = _best_order(matrix, len(route_visits), _anchor_indices(route_visits))
-    return _summary_from_order(points, matrix, order_indices)
+    return replace(_summary_from_order(points, matrix, order_indices), estimated=True)
 
 
 def _anchor_indices(route_visits: list[Visit]) -> list[int]:

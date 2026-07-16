@@ -236,7 +236,9 @@ class HomeVisitRepository private constructor(
         clinic: String,
         startAt: String?,
         endAt: String?,
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): String = withContext(Dispatchers.IO) {
+        // Возвращаем reason, а не Boolean: «адрес не распознан» и «нет сети» — разные
+        // проблемы, и человеку нужно говорить, какая именно у него.
         val body = JSONObject()
             .put("address", address.trim())
             .put("income", income)
@@ -246,14 +248,14 @@ class HomeVisitRepository private constructor(
         endAt?.let { body.put("end_at", it) }
 
         val response = postJson(normalizeApiUrl(serverUrl, "/api/visits/onsite"), apiKey, body)
-            ?: return@withContext false
+            ?: return@withContext "network_error"
         if (!response.optBoolean("ok", false)) {
-            return@withContext false
+            return@withContext response.optString("reason").ifBlank { "error" }
         }
-        val visit = response.optJSONObject("visit") ?: return@withContext false
+        val visit = response.optJSONObject("visit") ?: return@withContext "error"
         val visitId = visit.optInt("id", 0)
         if (visitId <= 0) {
-            return@withContext false
+            return@withContext "error"
         }
         val now = now()
         dao.saveVisit(
@@ -275,7 +277,7 @@ class HomeVisitRepository private constructor(
                 plannedEndAt = endAt,
             ),
         )
-        true
+        "ok"
     }
 
     suspend fun addTelemedEntry(
@@ -957,15 +959,37 @@ class HomeVisitRepository private constructor(
         response.optBoolean("ok", false)
     }
 
-    suspend fun updateDayFinish(serverUrl: String, apiKey: String, address: String): String? = withContext(Dispatchers.IO) {
+    suspend fun updateDayFinish(
+        serverUrl: String,
+        apiKey: String,
+        address: String,
+        lat: Double? = null,
+        lon: Double? = null,
+    ): String? = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("finish_address", address)
+        // Координаты от слоя подсказок (resolved/кандидат) — сервер тогда не геокодит
+        // текст заново и не может ответить needs_coordinates.
+        if (lat != null && lon != null) {
+            payload.put("lat", lat)
+            payload.put("lon", lon)
+        }
         val response = postJson(normalizeApiUrl(serverUrl, "/api/day/finish"), apiKey, payload) ?: return@withContext null
         response.optString("reason", if (response.optBoolean("ok", false)) "finish_updated" else "error")
     }
 
     // Путь именно /api/day/start-address: /api/day/start занят стартом рабочего дня.
-    suspend fun updateDayStart(serverUrl: String, apiKey: String, address: String): String? = withContext(Dispatchers.IO) {
+    suspend fun updateDayStart(
+        serverUrl: String,
+        apiKey: String,
+        address: String,
+        lat: Double? = null,
+        lon: Double? = null,
+    ): String? = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("start_address", address)
+        if (lat != null && lon != null) {
+            payload.put("lat", lat)
+            payload.put("lon", lon)
+        }
         val response = postJson(normalizeApiUrl(serverUrl, "/api/day/start-address"), apiKey, payload) ?: return@withContext null
         response.optString("reason", if (response.optBoolean("ok", false)) "start_updated" else "error")
     }
