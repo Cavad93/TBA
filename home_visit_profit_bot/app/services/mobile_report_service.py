@@ -4,7 +4,7 @@ from app.database import Database
 
 import calendar
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 
 from app.models import WorkDay
@@ -181,6 +181,17 @@ def parse_report_period(period: str, value: str | None = None) -> ReportPeriod:
         start = day.isoformat()
         end = date.fromordinal(day.toordinal() + 1).isoformat()
         return ReportPeriod(title=f"День {start}", period="day", start_date=start, end_date=end)
+    if normalized == "week":
+        # Неделя от понедельника (Ф7.3). value — любая ISO-дата внутри недели.
+        anchor = date.fromisoformat(value) if value else today
+        monday = anchor - timedelta(days=anchor.weekday())
+        end = monday + timedelta(days=7)
+        return ReportPeriod(
+            title=f"Неделя с {monday.isoformat()}",
+            period="week",
+            start_date=monday.isoformat(),
+            end_date=end.isoformat(),
+        )
     if normalized == "month":
         year, month = _parse_month(value, today)
         start = date(year, month, 1)
@@ -200,7 +211,7 @@ def parse_report_period(period: str, value: str | None = None) -> ReportPeriod:
             start_date=date(year, 1, 1).isoformat(),
             end_date=date(year + 1, 1, 1).isoformat(),
         )
-    raise ValueError("period must be one of: active, day, month, year")
+    raise ValueError("period must be one of: active, day, week, month, year")
 
 
 def _parse_month(value: str | None, today: date) -> tuple[int, int]:
