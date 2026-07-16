@@ -40,6 +40,23 @@ def test_no_block_when_almost_equal():
                          fetch=lambda url: _resp([5800])) is None
 
 
+def test_malformed_price_is_skipped_not_crashing():
+    """Кривое поле price от API не роняет расчёт — вариант просто пропускается."""
+    payload = {"data": {"AER": {
+        "0": {"price": "не число"},
+        "1": {"price": None},
+        "2": "не словарь",
+        "3": {"price": 4200},
+    }}}
+    assert cheapest_flight_price("MOW", "AER", "tok", fetch=lambda url: payload) == 4200.0
+
+
+def test_cheap_url_is_https():
+    """Токен уходит в query-строке — только TLS, по голому http ключ читается сетью."""
+    from app.services import tickets_service
+    assert tickets_service._CHEAP_URL.startswith("https://")
+
+
 def test_api_error_is_silent():
     def boom(url: str):
         raise RuntimeError("network")

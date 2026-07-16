@@ -19,7 +19,9 @@ from urllib.request import Request, urlopen
 
 # Порог выгоды по умолчанию: билеты должны быть на 10%+ дешевле машины.
 DEFAULT_SAVINGS_THRESHOLD = 0.10
-_CHEAP_URL = "http://api.travelpayouts.com/v1/prices/cheap"
+# ТОЛЬКО https: token уходит в query-строке, и по голому http партнёрский ключ
+# читался бы любым наблюдателем сети (эндпоинт по TLS проверен: отвечает).
+_CHEAP_URL = "https://api.travelpayouts.com/v1/prices/cheap"
 
 
 def _http_get_json(url: str, timeout: float = 6.0) -> dict[str, Any]:
@@ -54,7 +56,18 @@ def cheapest_flight_price(
     dest = data.get(dest_iata.upper()) if isinstance(data, dict) else None
     if not isinstance(dest, dict) or not dest:
         return None
-    prices = [float(v["price"]) for v in dest.values() if isinstance(v, dict) and v.get("price")]
+    # Цены парсим защищённо: одно кривое поле price от API не должно ронять
+    # исключением весь quick estimate — просто пропускаем такой вариант.
+    prices: list[float] = []
+    for variant in dest.values():
+        if not isinstance(variant, dict):
+            continue
+        try:
+            price = float(variant.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            prices.append(price)
     return min(prices) if prices else None
 
 
