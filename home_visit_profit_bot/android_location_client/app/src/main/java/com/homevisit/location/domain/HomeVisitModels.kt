@@ -372,6 +372,8 @@ data class CandidateRequestResult(
     val detail: String = "",
     /** Адрес попал в зону платной парковки — говорим об этом до согласия ехать. */
     val parking: ParkingHint? = null,
+    /** Оговорки честности оценки: нет старта смены, мало заказов в ленте. */
+    val warnings: List<String> = emptyList(),
 ) {
     val needsManualRoute: Boolean
         get() = reason == "needs_manual_route" || outsideCoverage

@@ -158,6 +158,25 @@ class HomeVisitRepository private constructor(
         }
     }
 
+    /**
+     * Обновить адрес старта/финиша активного дня в ЛОКАЛЬНОЙ базе. Карточки Ленты
+     * читают адрес именно отсюда: без этого успешная серверная правка выглядела
+     * «не сохранившейся» — сервер уже знает новый адрес, а телефон показывал старый.
+     */
+    suspend fun updateLocalDayAddresses(startAddress: String? = null, finishAddress: String? = null) {
+        val now = now()
+        database.withTransaction {
+            val day = dao.getLatestWorkDayByStatus(WorkDayStatus.Active) ?: return@withTransaction
+            dao.saveWorkDay(
+                day.copy(
+                    startAddress = startAddress?.trim()?.ifEmpty { null } ?: day.startAddress,
+                    finishAddress = finishAddress?.trim()?.ifEmpty { null } ?: day.finishAddress,
+                    updatedAtEpochMillis = now,
+                ),
+            )
+        }
+    }
+
     suspend fun endDay(workDayId: String? = null, endOdometer: Double? = null, details: EndDayDetails? = null) {
         val now = now()
         database.withTransaction {
@@ -1717,12 +1736,20 @@ class HomeVisitRepository private constructor(
                 zoneCode = parkingJson.optString("zone_code").ifBlank { null },
             )
         }
+        // Оговорки честности оценки (нет старта смены, мало заказов в ленте).
+        val warnings = buildList {
+            val arr = response.optJSONArray("warnings") ?: return@buildList
+            for (i in 0 until arr.length()) {
+                arr.optString(i).takeIf { it.isNotBlank() }?.let(::add)
+            }
+        }
         return CandidateRequestResult(
             ok = ok,
             reason = reason,
             estimate = estimate,
             detail = response.optString("detail"),
             parking = parking,
+            warnings = warnings,
         )
     }
 

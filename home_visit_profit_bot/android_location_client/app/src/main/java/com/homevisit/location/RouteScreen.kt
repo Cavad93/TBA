@@ -464,6 +464,14 @@ internal fun RouteAnchor(
     var editing by rememberSaveable(title) { mutableStateOf(false) }
     var text by rememberSaveable(title) { mutableStateOf("") }
     var pickerOpen by remember { mutableStateOf(false) }
+    // Редактор сворачивается только когда адрес в карточке РЕАЛЬНО сменился (успех
+    // дошёл до локальной базы). При ошибке (сеть, «сервер не нашёл адрес») поле
+    // остаётся открытым и введённый текст цел — раньше он молча пропадал.
+    LaunchedEffect(address) {
+        if (editing && address.isNotBlank() && address.trim() == text.trim()) {
+            editing = false
+        }
+    }
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -529,10 +537,7 @@ internal fun RouteAnchor(
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading && text.isNotBlank(),
-                    onClick = {
-                        onSave(text.trim())
-                        editing = false
-                    },
+                    onClick = { onSave(text.trim()) },
                 ) {
                     Text("Сохранить · пересчитать маршрут")
                 }

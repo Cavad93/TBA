@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any
 from app.database import Database, db_user_id
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from app.models import CandidateCalculation, Point, RouteSummary, Visit
 from app.repositories import (
@@ -43,7 +43,7 @@ from app.services.settings_service import allowed_clinics
 from app.services.visit_navigation import attach_navigation, navigation_settings
 from app.services.visit_parking import hint_from_hit, zone_at
 from app.services.parking_cost_service import parking_money
-from app.services.vehicle_service import osrm_profile
+from app.services.vehicle_service import osrm_profile, transport_type
 from app.services.server_settings import nominatim_url as server_nominatim_url, request_timeout_seconds as server_timeout
 
 
@@ -61,6 +61,9 @@ class CandidateApiResult:
     # Адрес в зоне платной парковки — если да, говорим об этом до того, как человек
     # согласился ехать, а не когда он уже там стоит.
     parking: dict[str, Any] | None = None
+    # Честность оценки: предупреждения о том, почему цифре нельзя верить слепо
+    # (нет старта смены, мало заказов в ленте). Пусто = оговорок нет.
+    warnings: list[str] = field(default_factory=list)
 
 
 class MobileVisitService:
@@ -103,10 +106,35 @@ class MobileVisitService:
             raise error
         return None
 
+    def _estimate_warnings(self, day) -> list[str]:
+        """Оговорки к оценке — честно сказать ДО того, как человек поверил цифре.
+
+        1. Нет старта смены с координатами: дорога от человека до заказа не участвует
+           в расчёте — вердикт систематически приукрашен.
+        2. В ленте пока мало заказов (1–3): почасовая «до» построена на паре точек,
+           следующий заказ заметно её сдвинет. Грузовикам и фургонам не показываем:
+           у них 1–3 заказа за смену — норма, предупреждение стало бы вечным шумом.
+        """
+        warnings: list[str] = []
+        if day.start_lat is None or day.start_lon is None:
+            warnings.append(
+                "Не задан старт смены с координатами — дорога до заказа не участвует "
+                "в расчёте, корректная оценка невозможна. Укажите адрес старта или включите GPS."
+            )
+        if transport_type(self.settings) not in ("truck", "van"):
+            orders = len(self.visits.list_for_day(day.id, ("accepted", "completed")))
+            if 0 < orders <= 3:
+                warnings.append(
+                    f"В ленте пока мало заказов ({orders}) — оценка выгодности может "
+                    "заметно скорректироваться по мере наполнения смены."
+                )
+        return warnings
+
     def create_candidate(self, payload: dict[str, Any]) -> CandidateApiResult:
         day = self.days.active()
         if day is None:
             return CandidateApiResult(ok=False, reason="no_active_day")
+        estimate_warnings = self._estimate_warnings(day)
 
         # «Дом» → сохранённый адрес: геокодер по названию шаблона ничего не найдёт.
         address = expand_template(_required_str(payload, "address"), self.settings)
@@ -138,7 +166,7 @@ class MobileVisitService:
 
         if geo is None or geo.lat is None or geo.lon is None:
             if route_km is None or route_minutes is None:
-                return CandidateApiResult(ok=False, reason="needs_coordinates")
+                return CandidateApiResult(ok=False, reason="needs_coordinates", warnings=estimate_warnings)
             # Человек уже дал дорогу руками — координаты желательны (автомаршрут,
             # парковка), но не обязательны. Раньше здесь была вечная петля: «укажите
             # км/мин вручную» → указал → снова needs_coordinates, заказ не создавался.
@@ -204,6 +232,7 @@ class MobileVisitService:
                 reason="outside_coverage",
                 candidate=candidate,
                 detail=str(error),
+                warnings=estimate_warnings,
             )
         except RoutingError as error:
             self.visits.reject(candidate.id)
@@ -212,6 +241,7 @@ class MobileVisitService:
                 reason="needs_manual_route",
                 candidate=candidate,
                 detail=str(error),
+                warnings=estimate_warnings,
             )
         # Сохраняем вердикт заказа ('go'|'edge'|'skip'), чтобы экраны «Смена» и
         # история могли показывать его без повторного пересчёта профитабельности.
@@ -227,6 +257,7 @@ class MobileVisitService:
             candidate=candidate,
             calculation=calculation,
             parking=parking_payload,
+            warnings=estimate_warnings,
         )
 
     def accept_candidate(self, visit_id: int) -> dict[str, Any]:
@@ -606,6 +637,7 @@ def candidate_result_payload(result: CandidateApiResult) -> dict[str, Any]:
         "detail": result.detail,
         "candidate": visit_payload(result.candidate) if result.candidate else None,
         "parking": result.parking,
+        "warnings": result.warnings,
     }
     if result.calculation is not None:
         payload["calculation"] = calculation_payload(result.calculation)

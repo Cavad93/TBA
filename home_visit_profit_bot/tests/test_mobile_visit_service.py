@@ -6,6 +6,56 @@ from app.repositories import LocationEventRepository, SettingsRepository, VisitR
 from app.services.mobile_visit_service import MobileVisitService, candidate_result_payload
 
 
+def test_estimate_warns_about_missing_start_and_small_feed(config) -> None:
+    """Нет старта с координатами и в ленте 1–3 заказа — оценка честно оговаривается."""
+    with connect(config) as connection:
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20)  # старт без координат
+        service = MobileVisitService(connection)
+        first = service.create_candidate(
+            {"address": "Невский 1", "income": 1000, "lat": 59.936, "lon": 30.315, "route_km": 5, "route_minutes": 20}
+        )
+        service.accept_candidate(first.candidate.id)
+        second = service.create_candidate(
+            {"address": "Невский 2", "income": 1500, "lat": 59.937, "lon": 30.316, "route_km": 5, "route_minutes": 20}
+        )
+    assert any("старт" in warning.lower() for warning in second.warnings)
+    assert any("мало заказов" in warning for warning in second.warnings)
+    assert "warnings" in candidate_result_payload(second)
+
+
+def test_truck_driver_not_warned_about_small_feed(config) -> None:
+    """Грузовику 1–3 заказа за смену — норма: про ленту молчим, про старт — нет."""
+    with connect(config) as connection:
+        SettingsRepository(connection).set("transport_type", "truck")
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20)
+        service = MobileVisitService(connection)
+        first = service.create_candidate(
+            {"address": "Невский 1", "income": 1000, "lat": 59.936, "lon": 30.315, "route_km": 5, "route_minutes": 20}
+        )
+        service.accept_candidate(first.candidate.id)
+        second = service.create_candidate(
+            {"address": "Невский 2", "income": 1500, "lat": 59.937, "lon": 30.316, "route_km": 5, "route_minutes": 20}
+        )
+    assert not any("мало заказов" in warning for warning in second.warnings)
+    assert any("старт" in warning.lower() for warning in second.warnings)
+
+
+def test_estimate_has_no_warnings_when_day_is_healthy(config) -> None:
+    """Старт с координатами и лента наполнена — никаких оговорок."""
+    with connect(config) as connection:
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        service = MobileVisitService(connection)
+        for index in range(4):
+            result = service.create_candidate(
+                {"address": f"Невский {index + 1}", "income": 1000, "lat": 59.936 + index * 0.001, "lon": 30.315, "route_km": 5, "route_minutes": 20}
+            )
+            service.accept_candidate(result.candidate.id)
+        fifth = service.create_candidate(
+            {"address": "Невский 9", "income": 1500, "lat": 59.94, "lon": 30.32, "route_km": 5, "route_minutes": 20}
+        )
+    assert fifth.warnings == []
+
+
 def test_mobile_candidate_manual_route_can_be_accepted_and_completed(config) -> None:
 
     with connect(config) as connection:

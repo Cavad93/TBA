@@ -9,6 +9,7 @@ import com.homevisit.location.MainActivity
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.homevisit.location.OrderSource
+import com.homevisit.location.settingText
 import com.homevisit.location.data.HomeVisitRepository
 import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.AddressCandidate
@@ -262,7 +263,12 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
      */
     fun startShift(startOdometer: Double, firstBreakHours: Double) {
         viewModelScope.launch {
+            // Адреса по умолчанию из настроек кладём сразу и в ЛОКАЛЬНЫЙ день: сервер
+            // и так подставит их при синке, но карточки Ленты читают адрес из локальной
+            // базы — пустота там выглядела как «мой адрес не сохранился».
             repository.startDay(
+                startAddress = uiState.value.appSettings.settingText("default_start_address").ifBlank { null },
+                finishAddress = uiState.value.appSettings.settingText("default_finish_address").ifBlank { null },
                 startOdometer = startOdometer,
                 breakHoursBefore = firstBreakHours,
             )
@@ -554,6 +560,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 estimate = result.estimate,
                 message = "Расчёт готов",
                 parking = result.parking,
+                warnings = result.warnings,
             )
             result.outsideCoverage -> CandidateUiState(
                 // Не «ошибка», а честная граница: карты этого города у нас пока нет.
@@ -561,19 +568,23 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 // бы бесконечно выгодным.
                 message = "Этот адрес пока вне покрытия наших карт. Введите километры и минуты дороги вручную.",
                 needsManualRoute = true,
+                warnings = result.warnings,
             )
             result.needsManualRoute -> CandidateUiState(
                 message = "Нужно ввести километры и минуты дороги вручную.",
                 needsManualRoute = true,
+                warnings = result.warnings,
             )
             result.needsCoordinates -> CandidateUiState(
                 // Сервер принимает ручные км/мин и без координат — предлагаем оба пути:
                 // уточнить адрес (снова пройдёт через подсказки) или дать дорогу руками.
                 message = "Сервер не нашёл адрес. Уточните его или введите километры и минуты вручную.",
                 needsManualRoute = true,
+                warnings = result.warnings,
             )
             else -> CandidateUiState(
                 message = "Не удалось рассчитать адрес: ${result.reason}",
+                warnings = result.warnings,
             )
         }
     }
@@ -826,6 +837,9 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             routeState.value = routeState.value.copy(isLoading = true, message = "Меняю финиш...")
             when (repository.updateDayFinish(serverUrl, apiKey, address)) {
                 "finish_updated" -> {
+                    // Локальная база — источник адреса для карточек Ленты: без этого
+                    // успешная правка выглядела «не сохранившейся».
+                    repository.updateLocalDayAddresses(finishAddress = address)
                     refreshRouteInternal(serverUrl, apiKey)
                     routeState.value = routeState.value.copy(message = "Финиш изменён, маршрут пересчитан")
                 }
@@ -849,6 +863,9 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             routeState.value = routeState.value.copy(isLoading = true, message = "Меняю старт...")
             when (repository.updateDayStart(serverUrl, apiKey, address)) {
                 "start_updated" -> {
+                    // Локальная база — источник адреса для карточек Ленты: без этого
+                    // успешная правка выглядела «не сохранившейся».
+                    repository.updateLocalDayAddresses(startAddress = address)
                     refreshRouteInternal(serverUrl, apiKey)
                     routeState.value = routeState.value.copy(message = "Старт изменён, маршрут пересчитан")
                 }
@@ -1391,6 +1408,8 @@ data class CandidateUiState(
     val parking: ParkingHint? = null,
     /** Сервер не уверен в адресе — 2–3 варианта на выбор (Фаза 2). Пусто = выбирать нечего. */
     val addressCandidates: List<AddressCandidate> = emptyList(),
+    /** Оговорки честности оценки с сервера: нет старта смены, мало заказов в ленте. */
+    val warnings: List<String> = emptyList(),
 )
 
 /**

@@ -904,6 +904,7 @@ internal fun CandidateGauge(candidate: CandidateUiState, onAccept: () -> Unit, o
                         textAlign = TextAlign.Center,
                     )
                 }
+                EstimateWarnings(candidate.warnings)
             }
             else -> {
                 val score = estimate.score
@@ -931,6 +932,7 @@ internal fun CandidateGauge(candidate: CandidateUiState, onAccept: () -> Unit, o
                 if (estimate.reason.isNotBlank()) {
                     Text(estimate.reason, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                 }
+                EstimateWarnings(candidate.warnings)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     GaugeTile(Modifier.weight(1f), money(estimate.afterHourly), "чистыми/ч")
                     // Деньги на километр — рядом с деньгами на час. Порознь они обманчивы:
@@ -969,6 +971,22 @@ internal fun CandidateGauge(candidate: CandidateUiState, onAccept: () -> Unit, o
                 }
             }
         }
+    }
+}
+
+/**
+ * Оговорки честности оценки (нет старта смены, мало заказов в ленте) — жёлтым,
+ * над кнопками: человек должен увидеть их ДО того, как поверил цифре.
+ */
+@Composable
+private fun EstimateWarnings(warnings: List<String>) {
+    warnings.forEach { warning ->
+        Text(
+            warning,
+            style = MaterialTheme.typography.bodySmall,
+            color = VerdictColors.edge,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
