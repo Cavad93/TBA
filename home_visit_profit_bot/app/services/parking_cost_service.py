@@ -33,8 +33,11 @@ class ParkingMoney:
 
 
 def _is_driving(profile: str) -> bool:
-    # Легковая/кроссовер/Газель/грузовик/мотоцикл — всё driving; пеший/вело — без парковки.
-    return profile not in ("foot", "bicycle")
+    # Легковая/кроссовер/Газель/грузовик/мотоцикл — всё driving; пеший/вело — без
+    # парковки. ВАЖНО: osrm_profile() для велосипеда возвращает «cycling» (имя
+    # профиля OSRM), а не «bicycle» (ключ типа транспорта) — фильтруем оба написания,
+    # иначе велосипедисту начислялась парковка.
+    return profile not in ("foot", "bicycle", "cycling")
 
 
 def parking_money(

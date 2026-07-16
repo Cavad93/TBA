@@ -34,7 +34,14 @@ def _day() -> WorkDay:
     )
 
 
-def _visit(visit_id: int, *, kind: str = "field", start_at: str | None = None, service: float = 0) -> Visit:
+def _visit(
+    visit_id: int,
+    *,
+    kind: str = "field",
+    start_at: str | None = None,
+    service: float = 0,
+    extra_minutes: float = 0,
+) -> Visit:
     return Visit(
         id=visit_id,
         work_day_id=1,
@@ -48,7 +55,7 @@ def _visit(visit_id: int, *, kind: str = "field", start_at: str | None = None, s
         lon=30.3,
         income=2000,
         estimated_extra_km=0,
-        estimated_extra_minutes=0,
+        estimated_extra_minutes=extra_minutes,
         kind=kind,
         service_minutes=service,
         planned_start_at=start_at,
@@ -66,6 +73,20 @@ def _route(order: list[int], leg_minutes: dict[int, float]) -> RouteSummary:
             for visit_id, minutes in leg_minutes.items()
         ],
     )
+
+
+def test_manual_route_visit_counts_its_minutes_in_the_chain() -> None:
+    """Заказ с ручной дорогой (без плеча OSRM) не едет «за ноль минут»: его ручные
+    минуты входят в цепочку, и опоздание на якорь после него — честное."""
+    manual = _visit(1, extra_minutes=40.0)
+    anchor = _visit(2, kind="onsite", start_at="2026-07-13T09:00:00", service=60)
+    route = _route([1, 2], {2: 10.0})  # у ручного заказа плеча нет
+
+    warnings = late_warnings(_day(), [manual, anchor], route, now=datetime(2026, 7, 13, 8, 0))
+
+    # 8:00 + 40 (ручная дорога) + 30 (работа) + 10 (плечо к якорю) = 9:20 → 20 минут.
+    assert len(warnings) == 1
+    assert warnings[0].late_minutes == 20
 
 
 def test_warns_when_orders_before_the_anchor_eat_the_morning() -> None:

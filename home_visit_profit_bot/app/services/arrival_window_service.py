@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from app.models import RouteSummary, Visit, WorkDay
-from app.services.schedule_service import _leg_minutes_by_visit, _parse
+from app.services.schedule_service import _drive_minutes, _leg_minutes_by_visit, _parse
 
 # Дефолтная неопределённость: ±1 ч у первого визита, до ±2 ч у дальних. Из личной
 # дисперсии выйдет свой масштаб (dispersion), пока не набралась статистика — эти.
@@ -87,7 +87,7 @@ def arrival_windows(
         if visit is None:
             continue
 
-        clock += timedelta(minutes=legs.get(visit_id, 0.0))
+        clock += timedelta(minutes=_drive_minutes(visit, legs))
         eta = clock
 
         # Полуширина растёт линейно с позицией: первый визит — base, последний — max.

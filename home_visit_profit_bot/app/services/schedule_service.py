@@ -58,6 +58,16 @@ def _leg_minutes_by_visit(route: RouteSummary) -> dict[int, float]:
     return minutes
 
 
+def _drive_minutes(visit: Visit, legs: dict[int, float]) -> float:
+    """Минуты дороги до заказа: плечо маршрута, а для заказа без координат
+    (дорогу дали руками, плеча у OSRM нет) — его ручные минуты. Иначе такой заказ
+    ехал бы по цепочке времени за ноль минут, и окна/опоздания дальше по дню врали бы."""
+    leg = legs.get(visit.id)
+    if leg is not None:
+        return leg
+    return float(visit.estimated_extra_minutes or 0.0)
+
+
 def late_warnings(
     day: WorkDay,
     visits: list[Visit],
@@ -80,7 +90,7 @@ def late_warnings(
         if visit is None:
             continue
 
-        clock += timedelta(minutes=legs.get(visit_id, 0.0))
+        clock += timedelta(minutes=_drive_minutes(visit, legs))
 
         planned_start = _parse(visit.planned_start_at) if visit.kind == "onsite" else None
         if planned_start is not None:

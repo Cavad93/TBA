@@ -47,6 +47,12 @@ def test_bicycle_profile_has_no_parking():
     assert parking_money(_hit("Санкт-Петербург", "КЗ-2"), 30.0, profile="bicycle") is None
 
 
+def test_cycling_osrm_profile_has_no_parking():
+    """Боевой код шлёт именно «cycling» (osrm_profile), а не «bicycle»: раньше этот
+    вариант проскакивал фильтр, и велосипедисту начислялась парковка."""
+    assert parking_money(_hit("Санкт-Петербург", "КЗ-2"), 30.0, profile="cycling") is None
+
+
 def test_unknown_city_has_no_money():
     # Тарифа города не знаем → денег нет (только текстовая подсказка о зоне отдельно).
     assert parking_money(_hit("Казань", None), 30.0, profile="driving") is None
