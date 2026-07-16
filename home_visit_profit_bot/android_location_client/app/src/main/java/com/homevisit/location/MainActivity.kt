@@ -487,7 +487,7 @@ internal data class WorkActions(
     val onEndDayWithDetails: (EndDayDetails) -> Unit,
     val onPrepareEndShift: () -> Unit,
     val onClearEndShift: () -> Unit,
-    val onCalculateVisit: (String, Double, String, Double?, Double?) -> Unit,
+    val onCalculateVisit: (String, Double, String, Double?, Double?, String?, Double?) -> Unit,
     /** Тап по варианту адреса из кандидатов (Фаза 2): докрутить расчёт по его координатам. */
     val onPickAddressCandidate: (AddressCandidate) -> Unit,
     val onAcceptCandidate: () -> Unit,
@@ -555,7 +555,7 @@ internal fun HomeVisitApp(
     onEndDayWithDetails: (EndDayDetails) -> Unit,
     onPrepareEndShift: (String, String) -> Unit,
     onClearEndShift: () -> Unit,
-    onCalculateVisit: (String, String, String, Double, String, Double?, Double?) -> Unit,
+    onCalculateVisit: (String, String, String, Double, String, Double?, Double?, String?, Double?) -> Unit,
     onPickAddressCandidate: (AddressCandidate) -> Unit,
     onAcceptCandidate: (String, String) -> Unit,
     onRejectCandidate: (String, String) -> Unit,
@@ -636,8 +636,8 @@ internal fun HomeVisitApp(
         onEndDayWithDetails = onEndDayWithDetails,
         onPrepareEndShift = { onPrepareEndShift(serverUrl, apiKey) },
         onClearEndShift = onClearEndShift,
-        onCalculateVisit = { address, income, clinic, routeKm, routeMinutes ->
-            onCalculateVisit(serverUrl, apiKey, address, income, clinic, routeKm, routeMinutes)
+        onCalculateVisit = { address, income, clinic, routeKm, routeMinutes, source, responseCost ->
+            onCalculateVisit(serverUrl, apiKey, address, income, clinic, routeKm, routeMinutes, source, responseCost)
         },
         onPickAddressCandidate = onPickAddressCandidate,
         onAcceptCandidate = { onAcceptCandidate(serverUrl, apiKey) },

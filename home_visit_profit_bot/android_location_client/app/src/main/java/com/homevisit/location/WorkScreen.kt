@@ -463,7 +463,7 @@ internal fun EvaluateForm(
     frequentIncome: Double?,
     templates: List<AddressTemplate>,
     recentAddresses: List<String> = emptyList(),
-    onCalculate: (String, Double, String, Double?, Double?) -> Unit,
+    onCalculate: (String, Double, String, Double?, Double?, String?, Double?) -> Unit,
     onPickCandidate: (AddressCandidate) -> Unit,
     onReopenResult: () -> Unit,
 ) {
@@ -471,6 +471,10 @@ internal fun EvaluateForm(
     var incomeText by rememberSaveable { mutableStateOf("") }
     // Пусто = «Без компании» (общий учёт — минимализм для новичков).
     var clinic by rememberSaveable { mutableStateOf("") }
+    // Источник заказа и цена отклика (Ф11.2) — необязательно. Цена отклика (платный
+    // лид Профи/Авито) входит в расчёт выгодности как расход заказа.
+    var orderSource by rememberSaveable { mutableStateOf("") }
+    var responseCostText by rememberSaveable { mutableStateOf("") }
     // Ручной маршрут показываем только когда геокодер не справился.
     var routeKmText by rememberSaveable { mutableStateOf("") }
     var routeMinutesText by rememberSaveable { mutableStateOf("") }
@@ -535,6 +539,18 @@ internal fun EvaluateForm(
             }
         }
         CompanyPicker(clinics = clinics, value = clinic, onValue = { clinic = it })
+        // Источник заказа + цена отклика (Ф11.2): необязательно. Цена отклика (платный
+        // лид) вычитается из маржи — заказ за 800 ₽ с откликом 400 ₽ выглядит иначе.
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                modifier = Modifier.weight(1f),
+                value = orderSource,
+                onValueChange = { orderSource = it },
+                label = { Text("Источник (напр. Профи)") },
+                singleLine = true,
+            )
+            MoneyField(modifier = Modifier.weight(1f), value = responseCostText, onValueChange = { responseCostText = it }, label = "Цена отклика, ₽")
+        }
         // Сервер не уверен в адресе — предлагаем 2–3 варианта. Тап = подтверждение,
         // координаты выбранного уходят в расчёт как ручная точка. Молча ничего не берём.
         if (candidate.addressCandidates.isNotEmpty()) {
@@ -563,6 +579,8 @@ internal fun EvaluateForm(
                     clinic,
                     if (hasManualRoute) routeKm else null,
                     if (hasManualRoute) routeMinutes else null,
+                    orderSource.ifBlank { null },
+                    parseNumber(responseCostText),
                 )
             },
         ) {

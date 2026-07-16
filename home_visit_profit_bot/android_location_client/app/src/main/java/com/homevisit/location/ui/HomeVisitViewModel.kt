@@ -315,6 +315,8 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         clinic: String,
         routeKm: Double?,
         routeMinutes: Double?,
+        orderSource: String? = null,
+        responseCost: Double? = null,
     ) {
         viewModelScope.launch {
             ensureActiveDay()
@@ -333,7 +335,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                     // Не уверены — пусть выберет человек (даже единственный вариант
                     // подтверждается одним тапом, а не подставляется молча и не
                     // теряется). Расчёт откладываем.
-                    pendingCandidate = PendingCandidate(serverUrl, apiKey, address, income, clinic)
+                    pendingCandidate = PendingCandidate(serverUrl, apiKey, address, income, clinic, orderSource, responseCost)
                     candidateState.value = CandidateUiState(
                         message = "Уточните адрес — выберите вариант",
                         addressCandidates = suggestion.candidates,
@@ -343,13 +345,13 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 if (suggestion.resolved != null) {
                     // Уверенный resolved — считаем сразу по его координатам.
                     runCandidate(serverUrl, apiKey, address, income, clinic, null, null,
-                        suggestion.resolved.lat, suggestion.resolved.lon)
+                        suggestion.resolved.lat, suggestion.resolved.lon, orderSource, responseCost)
                     return@launch
                 }
                 // Ноль кандидатов без resolved — идём обычным путём: сервер сам
                 // попробует геокодировать по названию.
             }
-            runCandidate(serverUrl, apiKey, address, income, clinic, routeKm, routeMinutes, null, null)
+            runCandidate(serverUrl, apiKey, address, income, clinic, routeKm, routeMinutes, null, null, orderSource, responseCost)
         }
     }
 
@@ -405,6 +407,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             runCandidate(
                 pending.serverUrl, pending.apiKey, pending.address,
                 pending.income, pending.clinic, null, null, candidate.lat, candidate.lon,
+                pending.orderSource, pending.responseCost,
             )
         }
     }
@@ -419,6 +422,8 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         routeMinutes: Double?,
         lat: Double?,
         lon: Double?,
+        orderSource: String? = null,
+        responseCost: Double? = null,
     ) {
         val result = repository.calculateVisitCandidate(
             serverUrl = serverUrl,
@@ -430,6 +435,8 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             routeMinutes = routeMinutes,
             lat = lat,
             lon = lon,
+            orderSource = orderSource,
+            responseCost = responseCost,
         )
         // Нет сети, но есть координаты кандидата и прогретый кеш матрицы дня —
         // мгновенный офлайн-вердикт по кешу (Фаза 3.4/3.5), сервер уточнит при связи.
@@ -1267,6 +1274,8 @@ private data class PendingCandidate(
     val address: String,
     val income: Double,
     val clinic: String,
+    val orderSource: String? = null,
+    val responseCost: Double? = null,
 )
 
 data class RouteUiState(

@@ -670,6 +670,8 @@ class HomeVisitRepository private constructor(
         routeMinutes: Double? = null,
         lat: Double? = null,
         lon: Double? = null,
+        orderSource: String? = null,
+        responseCost: Double? = null,
     ): CandidateRequestResult = withContext(Dispatchers.IO) {
         val payload = JSONObject()
             .put("address", address.trim())
@@ -679,6 +681,10 @@ class HomeVisitRepository private constructor(
             payload.put("route_km", routeKm)
             payload.put("route_minutes", routeMinutes)
         }
+        // Источник заказа и цена отклика (Ф11.2) — необязательно; цена отклика входит
+        // в маржу на сервере.
+        if (!orderSource.isNullOrBlank()) payload.put("order_source", orderSource)
+        if (responseCost != null) payload.put("response_cost", responseCost)
         // Координаты выбранного кандидата уходят как ручная точка — сервер тогда не
         // геокодит заново (manual_geocoding_result), а считает дорогу до неё.
         if (lat != null && lon != null) {
