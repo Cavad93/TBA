@@ -742,8 +742,23 @@ class HomeVisitRepository private constructor(
         val payload = JSONObject().put("text", text)
         val response = postJson(normalizeApiUrl(serverUrl, "/api/orders/batch-parse"), apiKey, payload)
             ?: return@withContext emptyList()
-        val ordersJson = response.optJSONArray("orders") ?: return@withContext emptyList()
-        buildList {
+        parseBatchOrders(response)
+    }
+
+    /**
+     * Скриншот заказов → наш OCR (сервер 2, канал WireGuard) → тот же пакет заказов
+     * (Ф15.4). Тело — сырые байты картинки. OCR выключен/недоступен → пустой список,
+     * поток добавления идёт ручным вводом (мягкая деградация).
+     */
+    suspend fun ocrExtract(serverUrl: String, apiKey: String, image: ByteArray): List<BatchOrder> = withContext(Dispatchers.IO) {
+        val response = postBytes(normalizeApiUrl(serverUrl, "/api/ocr/extract"), apiKey, image, "image/png")
+            ?: return@withContext emptyList()
+        parseBatchOrders(response)
+    }
+
+    private fun parseBatchOrders(response: JSONObject): List<BatchOrder> {
+        val ordersJson = response.optJSONArray("orders") ?: return emptyList()
+        return buildList {
             for (i in 0 until ordersJson.length()) {
                 val o = ordersJson.optJSONObject(i) ?: continue
                 val resolvedJson = o.optJSONObject("resolved")
@@ -1522,6 +1537,35 @@ class HomeVisitRepository private constructor(
             connection.responseCode in 200..299
         } catch (_: Exception) {
             false
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    /**
+     * POST сырых байтов (картинка для OCR, Ф15.4). Больший readTimeout: инференс OCR
+     * на CPU занимает несколько секунд. Ошибка/сеть → null (клиент вводит вручную).
+     */
+    private fun postBytes(url: String, apiKey: String, body: ByteArray, contentType: String): JSONObject? {
+        if (url.isBlank() || apiKey.isBlank() || body.isEmpty()) {
+            return null
+        }
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 10_000
+                readTimeout = 60_000
+                doOutput = true
+                setRequestProperty("Content-Type", contentType)
+                setRequestProperty("Authorization", "Bearer $apiKey")
+            }
+            connection.outputStream.use { it.write(body) }
+            val stream = if (connection.responseCode in 200..399) connection.inputStream else connection.errorStream
+            val text = stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+            JSONObject(text)
+        } catch (_: Exception) {
+            null
         } finally {
             connection?.disconnect()
         }

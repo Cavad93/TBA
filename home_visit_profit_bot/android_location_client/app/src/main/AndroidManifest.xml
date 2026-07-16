@@ -48,6 +48,17 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
+            <!--
+                Share-target скриншотом (Фаза 15.4): принимаем «Поделиться» картинкой —
+                скриншот списка заказов из мессенджера уходит на наш OCR (сервер 2, канал
+                WireGuard), распознанный текст — тем же пакетным парсером на экран
+                подтверждения. On-device OCR кириллицы невозможен (ML Kit не умеет, Ф15.3).
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
         </activity>
 
         <service

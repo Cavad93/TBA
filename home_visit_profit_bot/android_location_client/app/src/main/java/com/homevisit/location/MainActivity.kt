@@ -176,6 +176,13 @@ private fun extractSharedText(intent: Intent?): String? {
     return intent.getStringExtra(Intent.EXTRA_TEXT)
 }
 
+/** Картинка из «Поделиться» (Ф15.4): ACTION_SEND image/*, иначе null. */
+private fun extractSharedImageUri(intent: Intent?): android.net.Uri? {
+    if (intent?.action != Intent.ACTION_SEND || intent.type?.startsWith("image/") != true) return null
+    @Suppress("DEPRECATION")
+    return intent.getParcelableExtra(Intent.EXTRA_STREAM) as? android.net.Uri
+}
+
 class MainActivity : ComponentActivity() {
     private lateinit var prefs: SharedPreferences
 
@@ -208,10 +215,23 @@ class MainActivity : ComponentActivity() {
                 // Share-target (Ф15.1/15.2): пришёл «Поделиться» текстом — разбираем пакетным
                 // парсером и показываем экран подтверждения (зелёные/жёлтые/красные).
                 val sharedText = remember { extractSharedText(intent) }
+                // Share-target скриншотом (Ф15.4): пришла картинка — читаем байты и шлём на
+                // наш OCR, дальше тот же экран пакета, что и для текста.
+                val sharedImageUri = remember { extractSharedImageUri(intent) }
                 val batchOrders by viewModel.batchOrders.collectAsStateWithLifecycle()
                 LaunchedEffect(sharedText) {
                     if (!sharedText.isNullOrBlank()) {
                         viewModel.parseSharedText(DEFAULT_SERVER_URL, sessionToken, sharedText)
+                    }
+                }
+                LaunchedEffect(sharedImageUri) {
+                    if (sharedImageUri != null) {
+                        val bytes = runCatching {
+                            contentResolver.openInputStream(sharedImageUri)?.use { it.readBytes() }
+                        }.getOrNull()
+                        if (bytes != null && bytes.isNotEmpty()) {
+                            viewModel.parseSharedImage(DEFAULT_SERVER_URL, sessionToken, bytes)
+                        }
                     }
                 }
                 if (batchOrders.isNotEmpty()) {

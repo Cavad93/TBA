@@ -710,6 +710,14 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /** Разобрать пришедший скриншот в пакет заказов через наш OCR (Ф15.4). */
+    fun parseSharedImage(serverUrl: String, apiKey: String, image: ByteArray) {
+        if (image.isEmpty()) return
+        viewModelScope.launch {
+            batchOrdersState.value = repository.ocrExtract(serverUrl, apiKey, image)
+        }
+    }
+
     fun clearBatch() {
         batchOrdersState.value = emptyList()
     }
