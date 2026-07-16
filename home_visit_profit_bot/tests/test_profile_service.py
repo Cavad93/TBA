@@ -29,6 +29,12 @@ def test_profile_empty_returns_neutral_defaults(config) -> None:
     # Индексы без истории не показываем: цифра из воздуха хуже честного «нет данных».
     assert payload["indices"]["has_data"] is False
     assert payload["indices"]["need_more_shifts"] == 7
+    # Калибровка дороги (Ф7.6) без истории: блок есть, но помечен «нужно ещё N смен» —
+    # личную поправку темпа рисовать из воздуха нельзя.
+    assert payload["calibration"]["has_data"] is False
+    assert payload["calibration"]["days"] == 0
+    assert payload["calibration"]["need_more_shifts"] == 7
+    assert "route_time_factor" not in payload["calibration"]
 
 
 def test_profile_with_active_day_reports_wellbeing_and_driving(config) -> None:

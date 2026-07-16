@@ -53,6 +53,7 @@ import com.homevisit.location.domain.NavTarget
 import com.homevisit.location.domain.ParkingHint
 import com.homevisit.location.domain.NavigationPrefs
 import com.homevisit.location.domain.HomeStartPrompt
+import com.homevisit.location.domain.ProfileCalibration
 import com.homevisit.location.domain.ProfileDriving
 import com.homevisit.location.domain.DrivingWithinDay
 import com.homevisit.location.domain.IndexCard
@@ -2082,6 +2083,14 @@ class HomeVisitRepository private constructor(
                     )
                 },
             ),
+            calibration = r.optJSONObject("calibration")?.let { c ->
+                ProfileCalibration(
+                    hasData = c.optBoolean("has_data", false),
+                    days = c.optInt("days", 0),
+                    needMoreShifts = c.optInt("need_more_shifts", 0),
+                    routeTimeFactor = if (c.isNull("route_time_factor")) null else c.optDouble("route_time_factor"),
+                )
+            },
             fromCache = r.optBoolean("_from_cache", false),
         )
     }

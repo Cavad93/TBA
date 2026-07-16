@@ -16,6 +16,7 @@ from app.repositories import (
     UserBaselineRepository,
     WorkDayRepository,
 )
+from app.services.baseline_service import MIN_DAYS_FOR_PERSONAL
 from app.services.day_metrics_service import load_baselines
 from app.services.driving_service import within_day_trend
 from app.services.indices_service import economy_index, load_index, overwork_result
@@ -67,6 +68,26 @@ class ProfileService:
             "income": income_model(self.settings).payload(),
             "wellbeing": self._wellbeing_block(),
             "driving": self._driving_block(today),
+            "calibration": self._calibration_block(),
+        }
+
+    # --- видимое вложение: личная калибровка дороги (Ф7.6) ----------------
+
+    def _calibration_block(self) -> dict[str, Any]:
+        """«Видимое вложение»: чем больше смен приложение видело, тем точнее знает ТВОЙ
+        темп дороги. `route_time_factor` — во сколько раз твоя дорога в среднем длиннее
+        (× >1) или короче (× <1) плановой оценки OSRM. Это накопленное знание уходит
+        вместе с приложением при переходе — показываем рост, чтобы человек видел вклад.
+        Пока смен мало — честно говорим «нужно ещё N смен», а не рисуем норму из воздуха.
+        """
+        factor = load_baselines(self.baselines).get("route_time_factor")
+        if factor is None or factor.days <= 0:
+            return {"has_data": False, "days": 0, "need_more_shifts": MIN_DAYS_FOR_PERSONAL}
+        return {
+            "has_data": factor.is_personal,
+            "days": factor.days,
+            "need_more_shifts": max(0, MIN_DAYS_FOR_PERSONAL - factor.days),
+            "route_time_factor": round(max(0.0, factor.median), 2),
         }
 
     # --- три индекса ------------------------------------------------------

@@ -5,9 +5,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -45,20 +50,42 @@ internal fun PersonalTripCard(state: PersonalTripUi) {
 
 @Composable
 private fun PersonalTripResult(check: com.homevisit.location.domain.MinimumCheck) {
+    // «Только туда» — тот же движок, без второй формулы: дорога и время ровно вдвое
+    // меньше (round_trip = 2× one-way), парковка — разовый расход за визит, не делится.
+    var oneWay by rememberSaveable { mutableStateOf(false) }
+    val factor = if (oneWay) 0.5 else 1.0
+    val carCost = check.carCost * factor
+    val timeCost = check.timeCost * factor
+    val km = check.roundTripKm * factor
+    val minutes = check.roundTripMinutes * factor
+    val total = carCost + timeCost + check.parkingCost
+
     InputCard("Личная поездка") {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = !oneWay,
+                onClick = { oneWay = false },
+                label = { Text("Туда-обратно") },
+            )
+            FilterChip(
+                selected = oneWay,
+                onClick = { oneWay = true },
+                label = { Text("Только туда") },
+            )
+        }
         Text(
-            "≈ ${money(check.minimumCheck)} туда и обратно",
+            if (oneWay) "≈ ${money(total)} в одну сторону" else "≈ ${money(total)} туда и обратно",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
         )
         Text(
-            "${fmtKm(check.roundTripKm)} · ${check.roundTripMinutes.toInt()} мин в пути",
+            "${fmtKm(km)} · ${minutes.toInt()} мин в пути",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            TripCostRow("Дорога (топливо, износ)", check.carCost)
-            TripCostRow("Время в пути", check.timeCost)
+            TripCostRow("Дорога (топливо, износ)", carCost)
+            TripCostRow("Время в пути", timeCost)
             if (check.parkingCost > 0) TripCostRow("Парковка", check.parkingCost)
         }
         if (check.hourlyOnSite > 0) {

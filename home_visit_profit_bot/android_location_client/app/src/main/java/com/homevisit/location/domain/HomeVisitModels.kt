@@ -199,7 +199,22 @@ data class ProfileSnapshot(
     val income: IncomeModel?,
     val wellbeing: ProfileWellbeing,
     val driving: ProfileDriving?,
+    /** Видимое вложение (Ф7.6): личная калибровка темпа дороги. */
+    val calibration: ProfileCalibration? = null,
     val fromCache: Boolean = false,
+)
+
+/**
+ * «Видимое вложение» (Ф7.6): чем больше смен приложение видело, тем точнее знает ТВОЙ
+ * темп дороги. `routeTimeFactor` — во сколько раз твоя дорога в среднем длиннее (×>1)
+ * или короче (×<1) плановой оценки карт. Пока смен мало (`hasData=false`) — показываем
+ * «нужно ещё N смен», а не выдуманное число.
+ */
+data class ProfileCalibration(
+    val hasData: Boolean,
+    val days: Int,
+    val needMoreShifts: Int,
+    val routeTimeFactor: Double?,
 )
 
 /**

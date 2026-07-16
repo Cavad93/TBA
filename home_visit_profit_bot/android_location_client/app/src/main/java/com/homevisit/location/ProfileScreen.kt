@@ -136,6 +136,7 @@ import com.homevisit.location.domain.HomeRecommendation
 import com.homevisit.location.domain.HomeOverwork
 import com.homevisit.location.domain.HomeSnapshot
 import com.homevisit.location.domain.HomeStartPrompt
+import com.homevisit.location.domain.ProfileCalibration
 import com.homevisit.location.domain.ProfileDriving
 import com.homevisit.location.domain.ProfileWellbeing
 import com.homevisit.location.domain.ReportPeriod
@@ -227,6 +228,11 @@ internal fun ProfileScreen(
                 SectionHeader("Стиль вождения · по данным приложения")
                 DrivingCard(it)
                 it.withinDay?.let { trend -> WithinDayCard(trend) }
+            }
+
+            snapshot.calibration?.let {
+                SectionHeader("Твой темп · приложение подстраивается под тебя")
+                CalibrationCard(it)
             }
 
             Spacer(Modifier.height(4.dp))
@@ -340,6 +346,65 @@ internal fun DrivingCard(d: ProfileDriving) {
             // мы его ниоткуда не берём, а врать пользователю нельзя.
             MetricLine("Резких ускорений", "${oneDecimal(d.harshAccelPer100km)}/100 км", if (d.harshAccelPer100km > 3) VerdictColors.edge else MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+
+/**
+ * Видимое вложение (Ф7.6): личная калибровка темпа дороги. Пока смен мало — показываем
+ * прогресс до личной нормы («ещё N смен»), это и есть накапливаемый вклад. Когда данных
+ * хватило — крупно множитель дороги и объяснение словами, что он уже в расчётах.
+ */
+@Composable
+internal fun CalibrationCard(c: ProfileCalibration) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            val factor = c.routeTimeFactor
+            if (c.hasData && factor != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Твой темп дороги учтён", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(routeFactorWords(factor), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("×${oneDecimal(factor)}", fontFamily = JetBrainsMono, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = VerdictColors.go)
+                        Text("по ${c.days} см.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            } else {
+                val target = c.days + c.needMoreShifts
+                Text("Приложение учит твой темп дороги", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "Ещё ${c.needMoreShifts} ${shiftsWord(c.needMoreShifts)} — и расчёт подстроится под то, насколько твоя дорога длиннее или короче карты. Это знание накапливается только у тебя.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                MetricBar("Собрано смен", "${c.days}/$target", if (target > 0) c.days.toFloat() / target else 0f, VerdictColors.go)
+            }
+        }
+    }
+}
+
+private fun routeFactorWords(factor: Double): String {
+    val pct = ((factor - 1.0) * 100).toInt()
+    return when {
+        pct >= 3 -> "Твоя дорога в среднем на $pct% дольше плана карт — уже в расчётах."
+        pct <= -3 -> "Твоя дорога в среднем на ${-pct}% короче плана карт — уже в расчётах."
+        else -> "Твоя дорога идёт почти ровно по плану карт."
+    }
+}
+
+private fun shiftsWord(n: Int): String {
+    val mod100 = n % 100
+    val mod10 = n % 10
+    return when {
+        mod100 in 11..14 -> "смен"
+        mod10 == 1 -> "смена"
+        mod10 in 2..4 -> "смены"
+        else -> "смен"
     }
 }
 
