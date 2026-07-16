@@ -150,18 +150,13 @@ class HomeService:
             "weekly_average": round(float(summary.get("weekly_average") or 0), 1),
             "level": str(summary.get("level") or ""),
             "break_hours_before": float(summary.get("break_hours_before") or 0),
-            "break_hours_before": float(summary.get("break_hours_before") or 0),
             "verdict": _debt_verdict(debt),
             "source": source or "none",
         }
 
     def _trends_payload(self, money: dict[str, Any], recovery: dict[str, Any] | None) -> dict[str, Any]:
         hourly_vs_month = round(money["yesterday"]["net_hourly"] - money["month"]["net_hourly"], 1)
-        debt_delta = None
-        rows = self.stats.last(2)
-        if recovery is not None and len(rows) >= 2:
-            prev_debt = float(rows[1]["overwork_index"] or 0)
-            debt_delta = round(recovery["overwork_index"] - prev_debt, 1)
+        debt_delta = _debt_trend(recovery, self.stats.last(2))
         return {"hourly_vs_month": hourly_vs_month, "debt_vs_prev": debt_delta}
 
     def _green_streak(self) -> int:
@@ -304,6 +299,23 @@ class HomeService:
             "title": "Ровный день",
             "text": "Планируй умеренную загрузку с паузами. Ориентируйся на самочувствие к обеду.",
         }
+
+
+def _debt_trend(recovery: dict[str, Any] | None, rows: list[Any]) -> float | None:
+    """Изменение долга к предыдущему дню.
+
+    «Предыдущий» зависит от источника recovery: при активной смене recovery —
+    живой, и предыдущий день — последний ЗАКРЫТЫЙ (rows[0]); без смены recovery
+    сам построен по rows[0], и предыдущий — rows[1]. Раньше при активной смене
+    тренд сравнивался с позавчерашним, молча пропуская вчера.
+    """
+    if recovery is None or not rows:
+        return None
+    prev_index = 0 if recovery.get("source") == "active" else 1
+    if len(rows) <= prev_index:
+        return None
+    prev_debt = float(rows[prev_index]["overwork_index"] or 0)
+    return round(recovery["overwork_index"] - prev_debt, 1)
 
 
 def _debt_verdict(debt: float) -> str:

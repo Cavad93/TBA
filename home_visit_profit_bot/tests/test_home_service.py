@@ -45,3 +45,24 @@ def test_home_with_active_shift_reports_shift_and_recovery(config) -> None:
     kinds = {rec["kind"] for rec in payload["recommendations"]}
     assert "recovery" in kinds
     assert "planning" in kinds
+
+
+def test_debt_trend_uses_last_closed_day_during_active_shift() -> None:
+    """При активной смене «предыдущий» — последний ЗАКРЫТЫЙ день (rows[0]).
+
+    Раньше тренд сравнивал живой долг с позавчерашним, молча пропуская вчера.
+    """
+    from app.services.home_service import _debt_trend
+
+    rows = [{"overwork_index": 40.0}, {"overwork_index": 70.0}]
+    live = {"overwork_index": 55.0, "source": "active"}
+    closed = {"overwork_index": 40.0, "source": "closed"}
+
+    # Живой 55 против вчерашних 40 → +15 (а не против позавчерашних 70).
+    assert _debt_trend(live, rows) == 15.0
+    # Без смены recovery сам построен по rows[0] → сравниваем с rows[1]: 40−70 = −30.
+    assert _debt_trend(closed, rows) == -30.0
+    # Границы: нет данных → None.
+    assert _debt_trend(None, rows) is None
+    assert _debt_trend(live, []) is None
+    assert _debt_trend(closed, [{"overwork_index": 40.0}]) is None

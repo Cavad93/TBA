@@ -26,7 +26,7 @@ from typing import Any
 from app.models import RouteSummary, Visit, WorkDay
 from app.repositories import DailyStatsRepository, SettingsRepository
 from app.services.profitability_service import calculate_day_profitability, vehicle_km_cost
-from app.services.schedule_service import _leg_minutes_by_visit, _parse
+from app.services.schedule_service import _drive_minutes, _leg_minutes_by_visit, _parse
 
 # Разница ₽/час меньше этого — шум: и OSRM, и оценки времени не настолько точны,
 # чтобы говорить человеку про «минус 12 ₽/час».
@@ -77,7 +77,9 @@ def _idle_minutes(day: WorkDay, visits: list[Visit], route: RouteSummary, *, now
         visit = by_id.get(visit_id)
         if visit is None:
             continue
-        clock += timedelta(minutes=legs.get(visit_id, 0.0))
+        # Дорога до заказа: плечо маршрута, а у заказа с ручными км — его ручные
+        # минуты (та же логика, что в late_warnings/arrival_windows, Этап 5 аудита).
+        clock += timedelta(minutes=_drive_minutes(visit, legs))
         planned_start = _parse(visit.planned_start_at) if visit.kind == "onsite" else None
         if planned_start is not None:
             wait = (planned_start - clock).total_seconds() / 60
