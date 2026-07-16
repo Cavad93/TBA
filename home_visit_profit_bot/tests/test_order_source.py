@@ -8,9 +8,11 @@
 from __future__ import annotations
 
 from app.db import connect
-from app.repositories import SettingsRepository, VisitRepository, WorkDayRepository
+from app.models import EndDayData
+from app.repositories import DailyStatsRepository, SettingsRepository, VisitRepository, WorkDayRepository
 from app.services.candidate_pure import evaluate
 from app.services.profitability_service import calculate_candidate_impact
+from app.services.stats_service import finalize_day
 
 
 def _base_inputs() -> dict:
@@ -85,6 +87,44 @@ def test_accepted_lead_cost_lowers_day_and_next_before(config) -> None:
 def replace_response_cost(visit):
     from dataclasses import replace
     return replace(visit, response_cost=0.0)
+
+
+def _close_day_with_orders(conn, *, lead_costs: tuple[float, float]) -> float:
+    """Закрыть смену с завершённым и отменённым заказами; вернуть расходы дня."""
+    days = WorkDayRepository(conn)
+    visits = VisitRepository(conn)
+    settings = SettingsRepository(conn)
+    day = days.create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31)
+    done = visits.create_candidate(
+        day.id, "Завершённый", 2000, 5, 15, None, True, lat=59.95, lon=30.36,
+        order_source="Профи", response_cost=lead_costs[0],
+    )
+    visits.accept(done.id)
+    visits.complete_visit(done.id)
+    wasted = visits.create_candidate(
+        day.id, "Отменённый", 1500, 5, 15, None, True, lat=59.96, lon=30.37,
+        order_source="Авито", response_cost=lead_costs[1],
+    )
+    visits.accept(wasted.id)
+    visits.cancel_visit(wasted.id)
+    data = EndDayData(
+        actual_km=10, completed_visits_count=1, total_work_minutes=120,
+        actual_route_minutes=30, start_odometer=1000, end_odometer=1015,
+        odometer_km=15, fuel_expenses=0, fuel_liters=0,
+        fuel_consumption_l_per_100km=0, telemed_income=0, telemed_minutes=0,
+        parking_expenses=0,
+    )
+    stats = finalize_day(day, data, days, visits, DailyStatsRepository(conn), settings)
+    return stats.total_expenses
+
+
+def test_finalize_day_charges_paid_leads(config) -> None:
+    """История дня сходится с live-экономикой: лиды завершённых И отменённых —
+    расход смены, иначе личные нормы учатся на приукрашенных итогах."""
+    with connect(config) as conn:
+        with_leads = _close_day_with_orders(conn, lead_costs=(500.0, 300.0))
+        without_leads = _close_day_with_orders(conn, lead_costs=(0.0, 0.0))
+    assert round(with_leads - without_leads, 2) == 800.0
 
 
 def test_cancelled_paid_lead_still_costs_the_day(config) -> None:

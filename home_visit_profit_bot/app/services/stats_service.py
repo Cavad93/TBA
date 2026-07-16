@@ -120,6 +120,14 @@ def finalize_day(
     fuel_expenses, amortization_expenses, car_expenses = calculate_car_expenses(data.actual_km, cost)
     fuel_cost_per_km = cost.total
     food_expenses_total = data.food_expenses + data.food_meal_expenses + data.coffee_expenses + data.drinks_expenses
+    # Лиды (цена отклика) завершённых и отменённых заказов — реальный расход смены.
+    # Live-экономика дня их вычитает (Этапы 4/7 аудита); история обязана сходиться
+    # с тем, что человек видел в течение смены, иначе личные нормы учатся на
+    # приукрашенных итогах.
+    lead_costs = sum(
+        visit.response_cost
+        for visit in visit_repo.list_for_day(day.id, ("completed", "cancelled"))
+    )
     total_expenses = (
         car_expenses
         + data.vehicle_expenses      # ремонт, ТО, шины, страховка — из них считается износ
@@ -128,6 +136,7 @@ def finalize_day(
         + food_expenses_total
         + data.toll_expenses
         + data.other_expenses
+        + lead_costs
     )
     # Оклад — тоже выручка, просто она не приходит заказами. Без этого окладник видел
     # бы нулевой доход и отрицательную прибыль каждый день.
