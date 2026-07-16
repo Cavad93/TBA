@@ -19,6 +19,6 @@ def quick_estimate(body: bytes = Depends(raw_body), auth: Authed = Depends(authe
     """
     payload = parse_json(body, {"error": "bad_request"}, with_detail=True)
     try:
-        return QuickEstimateService(auth.db).estimate(payload)
+        return QuickEstimateService(auth.db).estimate(payload, user_id=auth.user_id)
     except (KeyError, ValueError, TypeError) as error:
         raise ApiError(400, {"error": "bad_request", "detail": str(error)})

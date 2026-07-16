@@ -143,7 +143,7 @@ class QuickEstimateService:
             savings_threshold=tickets_savings_threshold(),
         )
 
-    def _destination(self, address: str, payload: dict[str, Any]) -> Point | None:
+    def _destination(self, address: str, payload: dict[str, Any], user_id: int | None) -> Point | None:
         lat = _optional_float(payload.get("lat"))
         lon = _optional_float(payload.get("lon"))
         if lat is not None and lon is not None:
@@ -160,10 +160,27 @@ class QuickEstimateService:
                 timeout_seconds=server_timeout(),
             )
         except GeocodingError:
+            geo = None
+        if geo is not None and geo.lat is not None and geo.lon is not None:
+            return Point(label=address, lat=float(geo.lat), lon=float(geo.lon))
+        return self._fuzzy_destination(address, payload, user_id)
+
+    def _fuzzy_destination(self, address: str, payload: dict[str, Any], user_id: int | None) -> Point | None:
+        """Nominatim промолчал — «прощающие» слои (learned + DaData): опечатки и кривые
+        сокращения перестают быть тупиком. Берём только уверенный точный дом; список
+        кандидатов в личной оценке показать негде, неоднозначность честно остаётся
+        needs_coordinates. Без user_id (нечем считать квоту DaData) — не ходим."""
+        if user_id is None:
             return None
-        if geo is None or geo.lat is None or geo.lon is None:
+        resolved = resolve_fuzzy(
+            address, self.connection, self.settings, user_id,
+            lat=_optional_float(payload.get("from_lat")),
+            lon=_optional_float(payload.get("from_lon")),
+        )
+        if resolved is None:
             return None
-        return Point(label=address, lat=float(geo.lat), lon=float(geo.lon))
+        return Point(label=str(resolved.get("address") or address),
+                     lat=float(resolved["lat"]), lon=float(resolved["lon"]))
 
     def _origin(self, payload: dict[str, Any]) -> Point | None:
         # Текущая позиция клиента (GPS), если прислал.

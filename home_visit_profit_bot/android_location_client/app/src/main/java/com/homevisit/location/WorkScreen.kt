@@ -491,6 +491,9 @@ internal fun EvaluateForm(
     // Ручной маршрут показываем только когда геокодер не справился.
     var routeKmText by rememberSaveable { mutableStateOf("") }
     var routeMinutesText by rememberSaveable { mutableStateOf("") }
+    // Адрес последнего расчёта: к нему привязана плашка ручного км/мин. Исправили
+    // адрес — плашка и старые ручные значения не должны пережить исправление.
+    var lastCalculatedAddress by rememberSaveable { mutableStateOf("") }
     val income = parseNumber(incomeText)
     val routeKm = parseNumber(routeKmText)
     val routeMinutes = parseNumber(routeMinutesText)
@@ -625,7 +628,10 @@ internal fun EvaluateForm(
             if (candidate.addressCandidates.isNotEmpty()) {
                 AddressCandidatesList(candidate.addressCandidates, onPickCandidate)
             }
-            if (candidate.needsManualRoute) {
+            // Плашка живёт, пока в поле тот же адрес, что не распознался. Исправили
+            // адрес — плашка исчезает, «Оценить заказ» снова пробует геокодер, а не
+            // требует вносить километраж руками.
+            if (candidate.needsManualRoute && resolved == lastCalculatedAddress) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MoneyField(modifier = Modifier.weight(1f), value = routeKmText, onValueChange = { routeKmText = it }, label = "Км вручную")
                     MoneyField(modifier = Modifier.weight(1f), value = routeMinutesText, onValueChange = { routeMinutesText = it }, label = "Мин вручную")
@@ -650,14 +656,23 @@ internal fun EvaluateForm(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = address.isNotBlank() && income != null && !candidate.isLoading,
                 onClick = {
+                    // Набрали название шаблона («Дом») — отправляем сохранённый за ним
+                    // адрес: геокодер по названию ничего не найдёт.
+                    val submitted = resolveAddressTemplate(address, templates)
+                    // Адрес исправили после неудачи — ручные км/мин относились к старому
+                    // адресу и не переносятся: сначала снова пробуем геокодер.
+                    val sameAddress = submitted == lastCalculatedAddress
+                    if (!sameAddress) {
+                        routeKmText = ""
+                        routeMinutesText = ""
+                    }
+                    lastCalculatedAddress = submitted
                     onCalculate(
-                        // Набрали название шаблона («Дом») — отправляем сохранённый за ним
-                        // адрес: геокодер по названию ничего не найдёт.
-                        resolveAddressTemplate(address, templates),
+                        submitted,
                         income ?: 0.0,
                         clinic,
-                        if (hasManualRoute) routeKm else null,
-                        if (hasManualRoute) routeMinutes else null,
+                        if (sameAddress && hasManualRoute) routeKm else null,
+                        if (sameAddress && hasManualRoute) routeMinutes else null,
                         null,
                         null,
                     )

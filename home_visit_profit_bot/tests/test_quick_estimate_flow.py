@@ -55,6 +55,36 @@ def test_quick_estimate_needs_address(config) -> None:
     assert result["reason"] == "no_address"
 
 
+def test_quick_estimate_falls_back_to_fuzzy_layers(config, monkeypatch) -> None:
+    """Nominatim промолчал — опечатку спасают «прощающие» слои (learned/DaData)."""
+    monkeypatch.setattr(flow, "geocode_address", lambda *a, **k: None)
+    monkeypatch.setattr(
+        flow, "resolve_fuzzy",
+        lambda *a, **k: {"address": "пр-кт Авиаконструкторов, д 33", "lat": 60.021, "lon": 30.2357},
+    )
+    with connect(config) as connection:
+        result = QuickEstimateService(connection).estimate(
+            {"address": "Аваконструкторов 33", "from_lat": 59.930, "from_lon": 30.310},
+            user_id=1,
+        )
+    assert result["ok"]
+    assert result["round_trip_km"] > 0
+
+
+def test_quick_estimate_without_user_id_skips_fuzzy(config, monkeypatch) -> None:
+    """Без user_id квоту DaData считать нечем — фолбэк молчит, ответ честный."""
+    monkeypatch.setattr(flow, "geocode_address", lambda *a, **k: None)
+    called: list[int] = []
+    monkeypatch.setattr(flow, "resolve_fuzzy", lambda *a, **k: called.append(1))
+    with connect(config) as connection:
+        result = QuickEstimateService(connection).estimate(
+            {"address": "Аваконструкторов 33", "from_lat": 59.930, "from_lon": 30.310}
+        )
+    assert result["ok"] is False
+    assert result["reason"] == "needs_coordinates"
+    assert not called
+
+
 # --- Билеты (Ф11.6): гейты личного режима и межгорода -------------------------
 
 
