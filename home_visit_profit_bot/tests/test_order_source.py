@@ -56,6 +56,37 @@ def test_repository_stores_source_and_cost(config) -> None:
     assert loaded.response_cost == 450.0
 
 
+def test_accepted_lead_cost_lowers_day_and_next_before(config) -> None:
+    """Цена отклика ПРИНЯТОГО заказа — расход дня, а не только момента оценки.
+
+    Раньше лид «испарялся» после принятия: «до» следующей оценки было завышено
+    на его цену. Теперь день с платным лидом беднее ровно на цену лида.
+    """
+    from app.services.profitability_service import calculate_day_profitability
+
+    with connect(config) as conn:
+        days = WorkDayRepository(conn)
+        visits = VisitRepository(conn)
+        settings = SettingsRepository(conn)
+        day = days.create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        paid = visits.create_candidate(
+            day.id, "Профи", 2000, 5, 15, None, True, lat=59.95, lon=30.36,
+            order_source="Профи", response_cost=500.0,
+        )
+        visits.accept(paid.id)
+        accepted = visits.list_for_day(day.id, ("accepted", "completed"))
+        net_with_lead, _, _, _, _ = calculate_day_profitability(day, accepted, settings)
+        # Тот же день, но как если бы лид был бесплатным.
+        free_like = [replace_response_cost(v) for v in accepted]
+        net_free, _, _, _, _ = calculate_day_profitability(day, free_like, settings)
+    assert round(net_free - net_with_lead, 2) == 500.0
+
+
+def replace_response_cost(visit):
+    from dataclasses import replace
+    return replace(visit, response_cost=0.0)
+
+
 def test_response_cost_lowers_candidate_margin(config) -> None:
     with connect(config) as conn:
         days = WorkDayRepository(conn)

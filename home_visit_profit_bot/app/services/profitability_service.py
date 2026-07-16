@@ -129,7 +129,17 @@ def calculate_day_profitability(
     route = calculate_route_summary(day, visits, settings_repo, strict_routing=strict_routing)
     total_income = calculate_day_income(day, visits)
     total_expenses = calculate_known_expenses(day, route.total_km, cost)
-    net_profit = total_income - total_expenses
+    # Цена отклика (платные лиды Профи/Авито) — прямой расход дня. Раньше она
+    # вычиталась только у оцениваемого кандидата и «испарялась» после принятия:
+    # ₽/час дня и «до» всех следующих оценок были завышены на сумму лидов смены.
+    # Статусы — ровно те же, что в calculate_day_income: чей доход считаем,
+    # того и расход на лид.
+    lead_costs = sum(
+        visit.response_cost
+        for visit in visits
+        if visit.status in {"accepted", "completed", "candidate"}
+    )
+    net_profit = total_income - total_expenses - lead_costs
     total_minutes = route.total_minutes + route.visits_count * service_minutes + day.telemed_minutes + day.office_minutes
     return net_profit, total_minutes, route.total_km, route.total_minutes, route
 
@@ -268,9 +278,8 @@ def calculate_candidate_impact(
     # заказом, поэтому вычитается из чистого «после». «До» её не платит (заказа нет),
     # значит разница after−before честно относит парковку на кандидата.
     after_net_profit -= parking_cost_low
-    # Цена отклика (Фаза 11.2): платный лид (Профи/Авито) — прямой расход заказа. «До»
-    # его не платит (заказа нет), поэтому вычитаем из «после», как и парковку.
-    after_net_profit -= candidate.response_cost
+    # Цена отклика кандидата уже вычтена внутри calculate_day_profitability («после»
+    # включает кандидата в списке визитов) — отдельное вычитание здесь задвоило бы её.
 
     before_hourly = _safe_hourly(before_net_profit, before_minutes)
     after_hourly = _safe_hourly(after_net_profit, after_minutes)
