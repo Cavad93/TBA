@@ -18,6 +18,7 @@ import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.AuthOutcome
 import com.homevisit.location.domain.MinimumCheck
 import com.homevisit.location.domain.QuickEstimateResult
+import com.homevisit.location.domain.TicketsOffer
 import com.homevisit.location.domain.AuthUser
 import com.homevisit.location.calc.OfflineEstimateMapper
 import com.homevisit.location.domain.CandidateEstimate
@@ -862,7 +863,28 @@ class HomeVisitRepository private constructor(
                 minimumCheck = response.optDouble("minimum_check", 0.0),
                 hourlyOnSite = response.optDouble("hourly_on_site", 0.0),
                 fallback = response.optBoolean("fallback", false),
+                tickets = parseTickets(response.optJSONObject("tickets")),
             ),
+        )
+    }
+
+    /**
+     * Блок билетов (Ф11.6). null — сервер решил, что показывать нечего: не межгород,
+     * не личный режим, нет ключа или билет не дешевле машины на порог. Сюда доходит
+     * только реальная выгода — клиент ничего не перепроверяет и не пересчитывает.
+     *
+     * Без ссылки блок бесполезен (переход не засчитается, деньги не придут) — считаем
+     * такой ответ отсутствующим, а не рисуем кнопку в никуда.
+     */
+    private fun parseTickets(json: JSONObject?): TicketsOffer? {
+        if (json == null) return null
+        val url = json.optString("url")
+        if (url.isBlank()) return null
+        return TicketsOffer(
+            priceFrom = json.optDouble("price_from", 0.0),
+            savingsPercent = json.optInt("savings_percent", 0),
+            text = json.optString("text"),
+            url = url,
         )
     }
 

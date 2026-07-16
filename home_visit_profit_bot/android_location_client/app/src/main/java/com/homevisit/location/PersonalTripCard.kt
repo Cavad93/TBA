@@ -1,9 +1,12 @@
 package com.homevisit.location
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -15,6 +18,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.homevisit.location.ui.PersonalTripUi
@@ -95,6 +99,7 @@ private fun PersonalTripResult(check: com.homevisit.location.domain.MinimumCheck
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        TicketsChip(check.tickets, oneWay)
         if (check.fallback) {
             Text(
                 "Адрес вне покрытия карт — оценка по прямой, грубо.",
@@ -103,6 +108,33 @@ private fun PersonalTripResult(check: com.homevisit.location.domain.MinimumCheck
             )
         }
     }
+}
+
+/**
+ * Маленькая кнопка «дешевле долететь» (Ф11.6). Появляется только при реальной выгоде.
+ *
+ * Никаких решений здесь нет: сервер присылает блок ТОЛЬКО когда билет дешевле машины
+ * минимум на порог (дефолт 10%) на межгороде в личном режиме. Нет блока — нет кнопки.
+ * Цифры берём готовой фразой сервера, а не пересобираем: иначе однажды разойдёмся с тем,
+ * по чему он принимал решение.
+ *
+ * `oneWay` гасит кнопку, и это не мелочь. Сервер сравнивал КРУГОВУЮ машину с КРУГОВЫМ
+ * билетом (`price` у Travelpayouts — перелёт туда И обратно). В режиме «только туда»
+ * цена машины делится пополам, а билет — нет: рядом с половинной суммой «самолёт дешевле»
+ * стало бы прямой неправдой. Молчим, а не показываем сомнительное.
+ */
+@Composable
+private fun TicketsChip(tickets: com.homevisit.location.domain.TicketsOffer?, oneWay: Boolean) {
+    if (tickets == null || oneWay) return
+    val context = LocalContext.current
+    AssistChip(
+        onClick = {
+            runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(tickets.url)))
+            }
+        },
+        label = { Text("✈ ${tickets.text}") },
+    )
 }
 
 @Composable
