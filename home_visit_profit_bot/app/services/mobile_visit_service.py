@@ -625,9 +625,26 @@ class MobileVisitService:
         if not active_visits:
             return {"ok": False, "reason": "no_active_visit", "hint": None}
 
-        visit = active_visits[0]
+        # Показываем подсказку по заказу, на котором РЕАЛЬНО копятся GPS-события: geofence
+        # (location_service) пишет их на ближайший КООРДИНАТНЫЙ заказ, а не на первый в
+        # ленте. Раньше брали active_visits[0] — и если первый заказ без координат
+        # (частый случай для распознанных из фото), подсказка вечно висела «нет стоянки»
+        # на нём, пока geofence работал по другому заказу (отчёт 10 из TG).
         events = LocationEventRepository(self.connection)
-        event = events.get(visit.id)
+        visit = None
+        event = None
+        for candidate in active_visits:
+            candidate_event = events.get(candidate.id)
+            if candidate_event is not None:
+                visit, event = candidate, candidate_event
+                break
+        if visit is None:
+            # Ни на одном заказе ещё нет стоянки — берём первый КООРДИНАТНЫЙ (по нему
+            # geofence и сработает); нет координатных — первый, как раньше.
+            visit = next(
+                (v for v in active_visits if v.lat is not None and v.lon is not None),
+                active_visits[0],
+            )
         if event is None:
             return {
                 "ok": False,

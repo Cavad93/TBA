@@ -642,11 +642,19 @@ internal fun FocusOrderCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
-                Text(active.address, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                // Цвет ПОД фон карточки (edgeContainer), а не onSurface по умолчанию:
+                // на жёлто-бежевом фоне дефолтный текст бледнел, а в энергосбережении
+                // (система затемняет экран) становился почти нечитаемым (отчёт 10 из TG).
+                Text(
+                    active.address,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = VerdictColors.onEdgeContainer,
+                )
                 Text(
                     "${active.clinic.ifBlank { "Без ${OrderSource.current.genSingle}" }} · ${money(active.income)}",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = VerdictColors.onEdgeContainer,
                 )
                 AnchorTimeLabel(active)
                 // Километры, минуты и деньги — наши, из OSRM. Человек видит, за что едет,

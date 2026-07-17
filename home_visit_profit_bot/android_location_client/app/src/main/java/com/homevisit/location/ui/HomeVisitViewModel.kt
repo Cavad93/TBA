@@ -766,14 +766,33 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun completeCurrentVisit(serverUrl: String, apiKey: String) {
         viewModelScope.launch {
-            val activeVisit = uiState.value.activeVisit ?: return@launch
-            val serverId = activeVisit.serverId ?: return@launch
+            // Молчаливые выходы прятали причину: кнопка «Готово» «переставала работать»,
+            // а человек не понимал почему (отчёт 10 из TG). Теперь каждый случай говорит.
+            val activeVisit = uiState.value.activeVisit
+            if (activeVisit == null) {
+                gpsHintState.value = GpsHintUiState(message = "Нет активного заказа для завершения")
+                return@launch
+            }
+            val serverId = activeVisit.serverId
+            if (serverId == null) {
+                // Заказ ещё не дошёл до сервера (нет связи/идёт синхронизация) — без его
+                // серверного номера завершить нельзя. Синк догонит — тогда кнопка сработает.
+                gpsHintState.value = GpsHintUiState(
+                    message = "Заказ ещё не синхронизирован с сервером — дождитесь связи и повторите",
+                )
+                refreshRouteInternal(serverUrl, apiKey)
+                return@launch
+            }
             val ok = repository.completeVisit(serverUrl, apiKey, serverId)
             if (ok) {
                 repository.markVisitStatus(activeVisit.localId, VisitStatus.Completed)
                 gpsHintState.value = GpsHintUiState(message = "Адрес закрыт")
                 refreshRouteInternal(serverUrl, apiKey)
                 startAutoOpenIfEnabled()
+            } else {
+                gpsHintState.value = GpsHintUiState(
+                    message = "Не удалось завершить заказ — проверьте связь и повторите",
+                )
             }
         }
     }
