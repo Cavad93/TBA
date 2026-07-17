@@ -194,7 +194,11 @@ class AuthService:
     def _require_user(self, email: str) -> dict[str, Any]:
         user = self.users.get_by_email(auth.normalize_email(email))
         if not user:
-            raise AuthError("Аккаунт не найден", status=404)
+            # Анти-энумерация: «нет аккаунта» снаружи неотличим от «код не
+            # запрашивался». Раньше здесь было 404 «Аккаунт не найден» — и разница
+            # ответов reset/verify выдавала, какие e-mail зарегистрированы,
+            # сводя на нет молчаливость forgot_password/resend_code.
+            raise AuthError("Код не запрашивался или уже использован", status=400)
         return user
 
     def _check_code(self, record: dict[str, Any] | None, code: str, repo: Any) -> None:

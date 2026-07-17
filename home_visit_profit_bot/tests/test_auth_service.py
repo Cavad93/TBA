@@ -147,6 +147,36 @@ def test_logout_and_delete_account(fresh_db, codes) -> None:
         assert service.users.get_by_email("d@b.com") is None
 
 
+def test_reset_and_verify_do_not_reveal_account_existence(fresh_db, codes) -> None:
+    """Чужой e-mail и «код не запрашивался» должны быть НЕОТЛИЧИМЫ.
+
+    forgot_password нарочно отвечает одинаково для любого адреса, но
+    reset/verify с 404 «Аккаунт не найден» позволяли перечислять
+    зарегистрированные e-mail разницей ответов — дыра закрыта.
+    """
+    config = fresh_db
+    with connect(config) as connection:
+        service = AuthService(connection, config)
+        service.register("real@b.com", "supersecret", "Ник")
+        service.verify_email("real@b.com", codes["real@b.com"])
+
+        # знакомый e-mail, но код сброса не запрашивался
+        with pytest.raises(AuthError) as known:
+            service.reset_password("real@b.com", "000000", "newpassword")
+        # незнакомый e-mail
+        with pytest.raises(AuthError) as unknown:
+            service.reset_password("ghost@b.com", "000000", "newpassword")
+
+        assert known.value.status == unknown.value.status == 400
+        assert known.value.message == unknown.value.message
+
+        # та же пара для подтверждения e-mail
+        with pytest.raises(AuthError) as verify_unknown:
+            service.verify_email("ghost@b.com", "000000")
+        assert verify_unknown.value.status == 400
+        assert verify_unknown.value.message == known.value.message
+
+
 def test_authenticate_rejects_garbage_token(fresh_db, codes) -> None:
     config = fresh_db
     with connect(config) as connection:

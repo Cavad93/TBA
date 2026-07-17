@@ -16,6 +16,8 @@ data class AuthUiState(
     val mode: AuthMode = AuthMode.Login,
     val isLoading: Boolean = false,
     val message: String = "",
+    /** true — message об ошибке (красный), false — информация («Код отправлен»). */
+    val isError: Boolean = false,
     /** E-mail, ожидающий подтверждения кода (Verify) или сброса пароля (Reset). */
     val pendingEmail: String = "",
 )
@@ -41,12 +43,18 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     val state: StateFlow<AuthUiState> = _state
 
     fun switchMode(mode: AuthMode) {
-        _state.update { it.copy(mode = mode, message = "") }
+        _state.update { it.copy(mode = mode, message = "", isError = false) }
     }
 
-    fun register(email: String, password: String, nickname: String, occupation: String?) {
+    fun register(email: String, password: String, passwordConfirm: String, nickname: String, occupation: String?) {
         if (!validCredentials(email, password) || nickname.isBlank()) {
-            _state.update { it.copy(message = "Заполните e-mail, ник и пароль (от 8 символов)") }
+            _state.update { it.copy(message = "Заполни e-mail, ник и пароль (от 8 символов)", isError = true) }
+            return
+        }
+        // Дубль проверки формы: кнопка и так заблокирована при несовпадении,
+        // но состояние гонок Compose не должно уметь отправить разные пароли.
+        if (password != passwordConfirm) {
+            _state.update { it.copy(message = "Пароли не совпадают", isError = true) }
             return
         }
         launchGuard {
@@ -55,7 +63,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 pendingPassword = password
                 _state.update { it.copy(mode = AuthMode.Verify, pendingEmail = email.trim(), message = result.message) }
             } else {
-                _state.update { it.copy(message = result.message) }
+                _state.update { it.copy(message = result.message, isError = true) }
             }
         }
     }
@@ -63,13 +71,13 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun verify(verificationCode: String, onAuthenticated: (String, AuthUser?) -> Unit) {
         val email = _state.value.pendingEmail
         if (verificationCode.isBlank()) {
-            _state.update { it.copy(message = "Введите код из письма") }
+            _state.update { it.copy(message = "Введи код из письма", isError = true) }
             return
         }
         launchGuard {
             val verified = repository.verifyEmail(serverUrl, email, verificationCode)
             if (!verified.ok) {
-                _state.update { it.copy(message = verified.message) }
+                _state.update { it.copy(message = verified.message, isError = true) }
                 return@launchGuard
             }
             // Код верный — сразу входим с паролем из регистрации.
@@ -82,20 +90,21 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     return@launchGuard
                 }
             }
-            _state.update { it.copy(mode = AuthMode.Login, message = "E-mail подтверждён. Войдите.") }
+            _state.update { it.copy(mode = AuthMode.Login, message = "E-mail подтверждён. Теперь войди.") }
         }
     }
 
     fun resend() {
         val email = _state.value.pendingEmail
         launchGuard {
-            _state.update { it.copy(message = repository.resendCode(serverUrl, email).message) }
+            val result = repository.resendCode(serverUrl, email)
+            _state.update { it.copy(message = result.message, isError = !result.ok) }
         }
     }
 
     fun login(email: String, password: String, onAuthenticated: (String, AuthUser?) -> Unit) {
         if (email.isBlank() || password.isBlank()) {
-            _state.update { it.copy(message = "Введите e-mail и пароль") }
+            _state.update { it.copy(message = "Введи e-mail и пароль", isError = true) }
             return
         }
         launchGuard {
@@ -109,14 +118,14 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 pendingPassword = password
                 _state.update { it.copy(mode = AuthMode.Verify, pendingEmail = email.trim(), message = result.message) }
             } else {
-                _state.update { it.copy(message = result.message) }
+                _state.update { it.copy(message = result.message, isError = true) }
             }
         }
     }
 
     fun forgot(email: String) {
         if (email.isBlank()) {
-            _state.update { it.copy(message = "Введите e-mail") }
+            _state.update { it.copy(message = "Введи e-mail", isError = true) }
             return
         }
         launchGuard {
@@ -126,23 +135,28 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     mode = if (result.ok) AuthMode.Reset else it.mode,
                     pendingEmail = if (result.ok) email.trim() else it.pendingEmail,
                     message = result.message,
+                    isError = !result.ok,
                 )
             }
         }
     }
 
-    fun reset(verificationCode: String, newPassword: String) {
+    fun reset(verificationCode: String, newPassword: String, newPasswordConfirm: String) {
         val email = _state.value.pendingEmail
         if (verificationCode.isBlank() || newPassword.length < 8) {
-            _state.update { it.copy(message = "Введите код и новый пароль (от 8 символов)") }
+            _state.update { it.copy(message = "Введи код и новый пароль (от 8 символов)", isError = true) }
+            return
+        }
+        if (newPassword != newPasswordConfirm) {
+            _state.update { it.copy(message = "Пароли не совпадают", isError = true) }
             return
         }
         launchGuard {
             val result = repository.resetPassword(serverUrl, email, verificationCode, newPassword)
             if (result.ok) {
-                _state.update { it.copy(mode = AuthMode.Login, message = "Пароль изменён. Войдите с новым паролем.") }
+                _state.update { it.copy(mode = AuthMode.Login, message = "Пароль изменён. Войди с новым паролем.") }
             } else {
-                _state.update { it.copy(message = result.message) }
+                _state.update { it.copy(message = result.message, isError = true) }
             }
         }
     }
@@ -153,7 +167,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun launchGuard(block: suspend () -> Unit) {
         if (_state.value.isLoading) return
-        _state.update { it.copy(isLoading = true, message = "") }
+        _state.update { it.copy(isLoading = true, message = "", isError = false) }
         viewModelScope.launch {
             try {
                 block()

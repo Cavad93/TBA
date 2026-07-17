@@ -80,7 +80,9 @@ fun AuthFlow(
                 Text(
                     state.message,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    // Ошибка обязана отличаться от «Код отправлен» — иначе оба
+                    // сообщения выглядят как успех.
+                    color = if (state.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -107,7 +109,7 @@ private fun LoginForm(state: AuthUiState, viewModel: AuthViewModel, onAuthentica
         Text("Нет аккаунта? Зарегистрироваться")
     }
     TextButton(onClick = { viewModel.switchMode(AuthMode.Forgot) }) {
-        Text("Забыли пароль?")
+        Text("Не помнишь пароль?")
     }
 }
 
@@ -116,8 +118,10 @@ private fun RegisterForm(state: AuthUiState, viewModel: AuthViewModel) {
     var email by rememberSaveable { mutableStateOf("") }
     var nickname by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
+    var passwordConfirm by rememberSaveable { mutableStateOf("") }
     var consentGiven by rememberSaveable { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
+    val confirmError = passwordConfirmError(password, passwordConfirm)
     Text("Регистрация", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
     EmailField(email) { email = it }
     OutlinedTextField(
@@ -125,9 +129,15 @@ private fun RegisterForm(state: AuthUiState, viewModel: AuthViewModel) {
         onValueChange = { nickname = it },
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
-        label = { Text("Ник (как к вам обращаться)") },
+        label = { Text("Ник (как к тебе обращаться)") },
     )
     PasswordField(password, "Пароль (от 8 символов)") { password = it }
+    PasswordField(
+        passwordConfirm,
+        "Повтори пароль",
+        isError = confirmError != null,
+        supportingText = confirmError,
+    ) { passwordConfirm = it }
 
     // Согласие на обработку ПДн (152-ФЗ): явная галочка, по умолчанию снята.
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -148,8 +158,8 @@ private fun RegisterForm(state: AuthUiState, viewModel: AuthViewModel) {
 
     Button(
         modifier = Modifier.fillMaxWidth(),
-        enabled = !state.isLoading && consentGiven,
-        onClick = { viewModel.register(email, password, nickname, null) },
+        enabled = !state.isLoading && consentGiven && password == passwordConfirm,
+        onClick = { viewModel.register(email, password, passwordConfirm, nickname, null) },
     ) { Text("Создать аккаунт") }
     TextButton(onClick = { viewModel.switchMode(AuthMode.Login) }) {
         Text("Уже есть аккаунт? Войти")
@@ -194,7 +204,7 @@ private fun ForgotForm(state: AuthUiState, viewModel: AuthViewModel) {
     var email by rememberSaveable { mutableStateOf(state.pendingEmail) }
     Text("Сброс пароля", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
     Text(
-        "Введите e-mail — пришлём код для сброса пароля.",
+        "Введи e-mail — пришлём код для сброса пароля.",
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
@@ -212,6 +222,8 @@ private fun ForgotForm(state: AuthUiState, viewModel: AuthViewModel) {
 private fun ResetForm(state: AuthUiState, viewModel: AuthViewModel) {
     var code by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
+    var passwordConfirm by rememberSaveable { mutableStateOf("") }
+    val confirmError = passwordConfirmError(password, passwordConfirm)
     Text("Новый пароль", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
     Text(
         "Код отправлен на ${state.pendingEmail}",
@@ -228,10 +240,16 @@ private fun ResetForm(state: AuthUiState, viewModel: AuthViewModel) {
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
     )
     PasswordField(password, "Новый пароль (от 8 символов)") { password = it }
+    PasswordField(
+        passwordConfirm,
+        "Повтори новый пароль",
+        isError = confirmError != null,
+        supportingText = confirmError,
+    ) { passwordConfirm = it }
     Button(
         modifier = Modifier.fillMaxWidth(),
-        enabled = !state.isLoading,
-        onClick = { viewModel.reset(code, password) },
+        enabled = !state.isLoading && password == passwordConfirm,
+        onClick = { viewModel.reset(code, password, passwordConfirm) },
     ) { Text("Сохранить пароль") }
     TextButton(onClick = { viewModel.switchMode(AuthMode.Login) }) { Text("Назад ко входу") }
 }
@@ -249,13 +267,21 @@ private fun EmailField(value: String, onValueChange: (String) -> Unit) {
 }
 
 @Composable
-private fun PasswordField(value: String, label: String, onValueChange: (String) -> Unit) {
+private fun PasswordField(
+    value: String,
+    label: String,
+    isError: Boolean = false,
+    supportingText: String? = null,
+    onValueChange: (String) -> Unit,
+) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
         label = { Text(label) },
+        isError = isError,
+        supportingText = supportingText?.let { { Text(it) } },
         visualTransformation = PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
     )
