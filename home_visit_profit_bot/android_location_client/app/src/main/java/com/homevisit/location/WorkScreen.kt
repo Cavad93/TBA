@@ -222,11 +222,17 @@ internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions)
 
     // Дефолты — из настроек (default_start/finish_address); литерал «Дом» — лишь
     // последний фолбэк, и он срабатывает только у тех, кто завёл одноимённый шаблон.
-    // Ключ rememberSaveable — сам дефолт: настройки догрузились → поле обновилось.
+    // Поле СЛЕДУЕТ за дефолтом, пока человек его не тронул: прежний ключ
+    // rememberSaveable(дефолт) пересоздавал state при догрузке настроек и стирал
+    // адрес, который человек печатал в этот момент (гонка снапшота, Этап 29).
     val defaultStart = uiState.appSettings.settingText("default_start_address").ifBlank { "Дом" }
     val defaultFinish = uiState.appSettings.settingText("default_finish_address").ifBlank { "Дом" }
-    var startAddress by rememberSaveable(defaultStart) { mutableStateOf(defaultStart) }
-    var finishAddress by rememberSaveable(defaultFinish) { mutableStateOf(defaultFinish) }
+    var startTouched by rememberSaveable { mutableStateOf(false) }
+    var startEdit by rememberSaveable { mutableStateOf("") }
+    var finishTouched by rememberSaveable { mutableStateOf(false) }
+    var finishEdit by rememberSaveable { mutableStateOf("") }
+    val startAddress = if (startTouched) startEdit else defaultStart
+    val finishAddress = if (finishTouched) finishEdit else defaultFinish
     var startOdometerText by rememberSaveable { mutableStateOf("") }
     val startOdometer = parseNumber(startOdometerText) ?: 0.0
     // Опечатка в одометре молча стартовала смену с нулём — весь дневной пробег
@@ -238,14 +244,14 @@ internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions)
         OutlinedTextField(
             modifier = Modifier.fillMaxWidth(),
             value = startAddress,
-            onValueChange = { startAddress = it },
+            onValueChange = { startTouched = true; startEdit = it },
             label = { Text("Старт") },
             singleLine = true,
         )
         OutlinedTextField(
             modifier = Modifier.fillMaxWidth(),
             value = finishAddress,
-            onValueChange = { finishAddress = it },
+            onValueChange = { finishTouched = true; finishEdit = it },
             label = { Text("Финиш") },
             singleLine = true,
         )
@@ -282,7 +288,14 @@ internal fun EndDayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActio
     var actualKmText by rememberSaveable { mutableStateOf("") }
     var workHoursText by rememberSaveable { mutableStateOf("") }
     var routeHoursText by rememberSaveable { mutableStateOf("") }
-    var completedVisitsText by rememberSaveable { mutableStateOf(uiState.visitsCount.toString()) }
+    // «Заказов» следует за живым счётчиком дня, пока человек его не тронул.
+    // Инициализация значением на момент ПЕРВОЙ композиции замораживала «0»
+    // навсегда (вкладки живут в SaveableStateProvider) — день закрывался с
+    // враньём о числе заказов молча.
+    var completedVisitsTouched by rememberSaveable { mutableStateOf(false) }
+    var completedVisitsEdit by rememberSaveable { mutableStateOf("") }
+    val completedVisitsText =
+        if (completedVisitsTouched) completedVisitsEdit else uiState.visitsCount.toString()
     var endOdometerText by rememberSaveable { mutableStateOf("") }
     var fuelExpensesText by rememberSaveable { mutableStateOf("") }
     var fuelLitersText by rememberSaveable { mutableStateOf("") }
@@ -346,14 +359,20 @@ internal fun EndDayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActio
                         routeHoursText = hoursInput(estimate.routeMinutes)
                     }
                     if (estimate.detectedVisitsCount > 0) {
-                        completedVisitsText = estimate.detectedVisitsCount.toString()
+                        completedVisitsTouched = true
+                        completedVisitsEdit = estimate.detectedVisitsCount.toString()
                     }
                 }
             },
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MoneyField(modifier = Modifier.weight(1f), value = actualKmText, onValueChange = { actualKmText = it }, label = "Рабочие км")
-            MoneyField(modifier = Modifier.weight(1f), value = completedVisitsText, onValueChange = { completedVisitsText = it }, label = "Заказов")
+            MoneyField(
+                modifier = Modifier.weight(1f),
+                value = completedVisitsText,
+                onValueChange = { completedVisitsTouched = true; completedVisitsEdit = it },
+                label = "Заказов",
+            )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MoneyField(modifier = Modifier.weight(1f), value = workHoursText, onValueChange = { workHoursText = it }, label = "Работа, ч")
@@ -1186,14 +1205,18 @@ internal fun OfficeInputCard(
 internal fun TelemedInputCard(clinics: List<String>, onSubmit: (Double, Double, String) -> Unit) {
     var minutesText by rememberSaveable { mutableStateOf("3") }
     var incomeText by rememberSaveable { mutableStateOf("") }
-    var clinic by rememberSaveable(clinics) { mutableStateOf(clinics.firstOrNull().orEmpty()) }
+    // Выбор следует за списком, пока не тронут: прежний ключ rememberSaveable(clinics)
+    // сбрасывал выбранную компанию на первую при догрузке списка посреди ввода.
+    var clinicTouched by rememberSaveable { mutableStateOf(false) }
+    var clinicEdit by rememberSaveable { mutableStateOf("") }
+    val clinic = if (clinicTouched) clinicEdit else clinics.firstOrNull().orEmpty()
     val minutes = parseNumber(minutesText)
     val income = parseNumber(incomeText)
 
     InputCard("Удалённые заказы") {
         MoneyField(value = incomeText, onValueChange = { incomeText = it }, label = "Стоимость")
         MoneyField(value = minutesText, onValueChange = { minutesText = it }, label = "Минуты")
-        ClinicPicker(clinics = clinics, selected = clinic, onSelect = { clinic = it })
+        ClinicPicker(clinics = clinics, selected = clinic, onSelect = { clinicTouched = true; clinicEdit = it })
         Button(
             modifier = Modifier.fillMaxWidth(),
             enabled = minutes != null && income != null && clinic.isNotBlank(),

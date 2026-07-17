@@ -366,6 +366,13 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
     }
 
     if (wizardOpen) {
+        // После смерти процесса wizardOpen восстанавливается, а endShift сброшен:
+        // без повторного prepare мастер остался бы без расчёта и прифилла навсегда.
+        LaunchedEffect(Unit) {
+            if (uiState.endShift.preview == null && !uiState.endShift.isLoading) {
+                workActions.onPrepareEndShift()
+            }
+        }
         EndShiftWizard(
             endShift = uiState.endShift,
             onFinish = { details ->

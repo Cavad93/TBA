@@ -18,6 +18,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -62,14 +63,27 @@ internal fun BaseZonesPage(appSettings: AppSettingsUiState, workActions: WorkAct
         ?.firstOrNull { it.type == SettingType.Zones }
 
     // Держим зоны JSON-строкой: так состояние переживает поворот экрана без своего Saver.
-    var zonesJson by rememberSaveable(field?.textValue) { mutableStateOf(field?.textValue ?: "[]") }
+    // СЛЕДУЕТ за сервером, пока человек не начал править: прежний ключ
+    // rememberSaveable(textValue) стирал весь черновик зон и районов, когда вход на
+    // страницу сам же триггерил перечитку настроек (гонка снапшота, Этап 29).
+    var zonesDirty by rememberSaveable { mutableStateOf(false) }
+    var zonesJson by rememberSaveable { mutableStateOf(field?.textValue ?: "[]") }
+    LaunchedEffect(field?.textValue) {
+        val server = field?.textValue ?: "[]"
+        if (!zonesDirty) {
+            zonesJson = server
+        } else if (server == zonesJson) {
+            // Сервер догнал черновик (сохранение применилось) — правка растворилась.
+            zonesDirty = false
+        }
+    }
     // dropBlank = false: только что добавленная зона пуста по определению, и выброси мы
     // её здесь — карточка исчезала бы на следующем кадре, а «Добавить зону» выглядела бы
     // сломанной. Пустые отсекаются ниже, на сохранении (и ещё раз на сервере).
     val zones = parseBaseZones(zonesJson, dropBlank = false)
     // Черновики «Добавить район» по индексу зоны: «Сохранить зоны» подхватывает
     // набранное без «+» — раньше такой район молча пропадал при сохранении.
-    val districtDrafts = remember(field?.textValue) { mutableStateMapOf<Int, String>() }
+    val districtDrafts = remember { mutableStateMapOf<Int, String>() }
 
     ScreenColumn {
         ZonesIntroCard()
@@ -89,12 +103,14 @@ internal fun BaseZonesPage(appSettings: AppSettingsUiState, workActions: WorkAct
             ZoneCard(
                 zone = zone,
                 districtDraft = districtDrafts[index].orEmpty(),
-                onDistrictDraft = { districtDrafts[index] = it },
+                onDistrictDraft = { districtDrafts[index] = it; zonesDirty = true },
                 onChange = { updated ->
+                    zonesDirty = true
                     zonesJson = serializeBaseZones(zones.toMutableList().also { it[index] = updated })
                 },
                 onRemove = {
                     districtDrafts.remove(index)
+                    zonesDirty = true
                     zonesJson = serializeBaseZones(zones.toMutableList().also { it.removeAt(index) })
                 },
             )
@@ -102,7 +118,10 @@ internal fun BaseZonesPage(appSettings: AppSettingsUiState, workActions: WorkAct
 
         OutlinedButton(
             modifier = Modifier.fillMaxWidth(),
-            onClick = { zonesJson = serializeBaseZones(zones + BaseZone()) },
+            onClick = {
+                zonesDirty = true
+                zonesJson = serializeBaseZones(zones + BaseZone())
+            },
         ) {
             Text("Добавить зону")
         }

@@ -199,9 +199,12 @@ internal fun HomeScreen(
         )
     }
 
-    if (showStartSheet) {
+    // Лист старта — только при живом снапшоте: после смерти процесса showStartSheet
+    // восстанавливается rememberSaveable'ом раньше, чем придёт сводка, и лист без
+    // startPrompt спрашивал ветерана «перерыв первой смены» и слал одометр 0.
+    if (showStartSheet && snapshot != null) {
         StartShiftSheet(
-            startPrompt = snapshot?.startPrompt,
+            startPrompt = snapshot.startPrompt,
             onDismiss = { showStartSheet = false },
             onConfirm = { odometer, firstBreakHours ->
                 workActions.onStartShift(odometer, firstBreakHours)
