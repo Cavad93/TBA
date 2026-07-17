@@ -23,6 +23,42 @@ def test_estimate_warns_about_missing_start_and_small_feed(config) -> None:
     assert "warnings" in candidate_result_payload(second)
 
 
+def test_missing_day_start_is_healed_from_settings(config, monkeypatch) -> None:
+    """ГЛУБИННЫЙ ФИКС (отчёт 7): день без координат старта, но в настройках адрес
+    задан — оценка досоздаёт координаты из настройки и НЕ ругается на старт.
+
+    Раньше настройка старта жила строкой без координат, и если день стартовал без
+    них (гонка синка онбординга / адрес не геокодился в тот момент) — оценка вечно
+    предупреждала «не задан старт», пока человек не пересохранит вручную.
+    """
+    from app.services.geocoding_service import GeocodingResult
+
+    with connect(config) as connection:
+        settings = SettingsRepository(connection)
+        settings.set("default_start_address", "Невский проспект 1")
+        settings.set("default_finish_address", "Невский проспект 1")
+        # День создан БЕЗ координат старта/финиша (как после гонки синка).
+        WorkDayRepository(connection).create("Невский проспект 1", "Невский проспект 1", 30, 20)
+        service = MobileVisitService(connection)
+        monkeypatch.setattr(
+            service, "_geocode_layered",
+            lambda address: GeocodingResult(
+                input_text=address, normalized_address=address, district=None,
+                lat=59.93, lon=30.31, confidence=1.0, source="test",
+            ),
+        )
+        result = service.create_candidate(
+            {"address": "Невский 5", "income": 1000, "lat": 59.936, "lon": 30.315,
+             "route_km": 5, "route_minutes": 20}
+        )
+        healed = WorkDayRepository(connection).active()
+
+    # Старт дня материализован из настройки — координаты появились.
+    assert healed.start_lat is not None and healed.finish_lat is not None
+    # И оценка больше НЕ жалуется на отсутствие старта.
+    assert not any("старт" in warning.lower() for warning in result.warnings)
+
+
 def test_truck_driver_not_warned_about_small_feed(config) -> None:
     """Грузовику 1–3 заказа за смену — норма: про ленту молчим, про старт — нет."""
     with connect(config) as connection:

@@ -107,6 +107,47 @@ class MobileVisitService:
             raise error
         return None
 
+    def _ensure_day_anchors(self, day):
+        """Досоздать координаты старта/финиша активного дня из дефолтных настроек.
+
+        ГЛУБИННЫЙ ФИКС разрыва «в настройках старт задан, а смена без координат»
+        (отчёт 7 из TG). Оценка требует координаты именно у активного дня
+        (work_day.start_lat), а настройка default_start_address — только строка.
+        Координаты появлялись лишь в момент старта смены и терялись, если адрес не
+        успел геокодиться или настройка (онбординг) не дошла до сервера к старту —
+        день молча оставался без старта, хотя в настройках он «задан».
+
+        Здесь чиним корень: если у дня нет координат, но адрес в настройках есть —
+        материализуем их без участия человека. Геокодим ТОЛЬКО когда координат нет,
+        поэтому на прогретом дне это мгновенный выход без обращения к геокодеру.
+        """
+        if day.start_lat is None or day.start_lon is None:
+            geo = self._safe_default_geocode("default_start_address")
+            if geo is not None:
+                self.days.update_start(day.id, geo.normalized_address or "", geo.lat, geo.lon)
+                day = self.days.active() or day
+        if day.finish_lat is None or day.finish_lon is None:
+            geo = self._safe_default_geocode("default_finish_address")
+            if geo is not None:
+                self.days.update_finish(day.id, geo.normalized_address or "", geo.lat, geo.lon)
+                day = self.days.active() or day
+        return day
+
+    def _safe_default_geocode(self, setting_key: str):
+        """Геокодировать адрес из настройки (с раскрытием шаблона «Дом»). None — если
+        адрес пуст, шаблон не развернулся или не геокодится: старт остаётся незаданным,
+        и оценка честно предупредит — молчаливой подмены не делаем."""
+        address = expand_template((self.settings.get(setting_key) or "").strip(), self.settings)
+        if not address:
+            return None
+        try:
+            geo = self._geocode_layered(address)
+        except GeocodingError:
+            return None
+        if geo is None or geo.lat is None or geo.lon is None:
+            return None
+        return geo
+
     def _estimate_warnings(self, day) -> list[str]:
         """Оговорки к оценке — честно сказать ДО того, как человек поверил цифре.
 
@@ -135,6 +176,9 @@ class MobileVisitService:
         day = self.days.active()
         if day is None:
             return CandidateApiResult(ok=False, reason="no_active_day")
+        # Досоздать координаты старта/финиша из настроек, если их нет: закрывает
+        # разрыв «в настройках задан, а смена без координат» (отчёт 7 из TG).
+        day = self._ensure_day_anchors(day)
         estimate_warnings = self._estimate_warnings(day)
 
         # «Дом» → сохранённый адрес: геокодер по названию шаблона ничего не найдёт.
