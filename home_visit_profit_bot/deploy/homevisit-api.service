@@ -25,6 +25,14 @@ EnvironmentFile=/opt/tba/home_visit_profit_bot/.env
 # keep-alive не даёт простаивающим соединениям копиться. Размер тела режет Caddy.
 Environment=DB_POOL_MIN=2
 Environment=DB_POOL_MAX=20
+
+# Миграция схемы ДО старта воркеров. Старый сервер (app.main) звал init_db при
+# старте, uvicorn-путь этого не делал — 17.07.2026 это уронило приём GPS на бою:
+# код ссылался на новую колонку left_at, а ALTER никто не выполнил (UndefinedColumn,
+# 500 на каждой точке вне геозоны). init_db идемпотентен; отдельный шаг исключает
+# и гонку двух воркеров за ALTER, если бы миграция жила в lifespan.
+ExecStartPre=/opt/tba/home_visit_profit_bot/.venv/bin/python -c 'from app.config import load_config; from app.db import init_db; init_db(load_config())'
+
 ExecStart=/opt/tba/home_visit_profit_bot/.venv/bin/uvicorn app.asgi:app --host 127.0.0.1 --port 8088 --workers 2 --limit-concurrency 64 --timeout-keep-alive 15 --no-access-log
 
 # ОТКАТ (закомментировано):
