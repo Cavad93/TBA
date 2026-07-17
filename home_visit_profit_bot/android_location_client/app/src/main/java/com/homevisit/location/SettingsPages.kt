@@ -42,6 +42,7 @@ internal fun AppSettingsPage(appSettings: AppSettingsUiState, workActions: WorkA
             appSettings = appSettings,
             onRefresh = workActions.onRefreshAppSettings,
             onSave = workActions.onSaveAppSettings,
+            onSuggestAddress = workActions.onSuggestSettingsAddress,
         )
     }
 }

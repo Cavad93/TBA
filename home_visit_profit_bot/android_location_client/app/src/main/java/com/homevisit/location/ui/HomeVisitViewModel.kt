@@ -23,6 +23,7 @@ import com.homevisit.location.domain.archiveBounds
 import com.homevisit.location.domain.archiveTimeText
 import com.homevisit.location.domain.sortArchive
 import com.homevisit.location.domain.AddressCandidate
+import com.homevisit.location.domain.RejectedSetting
 import com.homevisit.location.domain.CandidateEstimate
 import com.homevisit.location.domain.MinimumCheck
 import com.homevisit.location.domain.ClinicOptions
@@ -1477,6 +1478,30 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /**
+     * Подсказки адреса для поля настроек (старт/финиш по умолчанию) — тот же
+     * серверный слой (learned-кеш + DaData), что при оценке адреса заказа.
+     * Пустой запрос убирает подсказки поля.
+     */
+    fun suggestSettingsAddress(serverUrl: String, apiKey: String, fieldKey: String, query: String) {
+        viewModelScope.launch {
+            if (query.isBlank() || serverUrl.isBlank() || apiKey.isBlank()) {
+                appSettingsState.update { it.copy(addressCandidates = it.addressCandidates - fieldKey) }
+                return@launch
+            }
+            val gps = lastKnownGps()
+            val result = repository.suggestAddress(serverUrl, apiKey, query, gps?.first, gps?.second)
+            val candidates = when {
+                result.candidates.isNotEmpty() -> result.candidates
+                result.resolved != null -> listOf(result.resolved)
+                else -> emptyList()
+            }
+            appSettingsState.update {
+                it.copy(addressCandidates = it.addressCandidates + (fieldKey to candidates))
+            }
+        }
+    }
+
     fun saveAppSettings(serverUrl: String, apiKey: String, values: Map<String, Any?>) {
         viewModelScope.launch {
             if (values.isEmpty()) {
@@ -1497,11 +1522,12 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             // обязан увидеть — иначе он считает сохранённым то, что молча пропало.
             val outcome = repository.consumeSettingsSyncOutcome()
             val message = settingsSaveMessage(outcome)
+            val rejected = outcome?.rejected.orEmpty()
             val snapshot = repository.fetchAppSettings(serverUrl, apiKey)
             appSettingsState.value = if (snapshot == null) {
-                appSettingsState.value.copy(isLoading = false, message = message)
+                appSettingsState.value.copy(isLoading = false, message = message, rejected = rejected)
             } else {
-                AppSettingsUiState(snapshot = snapshot, message = message)
+                AppSettingsUiState(snapshot = snapshot, message = message, rejected = rejected)
             }
             clinicsState.value = repository.loadCachedClinics()
         }
@@ -1773,6 +1799,12 @@ data class AppSettingsUiState(
     val isLoading: Boolean = false,
     val snapshot: AppSettingsSnapshot? = null,
     val message: String = "",
+    // Отвергнутые сервером поля последнего сохранения: подсвечиваются на месте
+    // с причиной — «где ошибка и как исправить», а не только общий тост.
+    val rejected: List<RejectedSetting> = emptyList(),
+    // Подсказки адресов для полей настроек (ключ поля → кандидаты) — тот же
+    // серверный слой, что при оценке адреса заказа.
+    val addressCandidates: Map<String, List<AddressCandidate>> = emptyMap(),
 )
 
 data class HomeUiState(

@@ -238,6 +238,9 @@ class MainActivity : ComponentActivity() {
                             prefs.edit().putBoolean(KEY_ONBOARDING_PENDING, false).apply()
                             onboardingPending = false
                         },
+                        onSuggestAddress = { key, query ->
+                            viewModel.suggestSettingsAddress(DEFAULT_SERVER_URL, sessionToken, key, query)
+                        },
                     )
                     return@HomeVisitTheme
                 }
@@ -358,6 +361,7 @@ class MainActivity : ComponentActivity() {
                     onRefreshAppSettings = viewModel::refreshAppSettings,
                     onSaveAppSettings = viewModel::saveAppSettings,
                     onRefreshClinics = viewModel::refreshClinics,
+                    onSuggestSettingsAddress = viewModel::suggestSettingsAddress,
                 )
                     // Подтверждение принятого фото — поверх приложения, а не вместо него:
                     // OCR считает на сервере секунды, и всё это время человек должен
@@ -624,6 +628,8 @@ internal data class WorkActions(
     val onAddExpense: (ExpenseCategory, Double, String) -> Unit,
     val onRefreshAppSettings: () -> Unit,
     val onSaveAppSettings: (Map<String, Any?>) -> Unit,
+    /** Подсказки адреса для поля настроек: (ключ поля, введённый текст). */
+    val onSuggestSettingsAddress: (String, String) -> Unit = { _, _ -> },
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -697,6 +703,7 @@ internal fun HomeVisitApp(
     onRefreshAppSettings: (String, String) -> Unit,
     onSaveAppSettings: (String, String, Map<String, Any?>) -> Unit,
     onRefreshClinics: (String, String) -> Unit,
+    onSuggestSettingsAddress: (String, String, String, String) -> Unit = { _, _, _, _ -> },
 ) {
     var selected by rememberSaveable { mutableStateOf(AppDestination.Home) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
@@ -790,6 +797,7 @@ internal fun HomeVisitApp(
         onAddExpense = onAddExpense,
         onRefreshAppSettings = { onRefreshAppSettings(serverUrl, apiKey) },
         onSaveAppSettings = { values -> onSaveAppSettings(serverUrl, apiKey, values) },
+        onSuggestSettingsAddress = { key, query -> onSuggestSettingsAddress(serverUrl, apiKey, key, query) },
     )
     // Подтягиваем список клиник из настроек, когда есть URL и ключ (для форм).
     LaunchedEffect(serverUrl, apiKey) {

@@ -122,6 +122,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.homevisit.location.data.HomeVisitRepository
+import com.homevisit.location.domain.AddressCandidate
 import com.homevisit.location.domain.AuthUser
 import com.homevisit.location.ui.AuthFlow
 import com.homevisit.location.ui.AuthViewModel
@@ -245,30 +246,22 @@ internal fun AppSettingsCard(
     appSettings: AppSettingsUiState,
     onRefresh: () -> Unit,
     onSave: (Map<String, Any?>) -> Unit,
+    onSuggestAddress: (String, String) -> Unit = { _, _ -> },
 ) {
     val snapshot = appSettings.snapshot
-    // Локальное редактируемое состояние, пересобирается при новой загрузке с сервера.
-    val textEdits = remember(snapshot) { mutableStateMapOf<String, String>() }
-    val boolEdits = remember(snapshot) { mutableStateMapOf<String, Boolean>() }
+    // ДЕЛЬТА-МОДЕЛЬ: карты хранят только то, что человек ТРОГАЛ; всё остальное
+    // рисуется прямо из снапшота (рендер везде `edits[key] ?: field.value`).
+    // Раньше карты заполнялись всеми значениями и ПЕРЕСОЗДАВАЛИСЬ на каждый новый
+    // снапшот — а живой хинт extra_cost_per_km делает снапшоты неравными, и любой
+    // фоновый refresh (в т.ч. запущенный входом на страницу) стирал начатый ввод:
+    // «кнопка добавить не работает», «старт/финиш не сохраняются» — всё это была
+    // одна гонка. Правка человека не может проигрывать асинхронному ответу сети.
+    val textEdits = remember { mutableStateMapOf<String, String>() }
+    val boolEdits = remember { mutableStateMapOf<String, Boolean>() }
     // Черновик шаблона «Название+Адрес» живёт на уровне экрана: раньше набранное
     // без нажатия «Добавить шаблон» молча пропадало при «Сохранить настройки».
     var templateDraftName by rememberSaveable { mutableStateOf("") }
     var templateDraftAddress by rememberSaveable { mutableStateOf("") }
-    LaunchedEffect(snapshot) {
-        if (snapshot != null) {
-            textEdits.clear()
-            boolEdits.clear()
-            snapshot.sections.forEach { section ->
-                section.fields.forEach { field ->
-                    when (field.type) {
-                        SettingType.Bool -> boolEdits[field.key] = field.boolValue
-                        SettingType.ListValue -> textEdits[field.key] = field.listValue.joinToString(", ")
-                        else -> textEdits[field.key] = field.textValue
-                    }
-                }
-            }
-        }
-    }
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -304,6 +297,9 @@ internal fun AppSettingsCard(
                         templateDraftAddress = templateDraftAddress,
                         onTemplateDraftName = { templateDraftName = it },
                         onTemplateDraftAddress = { templateDraftAddress = it },
+                        rejectedReasons = appSettings.rejected.associate { it.key to it.reason },
+                        addressCandidates = appSettings.addressCandidates,
+                        onSuggestAddress = onSuggestAddress,
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -327,6 +323,10 @@ internal fun AppSettingsCard(
                                 templateDraftAddress = ""
                             }
                             onSave(collectSettingsChanges(snapshot.sections, textEdits, boolEdits))
+                            // Дельта передана: дальше правда живёт в ответе сервера
+                            // (applied → свежий снапшот, rejected → подсветка с причиной).
+                            textEdits.clear()
+                            boolEdits.clear()
                         },
                     ) {
                         Text(if (appSettings.isLoading) "Сохраняю..." else "Сохранить настройки")
@@ -349,6 +349,11 @@ internal fun AppSettingsSection(
     templateDraftAddress: String = "",
     onTemplateDraftName: (String) -> Unit = {},
     onTemplateDraftAddress: (String) -> Unit = {},
+    // Отвергнутое последним сохранением: ключ → причина. Ошибка показывается у
+    // самого поля — «где ошибка и как исправить», а не только общим сообщением.
+    rejectedReasons: Map<String, String> = emptyMap(),
+    addressCandidates: Map<String, List<AddressCandidate>> = emptyMap(),
+    onSuggestAddress: (String, String) -> Unit = { _, _ -> },
 ) {
     // Зоны обслуживания — не поле, а отдельная страница со своим объяснением.
     val fields = section.fields.filter { it.type != SettingType.Zones }
@@ -361,6 +366,10 @@ internal fun AppSettingsSection(
     val templates = templatesField?.let { parseAddressTemplates(textEdits[it.key] ?: it.textValue) }.orEmpty()
 
     fields.forEach { field ->
+        // Причина отказа сервера у САМОГО поля: «где ошибка и как исправить»,
+        // без технического ключа в начале строки.
+        val rejectedReason = rejectedReasons[field.key]?.let { it.substringAfter(": ", it) }
+        val errorSupport: (@Composable () -> Unit)? = rejectedReason?.let { reason -> { Text(reason) } }
         // Иные расходы на километр. Пояснение здесь — не мелкая подпись под полем, а
         // полноценная карточка: в нём стоят НАСТОЯЩИЕ цифры этого человека («сейчас
         // приложение считает столько-то на топливо и столько-то на износ»). Не понимая,
@@ -374,6 +383,8 @@ internal fun AppSettingsSection(
                 label = { Text(field.label) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                isError = rejectedReason != null,
+                supportingText = errorSupport,
             )
             return@forEach
         }
@@ -398,11 +409,15 @@ internal fun AppSettingsSection(
         // раньше был заглушкой, за которой не стояло адреса, и смена начиналась без
         // координат.
         if (field.key == "default_start_address" || field.key == "default_finish_address") {
-            DefaultAddressPicker(
+            DefaultAddressField(
                 label = field.label,
                 value = textEdits[field.key] ?: field.textValue,
+                touched = textEdits.containsKey(field.key),
                 templates = templates,
+                candidates = addressCandidates[field.key].orEmpty(),
+                rejectedReason = rejectedReasons[field.key],
                 onValue = { textEdits[field.key] = it },
+                onSuggest = { query -> onSuggestAddress(field.key, query) },
             )
             SettingHint(field.hint)
             return@forEach
@@ -437,6 +452,8 @@ internal fun AppSettingsSection(
                     singleLine = true,
                     label = { Text(field.label) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    isError = rejectedReason != null,
+                    supportingText = errorSupport,
                 )
             }
             SettingType.ListValue -> {
@@ -458,6 +475,8 @@ internal fun AppSettingsSection(
                     singleLine = true,
                     label = { Text(field.label) },
                     placeholder = { Text("ДД.ММ.ГГГГ") },
+                    isError = rejectedReason != null,
+                    supportingText = errorSupport,
                 )
             }
             else -> {
@@ -467,6 +486,8 @@ internal fun AppSettingsSection(
                     onValueChange = { textEdits[field.key] = it },
                     singleLine = true,
                     label = { Text(field.label) },
+                    isError = rejectedReason != null,
+                    supportingText = errorSupport,
                 )
             }
         }
@@ -478,68 +499,85 @@ internal fun AppSettingsSection(
 }
 
 /**
- * Старт или финиш по умолчанию: выбор из шаблонов адресов, которые пользователь завёл
- * сам, плюс ручной ввод.
+ * Старт или финиш по умолчанию: свободный ввод адреса + живые подсказки того же
+ * серверного слоя, что при оценке заказа, + быстрый выбор из своих шаблонов.
  *
- * Раньше здесь было текстовое поле со словом «Дом» — заглушкой, за которой не стояло
- * никакого адреса. Геокодер такое не находит, и смена начиналась вообще без координат
- * старта: маршрут строить было не от чего. Поэтому здесь честно: либо шаблон, либо
- * настоящий адрес, либо пусто — и мы об этом предупреждаем.
+ * Прошлая версия была выпадающим списком ТОЛЬКО из шаблонов: на чистом аккаунте
+ * шаблонов нет — и ввести адрес было физически невозможно («старт и финиш не
+ * сохраняются»). Ввести руками — можно всегда; подсказки помогают попасть в
+ * адрес, который геокодер точно знает.
  */
 @Composable
-internal fun DefaultAddressPicker(
+internal fun DefaultAddressField(
     label: String,
     value: String,
+    touched: Boolean,
     templates: List<AddressTemplate>,
+    candidates: List<AddressCandidate>,
+    rejectedReason: String?,
     onValue: (String) -> Unit,
+    onSuggest: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val matched = templates.firstOrNull { it.address == value || it.name.equals(value, ignoreCase = true) }
-    val display = when {
-        matched != null -> "${matched.name} · ${matched.address}"
-        value.isBlank() -> "Не выбрано"
-        else -> value
-    }
-
-    Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Box(Modifier.fillMaxWidth()) {
-        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
-            Text(display, modifier = Modifier.weight(1f), textAlign = TextAlign.Start, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = "Выбрать адрес")
+    // Подсказки — только по живому вводу человека, с паузой: сервер не дёргается
+    // на каждую букву, а выбранная подсказка (текст равен label) не ищется заново.
+    LaunchedEffect(value, touched) {
+        if (!touched) return@LaunchedEffect
+        if (value.isBlank() || candidates.any { it.label == value }) {
+            onSuggest("")
+            return@LaunchedEffect
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (templates.isEmpty()) {
-                DropdownMenuItem(
-                    text = { Text("Сначала добавьте шаблон адреса ниже") },
-                    enabled = false,
-                    onClick = {},
-                )
+        kotlinx.coroutines.delay(500)
+        onSuggest(value)
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedTextField(
+            modifier = Modifier.weight(1f),
+            value = value,
+            onValueChange = onValue,
+            singleLine = true,
+            label = { Text(label) },
+            isError = rejectedReason != null,
+            supportingText = rejectedReason?.let { reason ->
+                { Text(reason.substringAfter(": ", reason)) }
+            },
+        )
+        if (templates.isNotEmpty()) {
+            Box {
+                IconButton(onClick = { expanded = true }) {
+                    Icon(Icons.Filled.ArrowDropDown, contentDescription = "Выбрать из шаблонов")
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    templates.forEach { template ->
+                        DropdownMenuItem(
+                            text = { Text("${template.name} · ${template.address}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            onClick = {
+                                // В настройку кладём АДРЕС, а не название: координаты
+                                // считаются по адресу, за которым закреплён шаблон.
+                                onValue(template.address)
+                                expanded = false
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Очистить") },
+                        onClick = { onValue(""); expanded = false },
+                    )
+                }
             }
-            templates.forEach { template ->
-                DropdownMenuItem(
-                    text = { Text("${template.name} · ${template.address}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    onClick = {
-                        // В настройку кладём АДРЕС, а не название: координаты считаются
-                        // по адресу, за которым закреплён шаблон.
-                        onValue(template.address)
-                        expanded = false
-                    },
-                )
-            }
-            DropdownMenuItem(
-                text = { Text("Не выбрано") },
-                onClick = { onValue(""); expanded = false },
-            )
         }
     }
-    OutlinedTextField(
-        modifier = Modifier.fillMaxWidth(),
-        value = value,
-        onValueChange = onValue,
-        singleLine = true,
-        label = { Text("Или введите адрес") },
-    )
-    if (value.isNotBlank() && matched == null && !looksLikeAddress(value)) {
+    // Кандидаты сервера — как при оценке адреса: тап подставляет точный вариант.
+    candidates.forEach { candidate ->
+        OutlinedButton(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = { onValue(candidate.label); onSuggest("") },
+        ) {
+            Text(candidate.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+    val matchesTemplate = templates.any { it.address == value || it.name.equals(value, ignoreCase = true) }
+    if (value.isNotBlank() && !matchesTemplate && !looksLikeAddress(value)) {
         Text(
             "«$value» не похоже на адрес и не совпадает ни с одним шаблоном — карта его не найдёт, " +
                 "и смена начнётся без точки старта.",
