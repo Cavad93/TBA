@@ -40,9 +40,33 @@ _STATUS_WORDS = frozenset({
 # Дата/время в строке (17.07.2026, 12:41:11) — сама по себе не адрес.
 _DATE_OR_TIME = re.compile(r"\d{1,2}[.:]\d{2}(?:[.:]\d{2,4})?")
 
+# Маркеры адресной части (для склейки карточек): город или тип улицы.
+_ADDRESS_MARKER = re.compile(
+    r"(санкт[\s-]*петербург|москва|посёлок|поселок|город|"
+    r"улиц|\bул\b|проспект|\bпр-?кт\b|\bпр\b|переулок|\bпер\b|шоссе|\bш\b|"
+    r"аллея|бульвар|\bб-р\b|набережн|\bнаб\b|проезд|линия|тупик)",
+    re.IGNORECASE,
+)
+
 
 def _cyrillic_latin_letters(text: str) -> int:
     return sum(1 for ch in text.lower() if ch.isalpha())
+
+
+def _is_date_line(line: str) -> bool:
+    """Строка — это дата/время карточки (разделитель блоков), а не адрес."""
+    return bool(_DATE_OR_TIME.search(line)) and _cyrillic_latin_letters(line) < 3
+
+
+def _is_address_fragment(line: str) -> bool:
+    """Кусок адреса в карточке: город/тип улицы, запятая-разделитель или номер дома.
+
+    ФИО и искажённый статус («Новый»→«овђй») таких признаков не имеют — отпадают.
+    """
+    low = line.strip().lower()
+    if not low or low in _STATUS_WORDS:
+        return False
+    return bool(_ADDRESS_MARKER.search(low)) or "," in low or any(ch.isdigit() for ch in low)
 
 
 def _looks_like_address(line: str) -> bool:
@@ -73,14 +97,56 @@ class ParsedOrder:
 
 
 def parse_order_lines(text: str) -> list[ParsedOrder]:
-    """Разбить многострочный текст на заказы (адрес + необязательный доход)."""
+    """Разбить многострочный текст на заказы (адрес + необязательный доход).
+
+    Два формата:
+    - «карточки» (скриншот приложения-агрегатора): блок ФИО/адрес/дата/статус, где
+      адрес перенесён на 2–3 строки. Их надо СКЛЕИВАТЬ — иначе адрес рвётся. Признак
+      формата — строки-даты как разделители карточек;
+    - «список» (ручной ввод/шаринг текстом): одна строка — один заказ.
+    """
     if not text:
         return []
+    lines = [raw.strip() for raw in text.splitlines() if raw.strip()]
+    if sum(1 for line in lines if _is_date_line(line)) >= 1:
+        return _parse_cards(lines)
+    return _parse_flat(lines)
+
+
+def _parse_cards(lines: list[str]) -> list[ParsedOrder]:
+    """Карточный формат: строки-даты режут поток на блоки, из блока склеиваем адрес.
+
+    OCR разбивает адрес карточки на несколько визуальных строк («Санкт-Петербург,
+    Плесецкая / улица, 24 / кв 788»). Собираем адресные фрагменты блока в одну строку,
+    ФИО и статус (без адресных признаков) отбрасываем (отчёт 6 из TG).
+    """
     orders: list[ParsedOrder] = []
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
+    block: list[str] = []
+
+    def flush() -> None:
+        parts = [line for line in block if _is_address_fragment(line)]
+        block.clear()
+        if not parts:
+            return
+        joined = words_to_number(" ".join(parts))
+        joined = _UNIT_TAIL.sub("", joined).strip(" ,;")
+        address = canonical_building(joined).strip(" ,;")
+        if address and any(ch.isdigit() for ch in address):
+            orders.append(ParsedOrder(address=address, income=None))
+
+    for line in lines:
+        if _is_date_line(line):
+            flush()
+        else:
+            block.append(line)
+    flush()
+    return orders
+
+
+def _parse_flat(lines: list[str]) -> list[ParsedOrder]:
+    """Простой список: одна строка — один заказ (адрес + необязательный доход в конце)."""
+    orders: list[ParsedOrder] = []
+    for line in lines:
         income: float | None = None
         match = _INCOME.search(line)
         if match:

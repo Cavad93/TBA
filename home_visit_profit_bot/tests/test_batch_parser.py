@@ -57,6 +57,28 @@ def test_call_card_block_yields_only_address():
     assert orders[0].address == "Санкт-Петербург, Плесецкая улица, 24"
 
 
+def test_multiline_address_in_card_is_joined():
+    """OCR разбивает адрес карточки на 2–3 строки — склеиваем в ОДИН адрес.
+
+    Реальная причина плохого распознавания (проверено на живом OCR сервера 2):
+    один адрес приходит несколькими визуальными строками, и построчный парсер рвал
+    его на обрывки. Даты — разделители карточек, между ними склеиваем адресные куски.
+    """
+    text = (
+        "ЛЕОНЕНКО СВЕТЛАНА\n"
+        "Санкт-Петербург, Плесецкая\n"
+        "улица, 24 кв 788 под 7\n"
+        "788\n"
+        "17.07.2026 12:41:11\n"
+        "Новый"
+    )
+    orders = parse_order_lines(text)
+    assert len(orders) == 1
+    assert "Плесецкая" in orders[0].address
+    assert "24" in orders[0].address
+    assert "кв" not in orders[0].address.lower()  # хвост срезан
+
+
 def test_names_dates_statuses_are_not_orders():
     assert parse_order_lines("ЛЕОНЕНКО СВЕТЛАНА ФАНИСОВНА") == []
     assert parse_order_lines("Степанов Никита Сергеевич") == []
