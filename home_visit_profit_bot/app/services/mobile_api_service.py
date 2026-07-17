@@ -137,6 +137,11 @@ class MobileApiService:
                     incoming_payload_json=incoming_payload_json,
                     details="Processed event was received again with different metadata or payload; existing server data was kept.",
                 )
+            # Отчёт по настройкам отдаётся и на duplicate: ручное сохранение и
+            # фоновый воркер могут отправить одно событие наперегонки, и без
+            # сохранённого отчёта проигравший запрос получал settings=None —
+            # rejected терялся, клиент говорил «Настройки сохранены».
+            stored_report = existing["settings_report_json"] if "settings_report_json" in existing.keys() else None
             return SyncResult(
                 ok=True,
                 event_id=event_id,
@@ -146,6 +151,7 @@ class MobileApiService:
                 server_entity_id=existing["server_entity_id"],
                 duplicate=True,
                 reason="duplicate_event",
+                settings=json.loads(stored_report) if stored_report else None,
             )
 
         self._settings_report = None
@@ -184,10 +190,16 @@ class MobileApiService:
         self.connection.execute(
             """
             UPDATE mobile_sync_events
-            SET status = 'processed', server_entity_id = ?, processed_at = ?
+            SET status = 'processed', server_entity_id = ?, processed_at = ?,
+                settings_report_json = ?
             WHERE client_event_id = ?
             """,
-            (server_entity_id, now_iso(), event_id),
+            (
+                server_entity_id,
+                now_iso(),
+                json.dumps(self._settings_report, ensure_ascii=False) if self._settings_report else None,
+                event_id,
+            ),
         )
         self.connection.commit()
         return SyncResult(

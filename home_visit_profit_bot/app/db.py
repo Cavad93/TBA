@@ -501,7 +501,10 @@ CREATE TABLE IF NOT EXISTS mobile_sync_events (
     status TEXT NOT NULL,
     payload_json TEXT NOT NULL,
     received_at TEXT NOT NULL,
-    processed_at TEXT
+    processed_at TEXT,
+    -- Отчёт settings_saved (updated/rejected/ignored): duplicate обязан отдать
+    -- его же, иначе гонка ручного сохранения с фоновым воркером теряет rejected.
+    settings_report_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS mobile_sync_conflicts (
@@ -822,6 +825,7 @@ def _ensure_columns(db: Database) -> None:
     # Метка бэкфилла координат (P1): видно, что точку проставил скрипт, а не человек.
     _ensure_column(db, "visits", "coords_backfilled_at", "TEXT")
     _ensure_column(db, "visit_location_events", "left_at", "TEXT")
+    _ensure_column(db, "mobile_sync_events", "settings_report_json", "TEXT")
     _ensure_column(db, "parking_state", "entered_zone_id", "INTEGER")
     _ensure_column(db, "parking_state", "entered_at", "TEXT")
     _ensure_column(db, "parking_zones", "region", "TEXT DEFAULT ''")

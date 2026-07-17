@@ -211,6 +211,56 @@ def test_unknown_expense_category_lands_in_other(config) -> None:
     assert float(day.other_expenses) == 900.0
 
 
+def test_zero_visits_count_falls_back_to_actual_completed(config) -> None:
+    """Ноль заказов от старого клиента при живых визитах — статистика честная."""
+    with connect(config) as connection:
+        service = MobileApiService(connection)
+        settings = SettingsRepository(connection)
+        clinic = sorted((settings.get("clinics") or "").split(","), key=str.strip)[0].strip()
+        _start_day(service)
+        day_id = WorkDayRepository(connection).active().id
+        visits = VisitRepository(connection)
+        for n in (1, 2):
+            visit = visits.create_candidate(day_id, f"Адрес {n}", 1000, 5, 10, None, False,
+                                            lat=59.93 + n * 0.01, lon=30.31, clinic=clinic)
+            visits.accept(visit.id)
+            connection.execute("UPDATE visits SET status = 'completed' WHERE id = ?", (visit.id,))
+
+        service.process_sync_event(_close_event(_close_payload(completed_visits_count=0)))
+        stats = connection.execute(
+            "SELECT completed_visits_count, visit_income FROM daily_stats WHERE work_day_id = ?",
+            (day_id,),
+        ).fetchone()
+
+    assert int(stats["completed_visits_count"]) == 2, "0 из дефолта модели — не правда"
+    assert float(stats["visit_income"]) == 2000.0
+
+
+def test_duplicate_settings_event_returns_stored_report(config) -> None:
+    """Гонка ручного сохранения с фоновым воркером: duplicate отдаёт тот же отчёт.
+
+    Раньше duplicate возвращал settings=None — rejected терялся, и проигравший
+    запрос честно врал «Настройки сохранены».
+    """
+    event = {
+        "event_id": "settings-race-1",
+        "event_type": "settings_saved",
+        "entity_type": "settings",
+        "entity_id": "settings",
+        "payload": {"values": {"auto_open_navigator": True, "osago_expires_at": "мусор"}},
+    }
+    with connect(config) as connection:
+        service = MobileApiService(connection)
+        first = service.process_sync_event(event)
+        second = service.process_sync_event(event)
+
+    assert first.settings is not None
+    assert second.duplicate
+    assert second.settings is not None, "duplicate обязан отдать сохранённый отчёт"
+    assert second.settings["rejected"] == first.settings["rejected"]
+    assert [item["key"] for item in second.settings["rejected"]] == ["osago_expires_at"]
+
+
 def test_visit_saved_keeps_response_cost_and_source(config) -> None:
     """Цена платного лида и источник больше не теряются на офлайн-пути визита."""
     with connect(config) as connection:

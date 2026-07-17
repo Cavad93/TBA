@@ -84,6 +84,13 @@ def finalize_day(
         raise ValueError("Пробег по одометру меньше рабочего пробега.")
     personal_km = max(0.0, odometer_km - data.actual_km)
     completed_visits = visit_repo.list_for_day(day.id, ("completed",))
+    # Ноль заказов при живых выполненных визитах — дефолт модели старого клиента,
+    # а не правда: статистика показывала бы «0 заказов» при реальном доходе, а
+    # средняя длительность визита не считалась бы вовсе. Фактический счёт сервер
+    # знает сам; ненулевое присланное уважаем (человек мог поправить руками).
+    completed_count = (
+        data.completed_visits_count if data.completed_visits_count > 0 else len(completed_visits)
+    )
     planned_route_minutes = calculate_planned_route_minutes(day, completed_visits, settings_repo)
     route_time_factor = calculate_route_time_factor(
         actual_route_minutes=route_minutes,
@@ -94,8 +101,8 @@ def finalize_day(
     if service_minutes_total < 0:
         raise ValueError("Время дороги, удалённых заказов и работы на точке больше общего рабочего времени.")
     service_per_visit = (
-        service_minutes_total / data.completed_visits_count
-        if data.completed_visits_count > 0
+        service_minutes_total / completed_count
+        if completed_count > 0
         else 0
     )
 
@@ -207,7 +214,7 @@ def finalize_day(
             # перерыв между сменами. Кофеин и сон из него убраны — из них выводилось
             # состояние здоровья.
             "actual_km": data.actual_km,
-            "completed_visits_count": data.completed_visits_count,
+            "completed_visits_count": completed_count,
             "total_work_minutes": total_work_minutes,
             "night_work_minutes": 0.0,
             "break_hours_before": day.break_hours_before,
@@ -226,7 +233,7 @@ def finalize_day(
         _save_workload_rating_feedback(connection, day.id, data.workload_rating, workload.score)
 
     stats = DailyStats(
-        completed_visits_count=data.completed_visits_count,
+        completed_visits_count=completed_count,
         total_income=total_income,
         total_expenses=total_expenses,
         net_profit=net_profit,
