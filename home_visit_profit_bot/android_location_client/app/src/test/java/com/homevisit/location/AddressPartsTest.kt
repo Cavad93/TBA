@@ -72,4 +72,23 @@ class AddressPartsTest {
         val (city, address) = splitCityAddress(full)
         assertEquals(full, joinCityAddress(city, address))
     }
+
+    @Test
+    fun `дубль в ленте ловится несмотря на регистр и пунктуацию`() {
+        val route = listOf("г Санкт-Петербург, ул Ленина, д 5", "пр Науки, д 10")
+        assertTrue(addressAlreadyInRoute("Г Санкт-Петербург,  ул Ленина  д 5", route))
+        assertTrue(addressAlreadyInRoute("пр Науки, д 10", route))
+    }
+
+    @Test
+    fun `другой дом дублем не считается`() {
+        val route = listOf("ул Ленина, д 5")
+        assertFalse(addressAlreadyInRoute("ул Ленина, д 7", route))
+    }
+
+    @Test
+    fun `пустой адрес не дубль`() {
+        assertFalse(addressAlreadyInRoute("", listOf("ул Ленина, д 5")))
+        assertFalse(addressAlreadyInRoute("ул Ленина, д 5", emptyList()))
+    }
 }

@@ -57,3 +57,25 @@ fun joinCityAddress(city: String, streetHouse: String): String {
         else -> "$cityPart, $addressPart"
     }
 }
+
+/**
+ * Нормализованный вид адреса для сравнения «тот же ли это адрес». Регистр, лишние
+ * пробелы и знаки-разделители не должны делать один адрес двумя. Номер квартиры в
+ * адресную строку заказа обычно не попадает — совпадение означает «тот же дом»,
+ * а разные пациенты/квартиры в нём человек подтвердит вручную.
+ */
+fun normalizeAddressForCompare(address: String): String =
+    address.lowercase()
+        .replace(Regex("[,.;]+"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+/**
+ * Есть ли уже такой адрес среди адресов активной ленты (сравнение нормализованное).
+ * Пустой адрес дублем не считается — сравнивать нечего.
+ */
+fun addressAlreadyInRoute(address: String, routeAddresses: List<String>): Boolean {
+    val target = normalizeAddressForCompare(address)
+    if (target.isEmpty()) return false
+    return routeAddresses.any { normalizeAddressForCompare(it) == target }
+}

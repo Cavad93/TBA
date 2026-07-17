@@ -715,11 +715,21 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun acceptCandidate(serverUrl: String, apiKey: String) {
+    fun acceptCandidate(serverUrl: String, apiKey: String, force: Boolean = false) {
         viewModelScope.launch {
             val estimate = candidateState.value.estimate ?: return@launch
+            // Тот же адрес уже в активной ленте — не добавляем молча второй раз.
+            // Повтор допустим (несколько пациентов в доме, разные квартиры), но по
+            // явному подтверждению: показываем диалог, force=true приходит из него.
+            if (!force && com.homevisit.location.addressAlreadyInRoute(
+                    estimate.address, uiState.value.routeVisits.map { it.address })) {
+                candidateState.update { it.copy(duplicateAddressConfirm = true, isLoading = false) }
+                return@launch
+            }
             val workDayId = ensureActiveDay()
-            candidateState.update { it.copy(isLoading = true, message = "Принимаю адрес...") }
+            candidateState.update {
+                it.copy(isLoading = true, duplicateAddressConfirm = false, message = "Принимаю адрес...")
+            }
             val ok = repository.acceptCandidate(serverUrl, apiKey, workDayId, estimate)
             candidateState.value = if (ok) {
                 refreshRouteInternal(serverUrl, apiKey)
@@ -747,6 +757,11 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun clearCandidateMessage() {
         candidateState.value = CandidateUiState()
+    }
+
+    /** Отмена подтверждения дубля адреса: оставляем оценку, заказ НЕ добавляем. */
+    fun dismissDuplicateConfirm() {
+        candidateState.update { it.copy(duplicateAddressConfirm = false) }
     }
 
     fun completeCurrentVisit(serverUrl: String, apiKey: String) {
@@ -1707,6 +1722,8 @@ data class CandidateUiState(
      * лист показывал «Адрес принят» под заголовком «Не удалось рассчитать».
      */
     val done: Boolean = false,
+    /** Адрес совпал с уже принятым в ленте — ждём подтверждения повторного ввода. */
+    val duplicateAddressConfirm: Boolean = false,
 )
 
 /**

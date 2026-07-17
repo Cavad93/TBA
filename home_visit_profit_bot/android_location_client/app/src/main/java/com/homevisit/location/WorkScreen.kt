@@ -516,16 +516,37 @@ internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
         ) {
             CandidateGauge(
                 candidate = candidate,
-                onAccept = {
-                    workActions.onAcceptCandidate()
-                    showResult = false
-                },
+                // Закрытие листа НЕ форсируем: при успехе его снимет done через
+                // LaunchedEffect, а при дубле адреса лист остаётся под диалогом
+                // подтверждения — иначе диалог всплыл бы над пустотой.
+                onAccept = { workActions.onAcceptCandidate(false) },
                 onReject = {
                     workActions.onRejectCandidate()
                     showResult = false
                 },
             )
         }
+    }
+
+    // Тот же адрес уже в активной ленте — спрашиваем подтверждение повтора (несколько
+    // пациентов в доме, разные квартиры), а не добавляем молча второй заказ.
+    if (candidate.duplicateAddressConfirm) {
+        AlertDialog(
+            onDismissRequest = { workActions.onDismissDuplicate() },
+            title = { Text("Адрес уже в ленте") },
+            text = {
+                Text(
+                    "Этот адрес уже есть в активной ленте заказов. Добавить ещё раз? " +
+                        "Например, если это другой пациент или другая квартира в том же доме.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { workActions.onAcceptCandidate(true) }) { Text("Добавить ещё раз") }
+            },
+            dismissButton = {
+                TextButton(onClick = { workActions.onDismissDuplicate() }) { Text("Отмена") }
+            },
+        )
     }
 }
 
