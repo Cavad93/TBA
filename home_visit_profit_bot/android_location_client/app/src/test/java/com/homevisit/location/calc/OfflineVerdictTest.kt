@@ -113,31 +113,42 @@ class OfflineVerdictTest {
         assertTrue("дорогой лид загоняет маржу в минус", paid.marginalProfit < 0)
     }
 
-    /** Лиды отменённых заказов дня режут «до»/«после»: потери смены не прячутся из ₽/час. */
+    /**
+     * Лиды отменённых заказов дня режут «до»/«после» — потери смены двигают решение.
+     *
+     * Арифметика (матрица baseInput): before 20 км/70 мин, after 25 км/110 мин,
+     * cost 10 ₽/км. Кандидат 100 ₽: чисто — after 463.6 ₽/ч (≥300, но ниже before
+     * 685.7) → «МОЖНО БРАТЬ». Сгоревший лид 400 ₽: after (850−400)/110×60 = 245.5
+     * < min 300 → «НЕВЫГОДНО». Общий сдвиг net'а решает через порог min, а не через
+     * сравнение after>before (оно от общего сдвига почти не меняется).
+     */
     @Test
     fun cancelledLeadCostsLowerDayHourly() {
-        val clean = OfflineVerdict.evaluate(baseInput(candidateIncome = 800.0))
+        val clean = OfflineVerdict.evaluate(baseInput(candidateIncome = 100.0))
         val burned = OfflineVerdict.evaluate(
-            baseInput(candidateIncome = 800.0).copy(cancelledLeadCosts = 100000.0),
+            baseInput(candidateIncome = 100.0).copy(cancelledLeadCosts = 400.0),
         )
-        assertEquals("go", clean.verdict)
-        assertTrue(
-            "сгоревшие лиды обязаны менять решение, а не только маржу",
-            burned.decision != clean.decision,
-        )
+        assertEquals("МОЖНО БРАТЬ", clean.decision)
+        assertEquals("skip", burned.verdict)
     }
 
-    /** autoOptimize=false прокидывается до RouteOptimizer: порядок Ленты, а не оптимум. */
+    /**
+     * autoOptimize=false прокидывается до RouteOptimizer: порядок Ленты, а не оптимум.
+     *
+     * Матрица построена так, что порядок Ленты — катастрофа (плечо 0→1 = 200 км),
+     * а оптимум дешёвый (0→2→3→1→4 = 8 км). extra_km у кандидата одинаков (5 км) —
+     * различие живёт в «до»/«после»: оптимум даёт after 1539 ₽/ч < before 1790 →
+     * «МОЖНО БРАТЬ», Лента даёт after −83.8 > before −139.9 → «ОДНОЗНАЧНО ДА».
+     * Разные решения = флаг реально дошёл до порядка объезда.
+     */
     @Test
     fun feedOrderFlagReachesRouteOptimizer() {
-        // Матрица, где порядок Ленты заметно длиннее оптимального: у «до»/«после»
-        // меняются км, значит extraCarCost при выключенной оптимизации другой.
         val dist = listOf(
-            listOf(0.0, 10.0, 1.0, 1.0, 30.0),
-            listOf(10.0, 0.0, 1.0, 1.0, 1.0),
-            listOf(1.0, 1.0, 0.0, 5.0, 10.0),
-            listOf(1.0, 1.0, 5.0, 0.0, 10.0),
-            listOf(30.0, 1.0, 10.0, 10.0, 0.0),
+            listOf(0.0, 200.0, 1.0, 1.0, 200.0),
+            listOf(200.0, 0.0, 1.0, 1.0, 1.0),
+            listOf(1.0, 1.0, 0.0, 5.0, 200.0),
+            listOf(1.0, 1.0, 5.0, 0.0, 200.0),
+            listOf(200.0, 1.0, 200.0, 200.0, 0.0),
         )
         val dur = dist.map { row -> row.map { it * 2.0 } }
         val base = baseInput(candidateIncome = 800.0).copy(
@@ -148,10 +159,7 @@ class OfflineVerdictTest {
         )
         val optimized = OfflineVerdict.evaluate(base)
         val feedOrder = OfflineVerdict.evaluate(base.copy(autoOptimize = false))
-        assertTrue(
-            "порядок Ленты дороже оптимального — числа обязаны отличаться",
-            feedOrder.extraCarCost != optimized.extraCarCost ||
-                feedOrder.marginalProfit != optimized.marginalProfit,
-        )
+        assertEquals("МОЖНО БРАТЬ", optimized.decision)
+        assertEquals("ОДНОЗНАЧНО ДА", feedOrder.decision)
     }
 }
