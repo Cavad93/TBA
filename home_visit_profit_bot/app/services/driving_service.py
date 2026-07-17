@@ -95,6 +95,16 @@ def rebuild_daily(
             weighted[key] += float(row[key] or 0) * weight
 
     averages = {key: (value / weight_total if weight_total > 0 else 0.0) for key, value in weighted.items()}
+    # Дневной балл агрессии пересчитывается из СУММ той же формулой, что на
+    # клиенте (LocationUploadService.calculateAggressiveScore), а не усредняется
+    # по отрезкам: короткий отрезок с парой событий насыщался до 100 ещё на
+    # телефоне, и среднее уже насыщенных значений держало потолок весь день
+    # (живая смена Этапа 34: score=100 при спокойном jerk 2.1).
+    daily_aggressive = daily_aggressive_score(
+        counts, sensor_minutes,
+        jerk_score=averages["jerk_score"],
+        speed_variability_score=averages["speed_variability_score"],
+    )
 
     daily.upsert(
         work_day_id=work_day_id,
@@ -108,8 +118,32 @@ def rebuild_daily(
         stop_go_count=counts["stop_go_count"],
         jerk_score=round(averages["jerk_score"], 1),
         speed_variability_score=round(averages["speed_variability_score"], 1),
-        aggressive_score=round(averages["aggressive_score"], 1),
+        aggressive_score=round(daily_aggressive, 1),
     )
+
+
+def daily_aggressive_score(
+    counts: dict[str, int],
+    sensor_minutes: float,
+    *,
+    jerk_score: float,
+    speed_variability_score: float,
+) -> float:
+    """Балл агрессии из суммарных счётчиков дня — формула клиента, единицы те же.
+
+    lane_change в балл не входит (детектор выключен Этапом 34 как шумовой);
+    меньше 5 сенсорных минут — балла нет (0), а не выдумка на floor-знаменателе.
+    """
+    if sensor_minutes < 5:
+        return 0.0
+    hours = sensor_minutes / 60.0
+    event_rate = (
+        counts["harsh_acceleration_count"]
+        + counts["harsh_braking_count"]
+        + counts["hard_cornering_count"]
+        + counts["stop_go_count"] * 0.25
+    ) / hours
+    return min(100.0, event_rate * 3.2 + jerk_score * 0.35 + speed_variability_score * 0.25)
 
 
 def within_day_trend(segments: DrivingSegmentRepository, work_day_id: int) -> dict[str, Any] | None:

@@ -75,6 +75,14 @@ public class LocationUploadService extends Service implements LocationListener, 
      * это или торможение, а GPS с интервалом в минуту не видит самого события.
      */
     private float speedTrendKmh = 0f;
+    /** Когда тренд обновлялся: старше 90 с — направление события не выдумываем. */
+    private long lastSpeedTrendAtMs = 0L;
+    /** С какого момента сглаженное ускорение держится над порогом (0 — не держится). */
+    private long harshOverSinceMs = 0L;
+    /** То же для гироскопа (повороты). */
+    private long cornerOverSinceMs = 0L;
+    /** Сглаженный модуль угловой скорости: реальный поворот — сигнал на секунды. */
+    private float smoothedGyro = 0f;
     // Номер отрезка пути = сколько адресов уже закрыто. Присылает сервер.
     private int segmentIndex = 0;
 
@@ -89,7 +97,17 @@ public class LocationUploadService extends Service implements LocationListener, 
     private static final float DRIVING_MIN_SPEED_KMH = 10f;
     // Порог резкого продольного события, м/с². Один и тот же для разгона и торможения:
     // симметрия обязательна, иначе одно из них всегда выглядит хуже другого.
+    // 2.8 — в индустриальном консенсусе (Sentiance 2.25/3.0, DriveQuant 2.5,
+    // Verizon ~2.2–2.6, CMT ~3.3; сверено Этапом 34).
     private static final float HARSH_ACCEL_MPS2 = 2.8f;
+    // Порог должен УДЕРЖИВАТЬСЯ (Teltonika: короче 500 мс — шум; Verizon: ≥1 с).
+    // Мгновенный всплеск — яма или рука, не манёвр.
+    private static final long HARSH_HOLD_MS = 600L;
+    // Резкий поворот: сглаженная угловая скорость, рад/с. 0.5 рад/с при 40 км/ч —
+    // боковое ≈5.5 м/с² (уровень Digital Matter 0.56 g). Прежний порог 1.4 рад/с
+    // по СЫРОМУ гироскопу машина почти не могла дать, а рука давала легко:
+    // 515 «поворотов» за 3 часа живой смены были вращением телефона.
+    private static final float HARD_CORNER_RAD_S = 0.5f;
     // Сглаживание перед вычислением рывка (0..1): меньше — сильнее фильтр.
     private static final float JERK_FILTER_ALPHA = 0.2f;
     private static final int BATCH_MAX_POINTS = 10;
@@ -282,18 +300,32 @@ public class LocationUploadService extends Service implements LocationListener, 
             // что и резкий разгон, и без этого гейта пешая часть смены исправно
             // накручивала «резкие разгоны» и рывки.
             boolean driving = lastSpeedKmh >= DRIVING_MIN_SPEED_KMH;
-            if (driving && linear >= HARSH_ACCEL_MPS2 && nowMs - lastHarshAccelMs > 2500) {
-                // Резкость видит акселерометр, направление — GPS. Иначе торможение не
-                // ловилось вовсе: порог −2.2 м/с² при интервале GPS в 60 с требует
-                // падения скорости на 475 км/ч, поэтому harsh_braking_count был
-                // фактически всегда нулём, и «плавность торможения» выглядела идеальной
-                // у любого водителя.
-                if (speedTrendKmh < 0) {
-                    harshBrakingCount += 1;
-                } else {
-                    harshAccelerationCount += 1;
+            // Индустриальный контракт события (Sentiance/Teltonika/Verizon, Этап 34):
+            // порог должен УДЕРЖИВАТЬСЯ, мгновенный всплеск — это яма или рука.
+            // По СГЛАЖЕННОМУ значению (EMA выше — тот же low-pass, что режет jerk).
+            if (driving && smoothedLinearAccel >= HARSH_ACCEL_MPS2) {
+                if (harshOverSinceMs == 0) {
+                    harshOverSinceMs = nowMs;
                 }
-                lastHarshAccelMs = nowMs;
+                if (nowMs - harshOverSinceMs >= HARSH_HOLD_MS && nowMs - lastHarshAccelMs > 4000) {
+                    // Резкость видит акселерометр, направление — GPS-тренд. Свежий и
+                    // выраженный тренд обязателен: раньше дефолт «разгон» приписывал
+                    // событию направление, которого никто не измерял (105 против 61
+                    // на живой смене — раскладка отражала знак минутного тренда, а не
+                    // манёвры). Нет данных о направлении — нет события: честнее
+                    // недосчитать, чем выдумать.
+                    boolean trendFresh = lastSpeedTrendAtMs > 0 && nowMs - lastSpeedTrendAtMs <= 90_000;
+                    if (trendFresh && Math.abs(speedTrendKmh) >= 3f) {
+                        if (speedTrendKmh < 0) {
+                            harshBrakingCount += 1;
+                        } else {
+                            harshAccelerationCount += 1;
+                        }
+                        lastHarshAccelMs = nowMs;
+                    }
+                }
+            } else {
+                harshOverSinceMs = 0;
             }
             walk.onSample(linear, event.timestamp / 1_000_000_000.0, lastSpeedKmh < 0 ? 0 : lastSpeedKmh);
         } else if (event.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
@@ -302,14 +334,30 @@ public class LocationUploadService extends Service implements LocationListener, 
                             + event.values[1] * event.values[1]
                             + event.values[2] * event.values[2]
             );
-            if (angular >= 1.4f && nowMs - lastHardCornerMs > 2500) {
-                hardCorneringCount += 1;
-                lastHardCornerMs = nowMs;
+            // Сглаживание тем же EMA: реальный поворот — сигнал долей герца на
+            // секунды, рука с телефоном — высокочастотный всплеск (JMIR 2018:
+            // low-pass 0.4 Гц; Teltonika: событие короче 500 мс — шум).
+            smoothedGyro += JERK_FILTER_ALPHA * (angular - smoothedGyro);
+            // Гейт скорости ≥30 км/ч (Teltonika для cornering): на парковочных
+            // скоростях руль крутят до упора, а стоя телефон вертят в руках —
+            // на живой смене 515 «поворотов» за 3 часа были именно этим.
+            boolean corneringSpeed = lastSpeedKmh >= 30f;
+            if (corneringSpeed && smoothedGyro >= HARD_CORNER_RAD_S) {
+                if (cornerOverSinceMs == 0) {
+                    cornerOverSinceMs = nowMs;
+                }
+                if (nowMs - cornerOverSinceMs >= HARSH_HOLD_MS && nowMs - lastHardCornerMs > 5000) {
+                    hardCorneringCount += 1;
+                    lastHardCornerMs = nowMs;
+                }
+            } else {
+                cornerOverSinceMs = 0;
             }
-            if (Math.abs(event.values[2]) >= 0.8f && nowMs - lastLaneChangeMs > 1800) {
-                laneChangeProxyCount += 1;
-                lastLaneChangeMs = nowMs;
-            }
+            // lane_change_proxy ВЫКЛЮЧЕН (Этап 34): ни один смартфонный SDK не
+            // детектит перестроения надёжно, а физика манёвра (~0.05–0.1 рад/с)
+            // на порядок ниже любого отличимого от шума порога. 670 «перестроений»
+            // за 3 часа живой смены были вращением телефона. Поле остаётся в
+            // контракте (сервер/БД), счётчик честно равен нулю.
         }
         if (nowMs - lastPersistMs > 10000) {
             persistAggregate();
@@ -457,6 +505,7 @@ public class LocationUploadService extends Service implements LocationListener, 
                 // требовал падения на 475 км/ч за интервал и не срабатывал никогда —
                 // резкость теперь берёт акселерометр, а знак берём отсюда.
                 speedTrendKmh = (float) deltaKmh;
+                lastSpeedTrendAtMs = System.currentTimeMillis();
                 if ((lastSpeedKmh < 5 && speedKmh > 15) || (lastSpeedKmh > 15 && speedKmh < 5)) {
                     stopGoCount += 1;
                 }
@@ -726,15 +775,24 @@ public class LocationUploadService extends Service implements LocationListener, 
     }
 
     private double calculateAggressiveScore() {
-        double hours = Math.max(0.25, sensorSeconds / 3600.0);
+        // Меньше 5 сенсорных минут — балла нет: floor 0.25 ч в знаменателе давал
+        // короткому отрезку с парой событий мгновенные 100, а daily усреднял уже
+        // насыщенные значения (живая смена: score=100 при спокойном jerk 2.1).
+        if (sensorSeconds < 300) {
+            return 0.0;
+        }
+        double hours = sensorSeconds / 3600.0;
+        // lane_change выключен (счётчик 0); stop-go — слабый сигнал. Масштаб 3.2:
+        // «плохой» темп ~10 событий/час даёт ~32 + jerk/variability, потолок 100
+        // достигается реальной агрессией (~25+/ч), а не шумом (раньше насыщение
+        // наступало при 40 соб/ч суммарного шума — вся шкала жила на потолке).
         double eventRate = (
                 harshAccelerationCount
                         + harshBrakingCount
                         + hardCorneringCount
-                        + laneChangeProxyCount * 0.6
-                        + stopGoCount * 0.4
+                        + stopGoCount * 0.25
         ) / hours;
-        return Math.min(100.0, eventRate * 2.5 + calculateJerkScore() * 0.35 + calculateSpeedVariabilityScore() * 0.25);
+        return Math.min(100.0, eventRate * 3.2 + calculateJerkScore() * 0.35 + calculateSpeedVariabilityScore() * 0.25);
     }
 
     private void loadAggregate() {
