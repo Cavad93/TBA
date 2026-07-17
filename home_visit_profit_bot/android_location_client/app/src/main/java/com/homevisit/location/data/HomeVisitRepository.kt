@@ -380,7 +380,9 @@ class HomeVisitRepository private constructor(
         // не должен подмешиваться к результату ручного «Сохранить».
         settingsSyncOutcome = null
         var sent = 0
-        dao.getSyncQueueByStatuses(listOf(SyncStatus.Pending.value, SyncStatus.Failed.value), limit = 25).forEach { item ->
+        // 50, не 25: при бэклоге свежее settings_saved могло не попасть в прогон,
+        // и человек видел ложное «Нет связи с сервером» при живой сети.
+        dao.getSyncQueueByStatuses(listOf(SyncStatus.Pending.value, SyncStatus.Failed.value), limit = 50).forEach { item ->
             val result = sendSyncEvent(normalizedUrl, apiKey, item)
             val nextAttempts = item.attempts + 1
             dao.updateSyncStatus(

@@ -10,6 +10,7 @@ Telegram-командами `set_*`; каталог повторяет их на
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -416,6 +417,10 @@ def _coerce(field: SettingField, value: Any) -> str:
         try:
             number = float(value)
         except (TypeError, ValueError):
+            raise ValueError(f"{field.key}: значение должно быть числом")
+        # inf/nan: float() их принимает, а int(inf) ниже дал бы OverflowError,
+        # который не ловится как ValueError — 500 на весь батч и вечный зомби.
+        if not math.isfinite(number):
             raise ValueError(f"{field.key}: значение должно быть числом")
         if field.min is not None and number < field.min:
             raise ValueError(f"{field.key}: не меньше {field.min}")

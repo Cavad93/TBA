@@ -119,6 +119,58 @@ class SettingsChangesTest {
     }
 
     @Test
+    fun `растворение дельты — применённое уходит, отвергнутое остаётся`() {
+        // Регресс жалобы «после Сохранить значения откатываются»: слепой clear()
+        // перерисовывал поля из старого снапшота на время round-trip'а.
+        val sections = listOf(
+            SettingsSection(
+                key = "money",
+                title = "Деньги",
+                fields = listOf(
+                    SettingField(key = "min_hourly_income", label = "Планка", type = SettingType.Number, textValue = "750,5"),
+                    SettingField(key = "auto_open_delay_seconds", label = "Отсчёт", type = SettingType.Number, textValue = "5"),
+                    SettingField(key = "clinics", label = "Компании", type = SettingType.ListValue, listValue = listOf("Альфа", "Бета")),
+                    SettingField(key = "auto_optimize", label = "Оптимизация", type = SettingType.Bool, boolValue = true),
+                ),
+            )
+        )
+        val textEdits = mutableMapOf(
+            "min_hourly_income" to "750.5",   // применено (число совпало, формат другой)
+            "auto_open_delay_seconds" to "99", // отвергнуто сервером (min/max) — сервер хранит 5
+            "clinics" to "Альфа, Бета",        // применено (список совпал)
+        )
+        val boolEdits = mutableMapOf("auto_optimize" to true) // совпало
+
+        dissolveAppliedEdits(sections, textEdits, boolEdits)
+
+        assertEquals(mapOf("auto_open_delay_seconds" to "99"), textEdits)
+        assertEquals(emptyMap<String, Boolean>(), boolEdits)
+    }
+
+    @Test
+    fun `черновик списка без «Добавить» подхватывается сохранением`() {
+        val sections = listOf(
+            SettingsSection(
+                key = "companies",
+                title = "Компании",
+                fields = listOf(
+                    SettingField(key = "clinics", label = "Компании", type = SettingType.ListValue, listValue = emptyList()),
+                ),
+            )
+        )
+        val textEdits = mutableMapOf<String, String>()
+        val listDrafts = mutableMapOf("clinics" to "  Династия  ")
+
+        mergeListDrafts(sections, textEdits, listDrafts)
+
+        assertEquals("Династия", textEdits["clinics"])
+        assertFalse(listDrafts.containsKey("clinics"))
+
+        val changes = collectSettingsChanges(sections, textEdits, emptyMap())
+        assertEquals(listOf("Династия"), changes["clinics"])
+    }
+
+    @Test
     fun `normalizeDateInput — границы`() {
         assertEquals("2027-07-16", normalizeDateInput("16.07.2027"))
         assertEquals("2027-07-06", normalizeDateInput("6.7.2027"))

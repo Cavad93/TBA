@@ -1469,10 +1469,13 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             }
             appSettingsState.update { it.copy(isLoading = true, message = "Загружаю настройки...") }
             val snapshot = repository.fetchAppSettings(serverUrl, apiKey)
+            // rejected переживает перечитку: пока человек не пересохранил, причина
+            // отказа обязана оставаться у поля — вход-выход со страницы её не стирает.
+            val keepRejected = appSettingsState.value.rejected
             appSettingsState.value = if (snapshot == null) {
-                AppSettingsUiState(message = "Не удалось получить настройки")
+                AppSettingsUiState(message = "Не удалось получить настройки", rejected = keepRejected)
             } else {
-                AppSettingsUiState(snapshot = snapshot, message = "Настройки обновлены")
+                AppSettingsUiState(snapshot = snapshot, message = "Настройки обновлены", rejected = keepRejected)
             }
             clinicsState.value = repository.loadCachedClinics()
         }

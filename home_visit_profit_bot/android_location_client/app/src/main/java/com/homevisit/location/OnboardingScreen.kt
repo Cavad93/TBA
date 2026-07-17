@@ -58,10 +58,17 @@ fun OnboardingScreen(
     onSuggestAddress: (String, String) -> Unit = { _, _ -> },
 ) {
     val snapshot = appSettings.snapshot
-    // Дельта тронутых полей — как в Настройках. Никаких fill/clear по снапшоту:
-    // нетронутое всегда рисуется из свежего снапшота, тронутое — из рук человека.
+    // Дельта тронутых полей — как в Настройках (общая модель, общие Saver'ы бы
+    // дублировали код: держим локальные простые карты + растворение).
     val textEdits = remember { mutableStateMapOf<String, String>() }
     val boolEdits = remember { mutableStateMapOf<String, Boolean>() }
+    val listDrafts = remember { mutableStateMapOf<String, String>() }
+    var templateDraftName by rememberSaveable { mutableStateOf("") }
+    var templateDraftAddress by rememberSaveable { mutableStateOf("") }
+    // Применённое растворяется по свежему снапшоту, отвергнутое остаётся в поле.
+    androidx.compose.runtime.LaunchedEffect(snapshot) {
+        if (snapshot != null) dissolveAppliedEdits(snapshot.sections, textEdits, boolEdits)
+    }
 
     var page by rememberSaveable { mutableStateOf(0) }
     var saveRequested by rememberSaveable { mutableStateOf(false) }
@@ -119,9 +126,14 @@ fun OnboardingScreen(
                         section = section,
                         textEdits = textEdits,
                         boolEdits = boolEdits,
+                        templateDraftName = templateDraftName,
+                        templateDraftAddress = templateDraftAddress,
+                        onTemplateDraftName = { templateDraftName = it },
+                        onTemplateDraftAddress = { templateDraftAddress = it },
                         rejectedReasons = appSettings.rejected.associate { it.key to it.reason },
                         addressCandidates = appSettings.addressCandidates,
                         onSuggestAddress = onSuggestAddress,
+                        listDrafts = listDrafts,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(modifier = Modifier.weight(1f), onClick = { page -= 1 }) {
@@ -152,7 +164,8 @@ fun OnboardingScreen(
                     if (saveRequested && appSettings.message.isNotBlank()) {
                         Text(appSettings.message, style = MaterialTheme.typography.bodyMedium)
                     }
-                    if (saveRequested && appSettings.rejected.isNotEmpty()) {
+                    val hasRejected = saveRequested && appSettings.rejected.isNotEmpty()
+                    if (hasRejected) {
                         appSettings.rejected.forEach { bad ->
                             Text(
                                 "${bad.label} — ${bad.reason.substringAfter(": ", bad.reason)}",
@@ -164,20 +177,26 @@ fun OnboardingScreen(
                             Text("Вернуться и поправить")
                         }
                     }
-                    if (!saveRequested) {
+                    // «Сохранить» доступна, пока сохранение не прошло чисто: после
+                    // отказа человек правит поля и пересохраняет — исправление не
+                    // выбрасывается (раньше кнопка исчезала навсегда после 1-го раза).
+                    if (!saveRequested || hasRejected) {
                         Button(
                             modifier = Modifier.fillMaxWidth(),
                             enabled = !appSettings.isLoading,
                             colors = ButtonDefaults.buttonColors(containerColor = VerdictColors.go),
                             onClick = {
+                                mergeListDrafts(snapshot.sections, textEdits, listDrafts)
                                 onSave(collectSettingsChanges(snapshot.sections, textEdits, boolEdits))
                                 saveRequested = true
                             },
                         ) {
-                            Text("Сохранить и начать работу")
+                            Text(if (hasRejected) "Сохранить исправленное" else "Сохранить и начать работу")
                         }
-                        OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = { page -= 1 }) {
-                            Text("Назад")
+                        if (!hasRejected) {
+                            OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = { page -= 1 }) {
+                                Text("Назад")
+                            }
                         }
                     } else {
                         Button(

@@ -101,8 +101,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -241,6 +243,33 @@ internal fun OrderSourceCard() {
     }
 }
 
+// Saver'ы карт правок: дельта переживает поворот экрана и смерть процесса.
+private fun textMapSaver() = listSaver<SnapshotStateMap<String, String>, String>(
+    save = { map -> map.toList().flatMap { (key, value) -> listOf(key, value) } },
+    restore = { flat ->
+        mutableStateMapOf<String, String>().apply {
+            var i = 0
+            while (i + 1 < flat.size) {
+                put(flat[i], flat[i + 1])
+                i += 2
+            }
+        }
+    },
+)
+
+private fun boolMapSaver() = listSaver<SnapshotStateMap<String, Boolean>, String>(
+    save = { map -> map.toList().flatMap { (key, value) -> listOf(key, if (value) "1" else "0") } },
+    restore = { flat ->
+        mutableStateMapOf<String, Boolean>().apply {
+            var i = 0
+            while (i + 1 < flat.size) {
+                put(flat[i], flat[i + 1] == "1")
+                i += 2
+            }
+        }
+    },
+)
+
 @Composable
 internal fun AppSettingsCard(
     appSettings: AppSettingsUiState,
@@ -256,8 +285,17 @@ internal fun AppSettingsCard(
     // фоновый refresh (в т.ч. запущенный входом на страницу) стирал начатый ввод:
     // «кнопка добавить не работает», «старт/финиш не сохраняются» — всё это была
     // одна гонка. Правка человека не может проигрывать асинхронному ответу сети.
-    val textEdits = remember { mutableStateMapOf<String, String>() }
-    val boolEdits = remember { mutableStateMapOf<String, Boolean>() }
+    // rememberSaveable: дельта переживает и поворот экрана.
+    val textEdits = rememberSaveable(saver = textMapSaver()) { mutableStateMapOf<String, String>() }
+    val boolEdits = rememberSaveable(saver = boolMapSaver()) { mutableStateMapOf<String, Boolean>() }
+    // Черновики «Добавить» для списков (компании и т.п.): «Сохранить» подхватывает.
+    val listDrafts = rememberSaveable(saver = textMapSaver()) { mutableStateMapOf<String, String>() }
+    // Дельта не очищается вслепую — она РАСТВОРЯЕТСЯ: ключ уходит, когда свежий
+    // снапшот уже показывает это значение. Применённое исчезает само, отвергнутое
+    // остаётся в поле рядом с причиной, откатов «на время round-trip» нет.
+    LaunchedEffect(snapshot) {
+        if (snapshot != null) dissolveAppliedEdits(snapshot.sections, textEdits, boolEdits)
+    }
     // Черновик шаблона «Название+Адрес» живёт на уровне экрана: раньше набранное
     // без нажатия «Добавить шаблон» молча пропадало при «Сохранить настройки».
     var templateDraftName by rememberSaveable { mutableStateOf("") }
@@ -300,6 +338,7 @@ internal fun AppSettingsCard(
                         rejectedReasons = appSettings.rejected.associate { it.key to it.reason },
                         addressCandidates = appSettings.addressCandidates,
                         onSuggestAddress = onSuggestAddress,
+                        listDrafts = listDrafts,
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -322,11 +361,11 @@ internal fun AppSettingsCard(
                                 templateDraftName = ""
                                 templateDraftAddress = ""
                             }
+                            // Черновики списков без нажатой «Добавить» — часть сохранения.
+                            mergeListDrafts(snapshot.sections, textEdits, listDrafts)
                             onSave(collectSettingsChanges(snapshot.sections, textEdits, boolEdits))
-                            // Дельта передана: дальше правда живёт в ответе сервера
-                            // (applied → свежий снапшот, rejected → подсветка с причиной).
-                            textEdits.clear()
-                            boolEdits.clear()
+                            // Дельту НЕ чистим: применённое растворится по свежему
+                            // снапшоту, отвергнутое останется в поле с причиной.
                         },
                     ) {
                         Text(if (appSettings.isLoading) "Сохраняю..." else "Сохранить настройки")
@@ -354,6 +393,7 @@ internal fun AppSettingsSection(
     rejectedReasons: Map<String, String> = emptyMap(),
     addressCandidates: Map<String, List<AddressCandidate>> = emptyMap(),
     onSuggestAddress: (String, String) -> Unit = { _, _ -> },
+    listDrafts: MutableMap<String, String> = mutableMapOf(),
 ) {
     // Зоны обслуживания — не поле, а отдельная страница со своим объяснением.
     val fields = section.fields.filter { it.type != SettingType.Zones }
@@ -451,7 +491,9 @@ internal fun AppSettingsSection(
                     onValueChange = { textEdits[field.key] = it },
                     singleLine = true,
                     label = { Text(field.label) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    // Decimal, не Number: на части клавиатур Number прячет запятую,
+                    // а «Расход, л/100 км» без дроби не ввести.
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     isError = rejectedReason != null,
                     supportingText = errorSupport,
                 )
@@ -462,6 +504,8 @@ internal fun AppSettingsSection(
                 ListFieldEditor(
                     label = field.label,
                     items = items,
+                    draft = listDrafts[field.key].orEmpty(),
+                    onDraft = { listDrafts[field.key] = it },
                     onItemsChange = { newItems -> textEdits[field.key] = newItems.joinToString(", ") },
                 )
             }
@@ -519,11 +563,15 @@ internal fun DefaultAddressField(
     onSuggest: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    // Выбранное из подсказок/шаблонов: не искать заново то, что человек только что
+    // выбрал (кандидаты в state уже пусты к моменту рестарта эффекта — сравнение
+    // с ними после выбора не срабатывало, и список подсказок возвращался).
+    var lastPicked by remember { mutableStateOf<String?>(null) }
     // Подсказки — только по живому вводу человека, с паузой: сервер не дёргается
-    // на каждую букву, а выбранная подсказка (текст равен label) не ищется заново.
+    // на каждую букву.
     LaunchedEffect(value, touched) {
         if (!touched) return@LaunchedEffect
-        if (value.isBlank() || candidates.any { it.label == value }) {
+        if (value.isBlank() || value == lastPicked || candidates.any { it.label == value }) {
             onSuggest("")
             return@LaunchedEffect
         }
@@ -554,6 +602,7 @@ internal fun DefaultAddressField(
                             onClick = {
                                 // В настройку кладём АДРЕС, а не название: координаты
                                 // считаются по адресу, за которым закреплён шаблон.
+                                lastPicked = template.address
                                 onValue(template.address)
                                 expanded = false
                             },
@@ -571,7 +620,11 @@ internal fun DefaultAddressField(
     candidates.forEach { candidate ->
         OutlinedButton(
             modifier = Modifier.fillMaxWidth(),
-            onClick = { onValue(candidate.label); onSuggest("") },
+            onClick = {
+                lastPicked = candidate.label
+                onValue(candidate.label)
+                onSuggest("")
+            },
         ) {
             Text(candidate.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -713,12 +766,18 @@ internal fun ListFieldEditor(
     label: String,
     items: List<String>,
     onItemsChange: (List<String>) -> Unit,
+    // Черновик нового элемента живёт у родителя: «Сохранить настройки» подхватит
+    // набранное и без нажатия «Добавить». Прошлая версия добавляла ПУСТУЮ строку —
+    // на пустом списке она гибла в сериализации (join([""]) == ""), и «Добавить
+    // компанию» у нового пользователя не делала видимого ничего.
+    draft: String = "",
+    onDraft: (String) -> Unit = {},
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         if (items.isEmpty()) {
             Text(
-                "Список пуст. Нажмите «Добавить».",
+                "Пока пусто. Впиши название и нажми «Добавить».",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -749,10 +808,29 @@ internal fun ListFieldEditor(
                 }
             }
         }
-        OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = { onItemsChange(items + "") }) {
-            Icon(Icons.Filled.Add, contentDescription = null)
-            Spacer(Modifier.width(6.dp))
-            Text("Добавить")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                modifier = Modifier.weight(1f),
+                value = draft,
+                onValueChange = { onDraft(it.replace(",", "")) },
+                singleLine = true,
+                label = { Text("Новое название") },
+            )
+            OutlinedButton(
+                enabled = draft.isNotBlank(),
+                onClick = {
+                    onItemsChange(items + draft.trim())
+                    onDraft("")
+                },
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Добавить")
+            }
         }
     }
 }

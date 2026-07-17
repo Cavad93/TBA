@@ -264,6 +264,65 @@ private fun isoDateOrNull(year: Int, month: Int, day: Int): String? {
     return "%04d-%02d-%02d".format(year, month, day)
 }
 
+/**
+ * Растворение дельты правок: ключ уходит из карт, когда СЕРВЕР уже показывает
+ * это значение. Заменяет слепой clear() после «Сохранить»: тот мгновенно
+ * перерисовывал поля из старого снапшота — видимый «откат» на время
+ * round-trip'а, а офлайн — до следующего синка; человек читал это как
+ * «не сохранилось». Отвергнутое сервером с сервером не совпадёт — останется
+ * в поле рядом с красной причиной: видно, что именно введено не так.
+ */
+internal fun dissolveAppliedEdits(
+    sections: List<SettingsSection>,
+    textEdits: MutableMap<String, String>,
+    boolEdits: MutableMap<String, Boolean>,
+) {
+    sections.forEach { section ->
+        section.fields.forEach { field ->
+            val text = textEdits[field.key]
+            if (text != null && settingEditMatchesServer(field, text)) {
+                textEdits.remove(field.key)
+            }
+            val flag = boolEdits[field.key]
+            if (flag != null && flag == field.boolValue) {
+                boolEdits.remove(field.key)
+            }
+        }
+    }
+}
+
+private fun settingEditMatchesServer(field: SettingField, edited: String): Boolean = when (field.type) {
+    SettingType.Number -> {
+        val entered = edited.trim().replace(',', '.').toDoubleOrNull()
+        val stored = field.textValue.trim().replace(',', '.').toDoubleOrNull()
+        entered != null && entered == stored
+    }
+    SettingType.ListValue -> {
+        val enteredList = edited.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        enteredList == field.listValue
+    }
+    else -> edited.trim() == field.textValue.trim()
+}
+
+/** Черновики «Добавить» у списков: непустой черновик — часть сохранения, не потеря. */
+internal fun mergeListDrafts(
+    sections: List<SettingsSection>,
+    textEdits: MutableMap<String, String>,
+    listDrafts: MutableMap<String, String>,
+) {
+    sections.forEach { section ->
+        section.fields.forEach { field ->
+            if (field.type != SettingType.ListValue) return@forEach
+            val draft = listDrafts[field.key]?.trim().orEmpty().replace(",", "")
+            if (draft.isEmpty()) return@forEach
+            val current = (textEdits[field.key] ?: field.listValue.joinToString(", "))
+                .split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            textEdits[field.key] = (current + draft).joinToString(", ")
+            listDrafts.remove(field.key)
+        }
+    }
+}
+
 internal fun collectSettingsChanges(
     sections: List<SettingsSection>,
     textEdits: Map<String, String>,

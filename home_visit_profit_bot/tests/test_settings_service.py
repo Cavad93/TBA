@@ -134,6 +134,12 @@ def test_update_reports_invalid_values_without_raising(config) -> None:
         result = service.update({"fuel_price_per_liter": -1})
         assert [item["key"] for item in result["rejected"]] == ["fuel_price_per_liter"]
 
+        # inf проходит float(), но int(inf) дал бы OverflowError → 500 → зомби.
+        result = service.update({"min_hourly_income": "Infinity"})
+        assert [item["key"] for item in result["rejected"]] == ["min_hourly_income"]
+        result = service.update({"min_hourly_income": float("nan")})
+        assert [item["key"] for item in result["rejected"]] == ["min_hourly_income"]
+
         result = service.update({"address_templates": "   "})
         assert [item["key"] for item in result["rejected"]] == ["address_templates"]
 
