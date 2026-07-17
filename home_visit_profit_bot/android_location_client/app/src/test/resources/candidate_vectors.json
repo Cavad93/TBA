@@ -275,5 +275,59 @@
       "verdict": "go",
       "score": 96
     }
+  },
+  {
+    "name": "half_cent_rounding_boundary",
+    "inputs": {
+      "income": 380.07,
+      "extra_km": 8,
+      "extra_drive_minutes": 4,
+      "service_minutes": 20,
+      "fuel_per_km": 7.0,
+      "maintenance_per_km": 3.0,
+      "before_hourly": 700,
+      "after_hourly": 760,
+      "min_hourly": 600,
+      "min_marginal_hourly": 600,
+      "is_base_district": true,
+      "existing_base_count": 3
+    },
+    "expected": {
+      "marginal_profit": 300.07,
+      "marginal_hourly": 750.17,
+      "marginal_per_km": 37.51,
+      "extra_car_cost": 80.0,
+      "extra_total_minutes": 24.0,
+      "decision": "ОДНОЗНАЧНО ДА",
+      "verdict": "go",
+      "score": 87
+    }
+  },
+  {
+    "name": "half_cent_rounding_boundary_up",
+    "inputs": {
+      "income": 380.42,
+      "extra_km": 8,
+      "extra_drive_minutes": 60,
+      "service_minutes": 20,
+      "fuel_per_km": 7.0,
+      "maintenance_per_km": 3.0,
+      "before_hourly": 700,
+      "after_hourly": 640,
+      "min_hourly": 600,
+      "min_marginal_hourly": 600,
+      "is_base_district": true,
+      "existing_base_count": 3
+    },
+    "expected": {
+      "marginal_profit": 300.42,
+      "marginal_hourly": 225.31,
+      "marginal_per_km": 37.55,
+      "extra_car_cost": 80.0,
+      "extra_total_minutes": 80.0,
+      "decision": "МОЖНО БРАТЬ",
+      "verdict": "go",
+      "score": 70
+    }
   }
 ]

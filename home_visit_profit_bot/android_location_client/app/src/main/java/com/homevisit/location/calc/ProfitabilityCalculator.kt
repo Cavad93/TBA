@@ -97,9 +97,15 @@ object ProfitabilityCalculator {
     private fun zeroTiny(value: Double, epsilon: Double): Double =
         if (kotlin.math.abs(value) < epsilon) 0.0 else value
 
-    /** round(x, 2) как в Python — half-even. */
+    /** round(x, 2) как в Python — half-even ПО ДВОИЧНОМУ значению.
+
+     * Именно BigDecimal(value), не BigDecimal.valueOf(value): valueOf идёт через
+     * Double.toString (кратчайшую десятичную запись), и на значениях вида 750.175
+     * тай ловится по десятичной записи — Python же округляет точное двоичное
+     * значение. На достижимых .xx5 это давало ±0.01 (750.17 у сервера, 750.18 тут).
+     */
     private fun round2(value: Double): Double =
-        BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_EVEN).toDouble()
+        BigDecimal(value).setScale(2, RoundingMode.HALF_EVEN).toDouble()
 
     /**
      * Точный перенос make_decision. Строки решений совпадают с сервером посимвольно —

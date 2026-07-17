@@ -25,14 +25,27 @@ from app.services.osrm_cache import cached_distance_matrix
 from app.services.server_settings import osrm_url as server_osrm_url, request_timeout_seconds
 
 
-def snapshot_version(cost, min_hourly: float, service_minutes: float, straight_line_factor: float) -> str:
+def snapshot_version(
+    cost,
+    min_hourly: float,
+    service_minutes: float,
+    straight_line_factor: float,
+    *,
+    auto_optimize: bool = True,
+) -> str:
     """Короткая версия снимка коэффициентов: телефон и сервер сверяют, что считают одним.
 
     Меняется любой коэффициент — меняется строка. Клиент кладёт её рядом с расчётом;
     расхождение версий в логе синка (Ф3.6) объясняет расхождение чисел без гадания.
     Публичная — её же зовёт `formula_parity_service`, чтобы формат снимка был один.
+    Флаг auto_optimize в версии обязателен: режим порядка объезда меняет extra_km,
+    и расхождение из-за него должно объясняться версией снимка, а не выглядеть багом.
     """
-    return f"km{cost.fuel_per_km:.2f}_{cost.maintenance_per_km:.2f}|mh{min_hourly:.0f}|sm{service_minutes:.0f}|f{straight_line_factor:.2f}"
+    order = "1" if auto_optimize else "0"
+    return (
+        f"km{cost.fuel_per_km:.2f}_{cost.maintenance_per_km:.2f}"
+        f"|mh{min_hourly:.0f}|sm{service_minutes:.0f}|f{straight_line_factor:.2f}|o{order}"
+    )
 
 
 # Старое имя оставлено как псевдоним: на него мог ссылаться внешний код/тесты.
@@ -74,6 +87,10 @@ def build_matrix_response(
     outside_min_hourly = pricing.effective_outside_min_hourly
     avg_speed = settings_repo.get_float("avg_speed_kmh", 30)
     straight_line_factor = settings_repo.get_float("straight_line_factor", 1.35)
+    # Режим порядка объезда обязан ехать в снимок: при выключенной оптимизации
+    # сервер считает день по порядку Ленты (Этап 20), и телефон офлайн обязан
+    # считать так же — иначе extra_km расходится на первом же дне с 2+ заказами.
+    auto_optimize = settings_repo.get_bool("auto_optimize", True)
 
     fallback = False
     if len(points) < 2:
@@ -114,6 +131,9 @@ def build_matrix_response(
             "service_minutes": service_minutes,
             "avg_speed_kmh": avg_speed,
             "straight_line_factor": straight_line_factor,
+            "auto_optimize": auto_optimize,
         },
-        "snapshot_version": snapshot_version(cost, min_hourly, service_minutes, straight_line_factor),
+        "snapshot_version": snapshot_version(
+            cost, min_hourly, service_minutes, straight_line_factor, auto_optimize=auto_optimize
+        ),
     }

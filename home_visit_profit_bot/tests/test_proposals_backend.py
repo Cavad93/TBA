@@ -63,6 +63,37 @@ def test_day_matrix_carries_response_costs_in_income_order(config) -> None:
     assert len(response["response_costs"]) == len(response["incomes"])
 
 
+def test_day_matrix_carries_cancelled_lead_costs_and_order_mode(config) -> None:
+    """Этап 22: лиды отменённых и режим порядка объезда обязаны доезжать до телефона.
+
+    Сервер вычитает лиды отменённых из «до»/«после» (calculate_candidate_impact) и
+    умеет считать день по порядку Ленты (respect_feed_order). Без этих полей в
+    снимке офлайн-вердикт физически не может считать так же.
+    """
+    with connect(config) as connection:
+        days = WorkDayRepository(connection)
+        visits = VisitRepository(connection)
+        settings = SettingsRepository(connection)
+        settings.set("auto_optimize", "false")
+        day = days.create("Дом", "Дом", 30, 20, start_lat=59.930, start_lon=30.310,
+                          finish_lat=59.930, finish_lon=30.310)
+        kept = visits.create_candidate(day.id, "Едем", 1000, 0, 0, None, False,
+                                       lat=59.940, lon=30.310)
+        visits.accept(kept.id)
+        burned = visits.create_candidate(day.id, "Сорвался", 2000, 0, 0, None, False,
+                                         lat=59.950, lon=30.310, response_cost=350)
+        visits.accept(burned.id)
+        connection.execute("UPDATE visits SET status = 'cancelled' WHERE id = ?", (burned.id,))
+
+        response = _service(connection).day_matrix()
+
+    assert response["cancelled_lead_costs"] == 350
+    assert response["coefficients"]["auto_optimize"] is False
+    # Режим порядка — часть версии снимка: расхождение чисел из-за него должно
+    # объясняться версией, а не выглядеть багом формул.
+    assert response["snapshot_version"].endswith("|o0")
+
+
 def test_end_day_preview_shows_vehicle_costs(config) -> None:
     """P5: расходы машины и аренды видны при подтверждении итогов."""
     with connect(config) as connection:

@@ -26,6 +26,7 @@ object OfflineEstimateMapper {
         income: Double,
         address: String,
         clinic: String,
+        responseCost: Double = 0.0,
     ): CandidateEstimate? {
         val points = parsePoints(cache.optJSONArray("points")) ?: return null
         val distances = parseMatrix(cache.optJSONArray("distances_km")) ?: return null
@@ -41,6 +42,10 @@ object OfflineEstimateMapper {
         val netIncomes = incomes.mapIndexed { index, value ->
             value - responseCosts.getOrElse(index) { 0.0 }
         }
+        // Лиды отменённых заказов дня: сервер вычитает их из «до»/«после»
+        // (calculate_candidate_impact), офлайн без них завышал бы ₽/час на потери
+        // смены. Старый кеш без поля даёт 0.0 — как раньше.
+        val cancelledLeadCosts = cache.optDouble("cancelled_lead_costs", 0.0)
         val c = cache.optJSONObject("coefficients") ?: JSONObject()
 
         val coeff = OfflineCandidateEstimator.Coefficients(
@@ -53,6 +58,7 @@ object OfflineEstimateMapper {
             minMarginalHourly = c.optDouble("min_marginal_hourly_income", 600.0),
             outsideMinHourly = c.optDouble("outside_zone_min_hourly_income", 600.0),
             outsideMinExtra = c.optDouble("outside_zone_min_extra_payment", 0.0),
+            autoOptimize = c.optBoolean("auto_optimize", true),
         )
 
         val result = OfflineCandidateEstimator.estimate(
@@ -63,6 +69,10 @@ object OfflineEstimateMapper {
             candidateIncome = income,
             existingIncomes = netIncomes,
             coeff = coeff,
+            // Цена отклика кандидата: сервер вычитает её из маржи — офлайн обязан
+            // тоже, иначе платный лид офлайн выглядит выгоднее, чем он есть.
+            candidateResponseCost = responseCost,
+            cancelledLeadCosts = cancelledLeadCosts,
         )
 
         val costPerKm = coeff.fuelPerKm + coeff.maintenancePerKm

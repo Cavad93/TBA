@@ -92,4 +92,66 @@ class OfflineVerdictTest {
         assertTrue("маржа реагирует на доход", rich.marginalProfit > poor.marginalProfit)
         assertTrue("балл богатого не ниже", rich.score >= poor.score)
     }
+
+    /**
+     * Регресс Этапа 22: цена отклика КАНДИДАТА обязана вычитаться из маржи и офлайн.
+     * До правки поле терялось по всей цепочке (VM → mapper → estimator → verdict), и
+     * знак маржи переворачивался: сервер −400 ₽, телефон +400 ₽ на одном и том же лиде.
+     */
+    @Test
+    fun candidateResponseCostCutsMarginOffline() {
+        val free = OfflineVerdict.evaluate(baseInput(candidateIncome = 800.0))
+        val paid = OfflineVerdict.evaluate(
+            baseInput(candidateIncome = 800.0).copy(candidateResponseCost = 800.0),
+        )
+        assertEquals(
+            "лид вычитается из маржи рубль в рубль",
+            free.marginalProfit - 800.0,
+            paid.marginalProfit,
+            0.011,
+        )
+        assertTrue("дорогой лид загоняет маржу в минус", paid.marginalProfit < 0)
+    }
+
+    /** Лиды отменённых заказов дня режут «до»/«после»: потери смены не прячутся из ₽/час. */
+    @Test
+    fun cancelledLeadCostsLowerDayHourly() {
+        val clean = OfflineVerdict.evaluate(baseInput(candidateIncome = 800.0))
+        val burned = OfflineVerdict.evaluate(
+            baseInput(candidateIncome = 800.0).copy(cancelledLeadCosts = 100000.0),
+        )
+        assertEquals("go", clean.verdict)
+        assertTrue(
+            "сгоревшие лиды обязаны менять решение, а не только маржу",
+            burned.decision != clean.decision,
+        )
+    }
+
+    /** autoOptimize=false прокидывается до RouteOptimizer: порядок Ленты, а не оптимум. */
+    @Test
+    fun feedOrderFlagReachesRouteOptimizer() {
+        // Матрица, где порядок Ленты заметно длиннее оптимального: у «до»/«после»
+        // меняются км, значит extraCarCost при выключенной оптимизации другой.
+        val dist = listOf(
+            listOf(0.0, 10.0, 1.0, 1.0, 30.0),
+            listOf(10.0, 0.0, 1.0, 1.0, 1.0),
+            listOf(1.0, 1.0, 0.0, 5.0, 10.0),
+            listOf(1.0, 1.0, 5.0, 0.0, 10.0),
+            listOf(30.0, 1.0, 10.0, 10.0, 0.0),
+        )
+        val dur = dist.map { row -> row.map { it * 2.0 } }
+        val base = baseInput(candidateIncome = 800.0).copy(
+            distances = dist,
+            durations = dur,
+            existingCount = 2,
+            existingIncomes = listOf(1000.0, 1000.0),
+        )
+        val optimized = OfflineVerdict.evaluate(base)
+        val feedOrder = OfflineVerdict.evaluate(base.copy(autoOptimize = false))
+        assertTrue(
+            "порядок Ленты дороже оптимального — числа обязаны отличаться",
+            feedOrder.extraCarCost != optimized.extraCarCost ||
+                feedOrder.marginalProfit != optimized.marginalProfit,
+        )
+    }
 }

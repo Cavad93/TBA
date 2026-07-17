@@ -1174,10 +1174,13 @@ class HomeVisitRepository private constructor(
         income: Double,
         address: String,
         clinic: String,
+        responseCost: Double = 0.0,
     ): CandidateEstimate? = withContext(Dispatchers.Default) {
         val cached = dao.getSetting("cache_route_matrix_day")?.value ?: return@withContext null
         val json = try { JSONObject(cached) } catch (_: Exception) { return@withContext null }
-        OfflineEstimateMapper.fromDayMatrix(json, candidateLat, candidateLon, income, address, clinic)
+        OfflineEstimateMapper.fromDayMatrix(
+            json, candidateLat, candidateLon, income, address, clinic, responseCost,
+        )
     }
 
     /**

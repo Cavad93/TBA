@@ -32,6 +32,8 @@ object OfflineCandidateEstimator {
         val minMarginalHourly: Double,
         val outsideMinHourly: Double? = null,
         val outsideMinExtra: Double = 0.0,
+        // false → порядок объезда — как в Ленте (respect_feed_order Этапа 20).
+        val autoOptimize: Boolean = true,
     )
 
     /**
@@ -53,6 +55,8 @@ object OfflineCandidateEstimator {
         isBaseDistrict: Boolean = true,
         existingBaseCount: Int = 0,
         blocksOutsideZone: Boolean = false,
+        candidateResponseCost: Double = 0.0,
+        cancelledLeadCosts: Double = 0.0,
     ): ProfitabilityCalculator.Result {
         val n = cachedPoints.size
         require(n >= 2) { "кеш-матрица должна содержать хотя бы старт и финиш" }
@@ -112,6 +116,9 @@ object OfflineCandidateEstimator {
                 isBaseDistrict = isBaseDistrict,
                 existingBaseCount = existingBaseCount,
                 blocksOutsideZone = blocksOutsideZone,
+                candidateResponseCost = candidateResponseCost,
+                cancelledLeadCosts = cancelledLeadCosts,
+                autoOptimize = coeff.autoOptimize,
             ),
         )
     }

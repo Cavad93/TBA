@@ -39,18 +39,28 @@ object OfflineVerdict {
         val isBaseDistrict: Boolean = true,
         val existingBaseCount: Int = 0,
         val blocksOutsideZone: Boolean = false,
+        // Цена отклика КАНДИДАТА (платный лид Профи/Авито). Сервер вычитает её из
+        // маржи (profitability_service:312); без этого поля офлайн-вердикт терял её
+        // и знак маржи мог перевернуться (сервер −400 ₽, телефон +400 ₽).
+        val candidateResponseCost: Double = 0.0,
+        // Лиды отменённых заказов дня — вычитаются из «до» и «после», как на сервере.
+        val cancelledLeadCosts: Double = 0.0,
+        // false → день считается по порядку Ленты (перенос respect_feed_order Этапа 20).
+        val autoOptimize: Boolean = true,
     )
 
     /** Мгновенный офлайн-вердикт заказа. Возвращает тот же Result, что ProfitabilityCalculator. */
     fun evaluate(input: Input): ProfitabilityCalculator.Result {
         val extra = RouteOptimizer.candidateExtra(
             input.distances, input.durations, input.existingCount, input.anchors,
+            respectFeedOrder = !input.autoOptimize,
         )
         val costPerKm = input.fuelPerKm + input.maintenancePerKm
         val incomeSum = input.existingIncomes.sum()
 
-        val beforeNet = incomeSum - extra.beforeKm * costPerKm
-        val afterNet = incomeSum + input.candidateIncome - extra.afterKm * costPerKm
+        val beforeNet = incomeSum - extra.beforeKm * costPerKm - input.cancelledLeadCosts
+        val afterNet = incomeSum + input.candidateIncome - input.candidateResponseCost -
+            extra.afterKm * costPerKm - input.cancelledLeadCosts
         val beforeMinutes = extra.beforeMinutes + input.existingCount * input.serviceMinutes
         val afterMinutes = extra.afterMinutes + (input.existingCount + 1) * input.serviceMinutes
         val beforeHourly = safeHourly(beforeNet, beforeMinutes)
@@ -73,6 +83,7 @@ object OfflineVerdict {
                 outsideMinHourly = input.outsideMinHourly,
                 outsideMinExtra = input.outsideMinExtra,
                 blocksOutsideZone = input.blocksOutsideZone,
+                responseCost = input.candidateResponseCost,
             )
         )
     }

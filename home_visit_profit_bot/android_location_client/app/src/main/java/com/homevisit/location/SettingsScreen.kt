@@ -555,8 +555,11 @@ private fun FuelCostPerKmHint(textEdits: Map<String, String>, fields: List<Setti
         colors = CardDefaults.cardColors(containerColor = VerdictColors.goContainer),
     ) {
         Text(
-            "Получается ${money(price * consumption / 100)} за километр — по этой цифре " +
-                "считается, выгоден ли заказ.",
+            // Честно: это только топливная часть. Вердикт считается по полной цене
+            // километра (топливо + износ), а измеренное по заправкам вытесняет модель.
+            "Топливо: ${money(price * consumption / 100)} за километр. В оценке заказа " +
+                "к этому добавляется износ, а при накопленных заправках и расходах " +
+                "приложение считает по ним, а не по этой формуле.",
             modifier = Modifier.padding(12.dp),
             style = MaterialTheme.typography.bodySmall,
             color = VerdictColors.onGoContainer,

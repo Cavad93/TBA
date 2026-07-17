@@ -72,7 +72,10 @@ def check_visit_parity(
     min_hourly = settings_repo.get_float("min_hourly_income", 600)
     service_minutes = settings_repo.get_float("default_service_minutes", 20)
     straight_line_factor = settings_repo.get_float("straight_line_factor", 1.35)
-    server_snapshot = snapshot_version(cost, min_hourly, service_minutes, straight_line_factor)
+    server_snapshot = snapshot_version(
+        cost, min_hourly, service_minutes, straight_line_factor,
+        auto_optimize=settings_repo.get_bool("auto_optimize", True),
+    )
     details = (
         f"маржа: телефон {float(client_marginal_profit):.2f} ₽ vs сервер {server_marginal:.2f} ₽ "
         f"(Δ {delta:.2f} ₽); снимок телефона {client_snapshot_version or '—'} vs сервер {server_snapshot}"

@@ -416,6 +416,12 @@ class MobileVisitService:
         # оценка на телефоне строила «до» из одних доходов и на днях с платными лидами
         # была оптимистичнее серверной: сервер лиды вычитает, телефон — нет.
         response["response_costs"] = [visit.response_cost for visit in ordered]
+        # Лиды ОТМЕНЁННЫХ заказов: деньги потрачены, дохода не будет. Сервер вычитает
+        # их из «до» и «после» (calculate_candidate_impact), офлайн-оценка без этой
+        # суммы завышала бы ₽/час дня ровно на потери смены.
+        response["cancelled_lead_costs"] = sum(
+            visit.response_cost for visit in self.visits.list_for_day(day.id, ("cancelled",))
+        )
         return response
 
     def update_finish(self, payload: dict[str, Any]) -> dict[str, Any]:

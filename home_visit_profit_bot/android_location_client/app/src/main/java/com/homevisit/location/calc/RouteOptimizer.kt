@@ -25,8 +25,19 @@ object RouteOptimizer {
     /**
      * Оптимальный порядок заказов. anchors — позиции заказов-якорей (onsite с фиксированным
      * временем) в порядке их времени; они остаются на местах, гибкие встраиваются вокруг.
+     *
+     * respectFeedOrder — перенос серверного `_order_indices` при выключенном auto_optimize
+     * (Этап 20): человек строит порядок сам, и день считается ровно по Ленте, без
+     * оптимизации. Без этого флага телефон офлайн всегда оптимизировал и расходился
+     * с сервером по extra_km на первом же дне с двумя заказами.
      */
-    fun bestOrder(durations: List<List<Double>>, visitsCount: Int, anchors: List<Int> = emptyList()): List<Int> {
+    fun bestOrder(
+        durations: List<List<Double>>,
+        visitsCount: Int,
+        anchors: List<Int> = emptyList(),
+        respectFeedOrder: Boolean = false,
+    ): List<Int> {
+        if (respectFeedOrder) return (1..visitsCount).toList()
         val visitIndices = (1..visitsCount).toList()
         val finishIndex = visitsCount + 1
         if (anchors.isNotEmpty()) return orderAroundAnchors(durations, visitIndices, anchors, finishIndex)
@@ -59,13 +70,14 @@ object RouteOptimizer {
         durations: List<List<Double>>,
         existingCount: Int,
         anchors: List<Int> = emptyList(),
+        respectFeedOrder: Boolean = false,
     ): CandidateExtra {
         val candidateIndex = existingCount + 1
-        val after = summarize(distances, durations, existingCount + 1, anchors)
+        val after = summarize(distances, durations, existingCount + 1, anchors, respectFeedOrder)
         val beforeDist = dropIndex(distances, candidateIndex)
         val beforeDur = dropIndex(durations, candidateIndex)
         val anchorsBefore = anchors.filter { it != candidateIndex } // индексы 1..K не сдвигаются
-        val before = summarize(beforeDist, beforeDur, existingCount, anchorsBefore)
+        val before = summarize(beforeDist, beforeDur, existingCount, anchorsBefore, respectFeedOrder)
         return CandidateExtra(
             extraKm = zeroTiny(after.totalKm - before.totalKm, 0.05),
             extraDriveMinutes = zeroTiny(after.totalMinutes - before.totalMinutes, 0.5),
@@ -91,8 +103,9 @@ object RouteOptimizer {
         durations: List<List<Double>>,
         visitsCount: Int,
         anchors: List<Int> = emptyList(),
+        respectFeedOrder: Boolean = false,
     ): Summary {
-        val order = bestOrder(durations, visitsCount, anchors)
+        val order = bestOrder(durations, visitsCount, anchors, respectFeedOrder)
         val finishIndex = visitsCount + 1
         val path = listOf(0) + order + listOf(finishIndex)
         var totalKm = 0.0

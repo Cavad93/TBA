@@ -660,7 +660,11 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         // Нет сети, но есть координаты кандидата и прогретый кеш матрицы дня —
         // мгновенный офлайн-вердикт по кешу (Фаза 3.4/3.5), сервер уточнит при связи.
         if (!result.ok && result.reason == "network_error" && lat != null && lon != null) {
-            val offline = repository.offlineCandidateEstimate(lat, lon, income, address, clinic)
+            // responseCost обязателен и офлайн: человек ввёл цену лида на этом же
+            // экране, а без неё знак маржи мог перевернуться (сервер −400, телефон +400).
+            val offline = repository.offlineCandidateEstimate(
+                lat, lon, income, address, clinic, responseCost ?: 0.0,
+            )
             if (offline != null) {
                 candidateState.value = CandidateUiState(
                     estimate = offline,

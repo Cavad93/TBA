@@ -78,4 +78,26 @@ class RouteOptimizerTest {
             assertEquals("$name route_minutes", exp.getDouble("route_minutes"), summary.routeMinutes, 1e-6)
         }
     }
+
+    /**
+     * respectFeedOrder — перенос серверного respect_feed_order (Этап 20): при
+     * выключенном auto_optimize день считается по порядку Ленты, даже если
+     * оптимизатор нашёл бы маршрут короче. До Этапа 22 телефон офлайн всегда
+     * оптимизировал и расходился с сервером по extra_km.
+     */
+    @Test
+    fun respectFeedOrderKeepsFeedSequence() {
+        // [старт0, з1, з2, финиш3]: объезд [2,1] втрое короче, чем порядок Ленты [1,2].
+        val durations = listOf(
+            listOf(0.0, 10.0, 1.0, 30.0),
+            listOf(10.0, 0.0, 1.0, 1.0),
+            listOf(1.0, 1.0, 0.0, 10.0),
+            listOf(30.0, 1.0, 10.0, 0.0),
+        )
+        assertEquals(listOf(2, 1), RouteOptimizer.bestOrder(durations, 2))
+        assertEquals(
+            listOf(1, 2),
+            RouteOptimizer.bestOrder(durations, 2, respectFeedOrder = true),
+        )
+    }
 }

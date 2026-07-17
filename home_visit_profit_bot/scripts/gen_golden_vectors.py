@@ -95,6 +95,26 @@ CASES: list[dict] = [
         "after_hourly": 700, "min_hourly": 600, "min_marginal_hourly": 600,
         "is_base_district": True, "existing_base_count": 2, "response_cost": 500,
     },
+    {
+        # Граница округления .xx5 (Этап 22): маржа 380.07−8×10=300.07, минуты 4+20=24,
+        # ₽/час = 300.07/24×60 = 750.175 → Python half-even по ДВОИЧНОМУ значению даёт
+        # 750.17. Kotlin через BigDecimal.valueOf давал 750.18 (тай по десятичной
+        # записи) — вектор ловит регресс выбора конструктора BigDecimal.
+        "name": "half_cent_rounding_boundary",
+        "income": 380.07, "extra_km": 8, "extra_drive_minutes": 4, "service_minutes": 20,
+        "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "before_hourly": 700,
+        "after_hourly": 760, "min_hourly": 600, "min_marginal_hourly": 600,
+        "is_base_district": True, "existing_base_count": 3,
+    },
+    {
+        # Вторая .xx5-граница с округлением в другую сторону: 300.42−0=…, минуты 60+20=80,
+        # ₽/час = 300.42/80×60 = 225.315 → Python 225.32 (двоичное значение чуть выше тая).
+        "name": "half_cent_rounding_boundary_up",
+        "income": 380.42, "extra_km": 8, "extra_drive_minutes": 60, "service_minutes": 20,
+        "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "before_hourly": 700,
+        "after_hourly": 640, "min_hourly": 600, "min_marginal_hourly": 600,
+        "is_base_district": True, "existing_base_count": 3,
+    },
 ]
 
 
