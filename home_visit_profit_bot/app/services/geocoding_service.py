@@ -134,27 +134,33 @@ def manual_geocoding_result(input_text: str, lat: float, lon: float, district: s
     )
 
 
+def _district_key(value: str) -> str:
+    return value.lower().replace(" район", "").replace(" округ", "").strip()
+
+
 def is_base_district(
     district: str | None,
     base_districts: list[str],
     *,
     city: str | None = None,
     address_text: str | None = None,
+    polygon_districts: list[str] | None = None,
 ) -> bool:
-    """В базовой ли зоне адрес. Совпадение по РАЙОНУ или, если зона задана городом
-    целиком, по ГОРОДУ.
+    """В базовой ли зоне адрес. Совпадение по РАЙОНУ (по границам OSM или от Nominatim)
+    или, если зона задана городом целиком, по ГОРОДУ.
 
-    Определять район СПб по названию нельзя: Nominatim для его адресов не отдаёт
-    «Приморский район» вовсе, только муниципальный округ и город (проверено на живом
-    Nominatim, отчёт 8 из TG). Поэтому базовую зону на уровне города («Санкт-Петербург»)
-    сверяем по городу адреса. Запасной путь — город как отдельный компонент строки
-    адреса: для адресов из старого кэша, где город отдельным полем не сохранён.
+    Главный источник района — географические границы (polygon_districts): Nominatim
+    районы России отдаёт ненадёжно, а районы Петербурга не знает вовсе (проверено
+    вживую, отчёт 8 из TG). Базовую зону на уровне города («Санкт-Петербург») сверяем
+    по городу адреса. Запасной путь — город как компонент строки адреса (старый кэш
+    без отдельного поля города).
     """
-    names = [item.lower().replace(" район", "").strip() for item in base_districts if item]
+    names = [_district_key(item) for item in base_districts if item]
     if not names:
         return False
-    if district:
-        if district.lower().replace(" район", "").strip() in names:
+    # Район по границам — самый надёжный; плюс район от Nominatim, где он есть.
+    for candidate in [district, *(polygon_districts or [])]:
+        if candidate and _district_key(candidate) in names:
             return True
     if city:
         city_norm = city.lower().replace("город ", "").replace("г ", "").strip()

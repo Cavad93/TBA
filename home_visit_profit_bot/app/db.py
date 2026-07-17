@@ -178,6 +178,29 @@ CREATE TABLE IF NOT EXISTS parking_zones (
 CREATE INDEX IF NOT EXISTS idx_parking_zones_bbox
     ON parking_zones(min_lat, max_lat, min_lon, max_lon);
 
+-- Административные районы РФ (границы из OSM). Nominatim для многих адресов не
+-- отдаёт район вовсе (районы Петербурга он не знает), поэтому «в каком районе точка»
+-- определяем по географическим границам — так же, как зоны парковки: грубый отбор
+-- по прямоугольнику (индекс), точный point-in-polygon в Python. Публичные, без RLS.
+-- geometry — JSON списка колец [[[lat,lon],...], ...] (внешние контуры + дырки),
+-- потому что районы — сложные MultiPolygon с анклавами и вырезами.
+CREATE TABLE IF NOT EXISTS district_zones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    osm_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    admin_level TEXT,
+    min_lat REAL NOT NULL,
+    min_lon REAL NOT NULL,
+    max_lat REAL NOT NULL,
+    max_lon REAL NOT NULL,
+    geometry TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(osm_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_district_zones_bbox
+    ON district_zones(min_lat, max_lat, min_lon, max_lon);
+
 -- Тарифы парковки по коду зоны. Приходят с портала открытых данных города (Москва),
 -- обновляются вместе с зонами. Тоже публичные — не под RLS.
 CREATE TABLE IF NOT EXISTS parking_tariffs (

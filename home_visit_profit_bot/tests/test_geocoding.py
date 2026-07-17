@@ -76,6 +76,19 @@ def test_base_zone_still_matches_by_district_name() -> None:
     assert not is_base_district("Кировский", ["Ленинский"])
 
 
+def test_base_zone_by_polygon_district() -> None:
+    """Район по границам OSM (/goal): Nominatim отдал мунокруг, а по полигону точка в
+    «Приморском районе» — и он совпал с базовой зоной пользователя."""
+    assert is_base_district(
+        "округ Озеро Долгое", ["Приморский", "Выборгский"],
+        polygon_districts=["округ Озеро Долгое", "Приморский район"],
+    )
+    # Полигонный район не из базовых — не базовая зона.
+    assert not is_base_district(
+        None, ["Приморский"], polygon_districts=["Центральный район"],
+    )
+
+
 def test_geocode_empty_nominatim_payload_returns_none(monkeypatch) -> None:
     monkeypatch.setattr(geocoding_service, "_search_nominatim_variants", lambda **kwargs: [])
 

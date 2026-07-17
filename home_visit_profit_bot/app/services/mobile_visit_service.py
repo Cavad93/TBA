@@ -14,8 +14,10 @@ from app.repositories import (
     VisitRepository,
     WorkDayRepository,
 )
+from app.repositories_districts import DistrictZoneRepository
 from app.services.address_resolver import expand_template
 from app.services.address_suggest_service import resolve_fuzzy_geo
+from app.services.district_service import districts_at as _districts_covering, pick_district_name as _pick_district
 from app.services.schedule_service import late_warnings
 from app.services.address_building import canonical_building
 from app.services.arrival_window_service import arrival_windows
@@ -148,6 +150,17 @@ class MobileVisitService:
             return None
         return geo
 
+    def _districts_at(self, lat: float | None, lon: float | None) -> list[str]:
+        """Имена административных районов, накрывающих точку (по границам OSM).
+
+        Пусто, если координат нет или таблица районов ещё не залита — тогда решение
+        о базовой зоне падает на прежние пути (город/имя от Nominatim).
+        """
+        if lat is None or lon is None:
+            return []
+        zones = DistrictZoneRepository(self.connection).near(lat, lon)
+        return [zone.name for zone in _districts_covering(zones, lat, lon)]
+
     def _estimate_warnings(self, day) -> list[str]:
         """Оговорки к оценке — честно сказать ДО того, как человек поверил цифре.
 
@@ -228,8 +241,16 @@ class MobileVisitService:
             detect_base_district_by_location(geo.district, geo.lat, geo.lon, base_districts)
             if geo is not None else None
         )
+        # Районы по географическим границам OSM — надёжнее Nominatim, который районы РФ
+        # знает плохо (районы Петербурга — не знает вовсе).
+        polygon_districts = self._districts_at(
+            geo.lat if geo is not None else None, geo.lon if geo is not None else None
+        )
         district = None if manual_district == "-" else manual_district
-        district = district or inferred_base_district or (geo.district if geo is not None else None)
+        district = (
+            district or _pick_district(polygon_districts) or inferred_base_district
+            or (geo.district if geo is not None else None)
+        )
         candidate = self.visits.create_candidate(
             day_id=day.id,
             address=address,
@@ -242,6 +263,7 @@ class MobileVisitService:
                 district, base_districts,
                 city=geo.city if geo is not None else None,
                 address_text=geo.normalized_address if geo is not None else None,
+                polygon_districts=polygon_districts,
             ),
             lat=geo.lat if geo is not None else None,
             lon=geo.lon if geo is not None else None,
@@ -547,6 +569,8 @@ class MobileVisitService:
             normalized = geo.normalized_address or address
             city = geo.city
 
+        polygon_districts = self._districts_at(lat, lon)
+        district = _pick_district(polygon_districts) or district
         visit = self.visits.create_onsite(
             day_id=day.id,
             address=normalized,
@@ -558,7 +582,10 @@ class MobileVisitService:
             lon=lon,
             clinic=clinic,
             district=district,
-            is_base_district=is_base_district(district, base_districts, city=city, address_text=normalized),
+            is_base_district=is_base_district(
+                district, base_districts, city=city, address_text=normalized,
+                polygon_districts=polygon_districts,
+            ),
         )
         response = self._route_response(day.id, "onsite_added", visit.id)
         response["visit"] = visit_payload(visit)
