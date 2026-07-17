@@ -33,6 +33,13 @@ class ReminderWorker(appContext: Context, params: WorkerParameters) : CoroutineW
 
         val kind = inputData.getString(KEY_KIND) ?: return Result.success()
         val home = HomeVisitRepository.create(applicationContext).fetchHome(serverUrl, apiKey)
+        // Числа из кэша — вчерашние: озвучивать их уведомлением («смена в минусе»,
+        // «сегодня X чистыми») значит будить человека устаревшей правдой. UI кэш
+        // показывает с пометкой — уведомление пометку показать не может, поэтому
+        // по кэшу просто молчим (кроме shift_start — он без чисел).
+        if (home?.fromCache == true && kind != KIND_SHIFT_START) {
+            return Result.success()
+        }
 
         val message = when (kind) {
             KIND_SHIFT_START -> ReminderMessages.shiftStart()
