@@ -26,6 +26,7 @@ def sync(body: bytes = Depends(raw_body), auth: Authed = Depends(authed)) -> dic
         "server_entity_id": result.server_entity_id,
         "duplicate": result.duplicate,
         "reason": result.reason,
+        "settings": result.settings,
     }
 
 

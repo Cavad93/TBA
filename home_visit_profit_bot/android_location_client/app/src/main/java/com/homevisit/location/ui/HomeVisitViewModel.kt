@@ -45,6 +45,7 @@ import com.homevisit.location.domain.ServerRouteSnapshot
 import com.homevisit.location.domain.StopLabel
 import com.homevisit.location.domain.SyncConflict
 import com.homevisit.location.domain.SyncQueueStats
+import com.homevisit.location.domain.settingsSaveMessage
 import com.homevisit.location.data.local.VisitEntity
 import com.homevisit.location.domain.VisitKind
 import com.homevisit.location.domain.VisitStatus
@@ -1487,11 +1488,16 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 return@launch
             }
             repository.syncPending(serverUrl, apiKey)
+            // Правда вместо безусловного «Настройки сохранены»: сервер применяет батч
+            // поключево, и отвергнутое поле (кривая дата, число вне границ) человек
+            // обязан увидеть — иначе он считает сохранённым то, что молча пропало.
+            val outcome = repository.consumeSettingsSyncOutcome()
+            val message = settingsSaveMessage(outcome)
             val snapshot = repository.fetchAppSettings(serverUrl, apiKey)
             appSettingsState.value = if (snapshot == null) {
-                appSettingsState.value.copy(isLoading = false, message = "Настройки отправлены, но не удалось обновить экран")
+                appSettingsState.value.copy(isLoading = false, message = message)
             } else {
-                AppSettingsUiState(snapshot = snapshot, message = "Настройки сохранены")
+                AppSettingsUiState(snapshot = snapshot, message = message)
             }
             clinicsState.value = repository.loadCachedClinics()
         }

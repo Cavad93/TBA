@@ -132,4 +132,8 @@ enum class SyncStatus(val value: String) {
     Pending("pending"),
     Sent("sent"),
     Failed("failed"),
+
+    // Сервер ответил 4xx: событие невалидно НАВСЕГДА, повтор даст тот же отказ.
+    // Такие события выводятся из ротации, а не ретраятся вечно (Failed ретраится).
+    Rejected("rejected"),
 }

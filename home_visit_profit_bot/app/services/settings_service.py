@@ -337,11 +337,29 @@ SETTINGS_CATALOG: list[SettingField] = [
     # ОСАГО (Фаза 5). Необязательно: пусто — ничего не показываем и не напоминаем.
     SettingField(
         "osago_expires_at", "osago", "Дата окончания ОСАГО", "date", "", allow_empty=True,
-        hint="Напомним продлить за 14 дней. Необязательно.",
+        hint="В формате ДД.ММ.ГГГГ. Напомним продлить за 14 дней. Необязательно.",
     ),
 ]
 
 _FIELD_BY_KEY: dict[str, SettingField] = {field.key: field for field in SETTINGS_CATALOG}
+
+
+# Человек пишет дату как привык — «16.07.2026», а не ISO. Требовать с него
+# ГГГГ-ММ-ДД значит молча отвергать естественный ввод; принимаем оба порядка
+# и все ходовые разделители, храним всегда в ISO.
+_DATE_INPUT_FORMATS = ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y")
+
+
+def _parse_date_iso(value: Any) -> str:
+    from datetime import datetime as _datetime
+
+    text = str(value).strip()
+    for fmt in _DATE_INPUT_FORMATS:
+        try:
+            return _datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            continue
+    raise ValueError("дата в формате ДД.ММ.ГГГГ или ГГГГ-ММ-ДД")
 
 
 def _parse_bool(value: Any) -> bool:
@@ -423,12 +441,10 @@ def _coerce(field: SettingField, value: Any) -> str:
             if field.allow_empty:
                 return ""
             raise ValueError(f"{field.key}: значение не может быть пустым")
-        from datetime import date as _date
         try:
-            _date.fromisoformat(text)
-        except ValueError:
-            raise ValueError(f"{field.key}: дата в формате ГГГГ-ММ-ДД")
-        return text
+            return _parse_date_iso(text)
+        except ValueError as error:
+            raise ValueError(f"{field.key}: {error}")
     text = str(value).strip()
     if not text and not field.allow_empty:
         raise ValueError(f"{field.key}: значение не может быть пустым")
@@ -525,11 +541,20 @@ class SettingsService:
         }
 
     def update(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Применить батч поключево: одно кривое значение не топит остальные.
+
+        Раньше первый же ValueError отвергал ВЕСЬ батч: человек правил дату ОСАГО,
+        адреса и переключатели одним нажатием — кривая дата молча хоронила всё,
+        а вечно-невалидное событие ретраилось бесконечно. Теперь валидное
+        применяется, отвергнутое возвращается в `rejected` с причиной — клиенту
+        есть что показать человеку.
+        """
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
         values = payload.get("values") if isinstance(payload.get("values"), dict) else payload
         updates: dict[str, str] = {}
         ignored: list[str] = []
+        rejected: list[dict[str, str]] = []
         for key, value in values.items():
             if key == "values":
                 continue
@@ -537,12 +562,14 @@ class SettingsService:
             if field is None:
                 ignored.append(key)
                 continue
-            updates[key] = _coerce(field, value)
-        if not updates:
-            raise ValueError("no known settings provided")
+            try:
+                updates[key] = _coerce(field, value)
+            except ValueError as error:
+                rejected.append({"key": key, "label": field.label, "reason": str(error)})
         for key, stored in updates.items():
             self.settings.set(key, stored)
         result = self.read()
         result["updated"] = sorted(updates.keys())
         result["ignored"] = ignored
+        result["rejected"] = rejected
         return result

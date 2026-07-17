@@ -935,11 +935,13 @@ internal fun SettingsOverlay(
     onBack: () -> Unit,
 ) {
     var page by rememberSaveable { mutableStateOf(SettingsPage.Main) }
-    // Страницы параметров и зон бесполезны без каталога с сервера — тянем его сразу,
-    // чтобы пользователь не жал «Загрузить настройки» руками.
+    // Страницы параметров и зон бесполезны без каталога с сервера — тянем его при
+    // каждом входе, а не только при пустом: снапшот устаревает незаметно (смена
+    // якоря в Ленте «липко» обновляет дефолтные адреса), и по устаревшему снапшоту
+    // повторный ввод того же адреса глотался сравнением «ничего не изменилось».
     LaunchedEffect(page) {
         val needsCatalog = page == SettingsPage.App || page == SettingsPage.Zones
-        if (needsCatalog && appSettings.snapshot == null && !appSettings.isLoading) {
+        if (needsCatalog && !appSettings.isLoading) {
             workActions.onRefreshAppSettings()
         }
     }

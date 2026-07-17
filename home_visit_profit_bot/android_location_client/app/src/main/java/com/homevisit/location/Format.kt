@@ -236,8 +236,33 @@ internal fun qualityWord(value: Int): String = when (value) {
     else -> "отлично"
 }
 
-/** Текстовые настройки, которые допустимо очистить (сервер принимает пустое значение). */
-private val CLEARABLE_TEXT_SETTINGS = setOf("default_start_address", "default_finish_address")
+/** Настройки, которые допустимо очистить (сервер принимает пустое значение). */
+private val CLEARABLE_TEXT_SETTINGS =
+    setOf("default_start_address", "default_finish_address", "osago_expires_at")
+
+// Человек пишет дату как привык: «16.07.2027». Сервер хранит ISO. Приводим сами,
+// а нераспознанное отправляем как есть — сервер вернёт отказ с причиной, и она
+// будет показана человеку (молча выбрасывать ввод нельзя, это «тихо соврало»).
+private val HUMAN_DATE = Regex("""^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$""")
+private val ISO_DATE = Regex("""^(\d{4})-(\d{1,2})-(\d{1,2})$""")
+
+internal fun normalizeDateInput(raw: String): String? {
+    val text = raw.trim()
+    ISO_DATE.matchEntire(text)?.let { match ->
+        val (year, month, day) = match.destructured
+        return isoDateOrNull(year.toInt(), month.toInt(), day.toInt())
+    }
+    HUMAN_DATE.matchEntire(text)?.let { match ->
+        val (day, month, year) = match.destructured
+        return isoDateOrNull(year.toInt(), month.toInt(), day.toInt())
+    }
+    return null
+}
+
+private fun isoDateOrNull(year: Int, month: Int, day: Int): String? {
+    if (month !in 1..12 || day !in 1..31) return null
+    return "%04d-%02d-%02d".format(year, month, day)
+}
 
 internal fun collectSettingsChanges(
     sections: List<SettingsSection>,
@@ -261,6 +286,17 @@ internal fun collectSettingsChanges(
                     val editedRaw = textEdits[field.key] ?: field.listValue.joinToString(", ")
                     val editedList = editedRaw.split(',').map { it.trim() }.filter { it.isNotEmpty() }
                     if (editedList != field.listValue) changes[field.key] = editedList
+                }
+                SettingType.Date -> {
+                    val edited = (textEdits[field.key] ?: field.textValue).trim()
+                    if (edited != field.textValue) {
+                        if (edited.isEmpty()) {
+                            // Дата необязательная: стёр — значит, хочет убрать напоминание.
+                            if (field.key in CLEARABLE_TEXT_SETTINGS) changes[field.key] = ""
+                        } else {
+                            changes[field.key] = normalizeDateInput(edited) ?: edited
+                        }
+                    }
                 }
                 else -> {
                     val edited = (textEdits[field.key] ?: field.textValue).trim()

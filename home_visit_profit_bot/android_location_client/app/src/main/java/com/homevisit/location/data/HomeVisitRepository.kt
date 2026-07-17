@@ -19,6 +19,9 @@ import com.homevisit.location.domain.AppSettingsSnapshot
 import com.homevisit.location.domain.AuthOutcome
 import com.homevisit.location.domain.MinimumCheck
 import com.homevisit.location.domain.QuickEstimateResult
+import com.homevisit.location.domain.RejectedSetting
+import com.homevisit.location.domain.SettingsSyncOutcome
+import com.homevisit.location.domain.parseRejectedSettings
 import com.homevisit.location.domain.TicketsOffer
 import com.homevisit.location.domain.AuthUser
 import com.homevisit.location.calc.OfflineEstimateMapper
@@ -373,24 +376,47 @@ class HomeVisitRepository private constructor(
         if (normalizedUrl.isBlank() || apiKey.isBlank()) {
             return@withContext 0
         }
+        // Итог по настройкам — на один прогон: несъеденный итог фонового синка
+        // не должен подмешиваться к результату ручного «Сохранить».
+        settingsSyncOutcome = null
         var sent = 0
         dao.getSyncQueueByStatuses(listOf(SyncStatus.Pending.value, SyncStatus.Failed.value), limit = 25).forEach { item ->
-            val ok = sendSyncEvent(normalizedUrl, apiKey, item)
+            val result = sendSyncEvent(normalizedUrl, apiKey, item)
             val nextAttempts = item.attempts + 1
             dao.updateSyncStatus(
                 id = item.id,
                 status = when {
-                    ok -> SyncStatus.Sent.value
+                    result.delivered -> SyncStatus.Sent.value
+                    // 4xx — сервер сказал «это невалидно навсегда»: ретраить бессмысленно.
+                    // Раньше такое событие жило зомби и билось в сервер каждые 15 минут.
+                    result.permanentlyRejected -> SyncStatus.Rejected.value
                     nextAttempts >= 3 -> SyncStatus.Failed.value
                     else -> SyncStatus.Pending.value
                 },
                 updatedAt = now(),
             )
-            if (ok) {
+            if (item.eventType == "settings_saved") {
+                val previous = settingsSyncOutcome
+                settingsSyncOutcome = SettingsSyncOutcome(
+                    delivered = (previous?.delivered ?: true) && result.delivered,
+                    rejected = (previous?.rejected ?: emptyList()) + result.settingsRejected,
+                )
+            }
+            if (result.delivered) {
                 sent += 1
             }
         }
         sent
+    }
+
+    // Итог последней отправки настроек: ViewModel забирает его после syncPending,
+    // чтобы сказать человеку правду вместо безусловного «Настройки сохранены».
+    private var settingsSyncOutcome: SettingsSyncOutcome? = null
+
+    fun consumeSettingsSyncOutcome(): SettingsSyncOutcome? {
+        val outcome = settingsSyncOutcome
+        settingsSyncOutcome = null
+        return outcome
     }
 
     suspend fun exportBackupJson(): String = withContext(Dispatchers.IO) {
@@ -1659,7 +1685,14 @@ class HomeVisitRepository private constructor(
             .put("updated_at_epoch_millis", item.updatedAtEpochMillis)
     }
 
-    private fun sendSyncEvent(url: String, apiKey: String, item: SyncQueueEntity): Boolean {
+    /** Итог одной отправки: доставлено / отвергнуто навсегда (4xx) / отчёт по настройкам. */
+    private data class SyncSendResult(
+        val delivered: Boolean,
+        val permanentlyRejected: Boolean = false,
+        val settingsRejected: List<RejectedSetting> = emptyList(),
+    )
+
+    private fun sendSyncEvent(url: String, apiKey: String, item: SyncQueueEntity): SyncSendResult {
         var connection: HttpURLConnection? = null
         return try {
             val payload = JSONObject()
@@ -1678,9 +1711,22 @@ class HomeVisitRepository private constructor(
                 setRequestProperty("Authorization", "Bearer $apiKey")
             }
             connection.outputStream.use { it.write(body) }
-            connection.responseCode in 200..299
+            val code = connection.responseCode
+            if (code in 200..299) {
+                // Тело ответа раньше выбрасывалось непрочитанным — а в нём сервер
+                // сообщает, какие настройки отверг и почему (поключевое применение).
+                val responseJson = runCatching {
+                    JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                }.getOrNull()
+                SyncSendResult(
+                    delivered = true,
+                    settingsRejected = parseRejectedSettings(responseJson),
+                )
+            } else {
+                SyncSendResult(delivered = false, permanentlyRejected = code in 400..499)
+            }
         } catch (_: Exception) {
-            false
+            SyncSendResult(delivered = false)
         } finally {
             connection?.disconnect()
         }

@@ -67,14 +67,23 @@ def test_saved_via_settings_and_read_back(config):
         assert SettingsRepository(conn).get("osago_expires_at") == "2027-01-15"
 
 
-def test_broken_date_rejected_by_settings(config):
+def test_human_date_format_accepted_by_settings(config):
+    """«15.01.2027» — не кривая дата, а естественный ввод; хранится в ISO."""
     from app.services.settings_service import SettingsService
     with connect(config) as conn:
-        try:
-            SettingsService(conn).update({"osago_expires_at": "15.01.2027"})
-            assert False, "ожидали ValueError на кривой дате"
-        except ValueError:
-            pass
+        res = SettingsService(conn).update({"osago_expires_at": "15.01.2027"})
+        assert "osago_expires_at" in res["updated"]
+        assert SettingsRepository(conn).get("osago_expires_at") == "2027-01-15"
+
+
+def test_broken_date_goes_to_rejected(config):
+    """Настоящий мусор не сохраняется и не роняет запрос — уходит в rejected."""
+    from app.services.settings_service import SettingsService
+    with connect(config) as conn:
+        res = SettingsService(conn).update({"osago_expires_at": "не дата"})
+        assert res["updated"] == []
+        assert [item["key"] for item in res["rejected"]] == ["osago_expires_at"]
+        assert SettingsRepository(conn).get("osago_expires_at") in (None, "")
 
 
 def test_empty_allowed(config):

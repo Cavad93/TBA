@@ -84,6 +84,10 @@ class SyncResult:
     server_entity_id: int | None
     duplicate: bool = False
     reason: str = "processed"
+    # Только для settings_saved: что применилось, что отвергнуто и почему.
+    # Батч настроек применяется поключево, и клиент обязан узнать про
+    # отвергнутое поле — иначе «Настройки сохранены» превращается в ложь.
+    settings: dict[str, Any] | None = None
 
 
 class MobileApiService:
@@ -96,6 +100,7 @@ class MobileApiService:
         self.expenses = ExpenseRepository(connection)
         self.telemed = TelemedRepository(connection)
         self.office = OfficeRepository(connection)
+        self._settings_report: dict[str, Any] | None = None
 
     def process_sync_event(self, envelope: dict[str, Any]) -> SyncResult:
         event_id = _required_str(envelope, "event_id")
@@ -140,6 +145,7 @@ class MobileApiService:
                 reason="duplicate_event",
             )
 
+        self._settings_report = None
         now = now_iso()
         if existing is None:
             self.connection.execute(
@@ -188,6 +194,7 @@ class MobileApiService:
             entity_type=entity_type,
             client_entity_id=client_entity_id,
             server_entity_id=server_entity_id,
+            settings=self._settings_report,
         )
 
     def _process_event(self, event_type: str, entity_type: str, client_entity_id: str, payload: dict[str, Any]) -> int:
@@ -204,7 +211,12 @@ class MobileApiService:
         if event_type == "expense_saved" and entity_type == "expense":
             return self._save_expense(client_entity_id, payload)
         if event_type == "settings_saved" and entity_type == "settings":
-            SettingsService(self.connection).update(payload)
+            report = SettingsService(self.connection).update(payload)
+            self._settings_report = {
+                "updated": report.get("updated", []),
+                "rejected": report.get("rejected", []),
+                "ignored": report.get("ignored", []),
+            }
             return 0
         raise ValueError(f"unsupported event: {event_type}/{entity_type}")
 

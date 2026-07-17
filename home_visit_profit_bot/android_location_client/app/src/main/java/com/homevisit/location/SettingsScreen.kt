@@ -411,6 +411,18 @@ internal fun AppSettingsSection(
                     onItemsChange = { newItems -> textEdits[field.key] = newItems.joinToString(", ") },
                 )
             }
+            SettingType.Date -> {
+                // Дата — не свободный текст: без подсказки формата человек пишет
+                // «16.07.2027», а раньше это молча топило весь батч сохранения.
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = textEdits[field.key] ?: field.textValue,
+                    onValueChange = { textEdits[field.key] = it },
+                    singleLine = true,
+                    label = { Text(field.label) },
+                    placeholder = { Text("ДД.ММ.ГГГГ") },
+                )
+            }
             else -> {
                 OutlinedTextField(
                     modifier = Modifier.fillMaxWidth(),

@@ -481,6 +481,7 @@ def _handler_factory(config: AppConfig):
                     "server_entity_id": result.server_entity_id,
                     "duplicate": result.duplicate,
                     "reason": result.reason,
+                    "settings": result.settings,
                 }
             )
 
