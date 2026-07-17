@@ -13,6 +13,7 @@ from app.services.rest_service import rest_facts
 from app.services.overwork_pricing_service import OverworkPricing, build_pricing
 from app.services.osago_service import osago_card
 from app.services.breakeven_service import shift_breakeven
+from app.services.profitability_service import calculate_day_profitability
 
 
 # Порог «зелёной зоны» восстановления: ниже — отдохнул, ресурс есть.
@@ -102,6 +103,11 @@ class HomeService:
             # Безубыточность смены (Фаза 10.2): прогресс до момента «смена отбита».
             # None — фикс-расходов нет (свой авто) или смена не идёт: блок молчит.
             "breakeven": self._breakeven(active),
+            # Честный чистый ДНЯ (Ф10.3, Этап 32): в breakeven.accumulated_net аренда
+            # ВОЗВРАЩЕНА (операционный чистый для порога) — уведомления, бравшие его
+            # как «чистыми сегодня», врали в плюс ровно на аренду, а «смена в минусе»
+            # молчала при реальном минусе. None — смены нет: «нет данных», не ноль.
+            "today_net": self._today_net(active),
         }
 
     def _breakeven(self, active) -> dict[str, Any] | None:
@@ -110,6 +116,13 @@ class HomeService:
         completed = VisitRepository(self.connection).list_for_day(active.id, ("completed",))
         status = shift_breakeven(active, completed, self.settings, self.stats)
         return status.payload() if status else None
+
+    def _today_net(self, active) -> float | None:
+        if active is None:
+            return None
+        completed = VisitRepository(self.connection).list_for_day(active.id, ("completed",))
+        net, _, _, _, _ = calculate_day_profitability(active, completed, self.settings, self.stats)
+        return round(net, 2)
 
     # --- сборка блоков ---------------------------------------------------
 

@@ -2187,6 +2187,9 @@ class HomeVisitRepository private constructor(
             recommendations = recommendations,
             osago = parseHomeOsago(response.optJSONObject("osago")),
             breakeven = parseHomeBreakeven(response.optJSONObject("breakeven")),
+            // null и от старого сервера, и вне смены: уведомления обязаны молчать,
+            // а не сочинять «0 ₽ чистыми».
+            todayNet = if (response.isNull("today_net")) null else response.optDouble("today_net"),
             fromCache = response.optBoolean("_from_cache", false),
         )
     }

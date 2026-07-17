@@ -83,6 +83,9 @@ data class HomeSnapshot(
     val recommendations: List<HomeRecommendation>,
     val osago: HomeOsago? = null,
     val breakeven: HomeBreakeven? = null,
+    // Честный чистый ДНЯ (без возврата аренды): для уведомлений. null — смены
+    // нет или сервер старый: «нет данных», а не выдуманный ноль.
+    val todayNet: Double? = null,
     val fromCache: Boolean = false,
 )
 

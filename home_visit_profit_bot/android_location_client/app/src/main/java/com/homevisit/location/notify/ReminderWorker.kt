@@ -37,8 +37,12 @@ class ReminderWorker(appContext: Context, params: WorkerParameters) : CoroutineW
         val message = when (kind) {
             KIND_SHIFT_START -> ReminderMessages.shiftStart()
             KIND_DAY_CLOSE -> {
-                val net = home?.breakeven?.accumulatedNet ?: 0.0
-                val paidOff = home?.breakeven?.isPaidOff
+                // Честный чистый ДНЯ, не breakeven.accumulated_net: в том аренда
+                // ВОЗВРАЩЕНА для порога, и «Сегодня X ₽ чистыми» врало в плюс ровно
+                // на аренду. Нет данных (офлайн без кэша, смены нет) — молчим,
+                // а не сочиняем «0 ₽ чистыми».
+                val net = home?.todayNet ?: return Result.success()
+                val paidOff = home.breakeven?.isPaidOff
                 ReminderMessages.dayClose(net, paidOff)
             }
             KIND_OSAGO -> {
@@ -47,8 +51,10 @@ class ReminderWorker(appContext: Context, params: WorkerParameters) : CoroutineW
             }
             KIND_NEGATIVE_ALERT -> {
                 // Только в активную смену и только если реально в минусе (Ф10.3).
+                // По честному чистому дня: операционный accumulated_net с
+                // возвращённой арендой молчал при реальном минусе на аренду.
                 if (home?.shiftActive != true) return Result.success()
-                val net = home.breakeven?.accumulatedNet ?: return Result.success()
+                val net = home.todayNet ?: return Result.success()
                 ReminderMessages.negativeShift(net) ?: return Result.success()
             }
             KIND_WEEKLY -> {
