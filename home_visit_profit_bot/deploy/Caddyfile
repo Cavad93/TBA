@@ -11,6 +11,17 @@
 vizitorkrut.ru, www.vizitorkrut.ru {
 	encode zstd gzip
 
+	# Access-лог. Файлы в /var/log/caddy лежали с 09.07.2026 пустыми: директивы
+	# log не было вовсе, и 17.07.2026 при разборе инцидента (500 на приёме GPS)
+	# подтвердить трафик шлюза было нечем. У uvicorn access-лог отключён
+	# осознанно (--no-access-log) — значит, единственный access-лог живёт здесь.
+	log {
+		output file /var/log/caddy/vizitorkrut-site.log {
+			roll_size 50MiB
+			roll_keep 5
+		}
+	}
+
 	# Папка со статикой. Путь укажите под свой сервер (см. DEPLOYMENT.md).
 	root * /opt/tba/home_visit_profit_bot/deploy/site
 	file_server
@@ -29,6 +40,15 @@ vizitorkrut.ru, www.vizitorkrut.ru {
 # --- Backend (API) на поддомене api.* — сюда ходит Android-приложение ---
 api.vizitorkrut.ru {
 	encode zstd gzip
+
+	# Access-лог API: по нему разбираются инциденты «телефон говорит, что слал,
+	# а сервер говорит, что не видел». Тело и Authorization сюда не пишутся.
+	log {
+		output file /var/log/caddy/vizitorkrut-api.log {
+			roll_size 50MiB
+			roll_keep 5
+		}
+	}
 
 	# Единственный публичный вход к backend, который наружу НЕ смотрит.
 	# Токен (Authorization: Bearer ...) приложение шлёт как есть — Caddy его не трогает.
