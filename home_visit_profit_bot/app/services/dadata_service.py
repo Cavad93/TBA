@@ -20,6 +20,10 @@ from dataclasses import dataclass
 import httpx
 
 SUGGEST_URL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address"
+# Обратное геокодирование «координаты → адрес». Сигнатура сверена с офиц. докой
+# dadata.ru/api/geolocate/ (июль 2026): POST, только заголовок Authorization: Token,
+# тело {lat, lon, count, radius_meters}. Общий дневной лимит с suggest-методами.
+GEOLOCATE_URL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/geolocate/address"
 
 
 @dataclass(frozen=True)
@@ -95,6 +99,55 @@ def suggest_addresses(
         raise DadataError(f"DaData вернула не-JSON: {error}") from error
 
     return [_suggestion(item) for item in payload.get("suggestions", []) if item.get("value")]
+
+
+def geolocate_city(
+    lat: float,
+    lon: float,
+    *,
+    token: str,
+    timeout_seconds: float = 5.0,
+) -> str | None:
+    """Город по координатам GPS — для предзаполнения поля «Город» в настройках.
+
+    Возвращает название населённого пункта или None (точка вне адресов, лимит, сеть).
+    None — честный ответ «не знаю»: предзаполнять поле выдуманным городом хуже, чем
+    оставить пустым и дать человеку ввести самому.
+    """
+    if not token:
+        raise DadataError("ключ DaData не задан")
+    body = {"lat": lat, "lon": lon, "count": 1, "radius_meters": 100}
+    try:
+        with httpx.Client(timeout=timeout_seconds) as client:
+            response = client.post(
+                GEOLOCATE_URL,
+                json=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "Authorization": f"Token {token}",
+                },
+            )
+    except httpx.HTTPError as error:
+        raise DadataError(f"сеть DaData недоступна: {error}") from error
+
+    if response.status_code in (401, 403, 429):
+        raise DadataLimitError(f"DaData отказала (HTTP {response.status_code})")
+    if response.status_code >= 400:
+        raise DadataError(f"DaData вернула HTTP {response.status_code}")
+
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise DadataError(f"DaData вернула не-JSON: {error}") from error
+
+    suggestions = payload.get("suggestions") or []
+    if not suggestions:
+        return None
+    data = suggestions[0].get("data") or {}
+    # city пуст для сёл/посёлков — тогда честный населённый пункт из settlement.
+    city = data.get("city") or data.get("settlement")
+    return str(city).strip() if city else None
 
 
 def _suggestion(item: dict) -> DadataSuggestion:

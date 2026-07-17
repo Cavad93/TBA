@@ -399,6 +399,9 @@ data class AddressCandidate(
     val lat: Double,
     val lon: Double,
     val city: String? = null,
+    /** Улица и дом БЕЗ города (город в поле city). Чтобы подсказка не тратила ширину
+     *  на «г Санкт-Петербург» и номер дома был виден. null — сервер не выделил улицу. */
+    val streetHouse: String? = null,
     /** Откуда вариант: "dadata" | "osm" | "nominatim". Для мелкой подписи-источника. */
     val source: String = "",
 )

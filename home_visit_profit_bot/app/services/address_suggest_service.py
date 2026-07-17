@@ -106,9 +106,12 @@ def suggest(query: str, connection, settings: SettingsRepository, user_id: int,
     # 3. Офлайн pg_trgm + слабый Nominatim → кандидаты.
     candidates = _try_osm_streets(text, connection, lat, lon)
     if nominatim_hit and nominatim_hit.lat is not None:
+        # city=None честно: Nominatim не вернул город, а подставлять сюда город из
+        # настроек — «выдуманное значение вместо честного null»: клиент, предзаполняя
+        # по нему поле «Город», соврал бы (отчёт 3 из TG). Пусть лучше пусто.
         candidates.append(_candidate(
             label=nominatim_hit.normalized_address or text,
-            lat=nominatim_hit.lat, lon=nominatim_hit.lon, source="nominatim", city=city,
+            lat=nominatim_hit.lat, lon=nominatim_hit.lon, source="nominatim", city=None,
         ))
     return {"candidates": _dedup(candidates)[:MAX_CANDIDATES]}
 
@@ -158,6 +161,27 @@ def resolve_fuzzy_geo(text: str, connection, settings: SettingsRepository, user_
         confidence=1.0,
         source=str(resolved.get("source") or "dadata"),
     )
+
+
+def reverse_city(lat: float, lon: float, connection, user_id: int) -> str | None:
+    """Город по координатам GPS для предзаполнения поля «Город» — или None.
+
+    None во всех неясных случаях (нет ключа, лимит, сеть, точка вне адресов): поле
+    останется пустым, и человек введёт город сам. Тратит общий дневной лимит DaData,
+    поэтому считаем через тот же счётчик, что и подсказки.
+    """
+    token = dadata_token()
+    if not token:
+        return None
+    usage = DadataUsageRepository(connection)
+    if not usage.within_limit(user_id, dadata_daily_limit_per_user()):
+        return None
+    try:
+        city = dadata_service.geolocate_city(lat, lon, token=token, timeout_seconds=server_timeout())
+    except dadata_service.DadataError:
+        return None
+    usage.increment(user_id)
+    return city
 
 
 def _fetch_dadata(text: str, connection, city: str, user_id: int) -> list:
@@ -252,10 +276,21 @@ def _decide_from_dadata(text: str, suggestions: list, lat: float | None, lon: fl
                                           city=best.city or city)}
     # Улица без дома или несколько разных мест — отдаём на выбор.
     candidates = [
-        _candidate(label=s.value, lat=s.lat, lon=s.lon, source="dadata", city=s.city or city)
+        _candidate(label=s.value, lat=s.lat, lon=s.lon, source="dadata", city=s.city or city,
+                   street_house=_street_house(s.value, s.street))
         for s in distinct[:MAX_CANDIDATES]
     ]
     return {"candidates": candidates}
+
+
+# Уличная часть адреса, отрезанная от города/региона впереди. Якорь — street из
+# DaData (street_with_type): взять value от него до конца, а не собирать из
+# компонентов, — так корпус и строение («д 3 к 1 стр 1») не теряются, а это ровно
+# то, что человек не видел, когда город съедал ширину подсказки (отчёт 3 из TG).
+def _street_house(value: str, street: str | None) -> str | None:
+    if street and street in value:
+        return value[value.index(street):].strip(" ,")
+    return None
 
 
 def _distinct_by_point(suggestions: list) -> list:
@@ -304,7 +339,7 @@ def _try_osm_streets(text: str, connection, lat: float | None, lon: float | None
     rows = OsmStreetRepository(connection).search(text, lat=lat, lon=lon, limit=MAX_CANDIDATES)
     return [
         _candidate(label=f"{row.street}, {row.city}", lat=row.lat, lon=row.lon,
-                   source="osm", city=row.city)
+                   source="osm", city=row.city, street_house=row.street)
         for row in rows
     ]
 
@@ -320,8 +355,9 @@ def _resolved(label, lat, lon, *, source, city=None, district=None) -> dict:
     }
 
 
-def _candidate(*, label, lat, lon, source, city=None) -> dict:
-    return {"label": label, "lat": float(lat), "lon": float(lon), "city": city, "source": source}
+def _candidate(*, label, lat, lon, source, city=None, street_house=None) -> dict:
+    return {"label": label, "lat": float(lat), "lon": float(lon), "city": city,
+            "street_house": street_house, "source": source}
 
 
 def _dedup(candidates: list[dict]) -> list[dict]:

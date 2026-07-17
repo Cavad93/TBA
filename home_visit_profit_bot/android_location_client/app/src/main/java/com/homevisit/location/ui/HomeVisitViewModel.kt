@@ -1505,6 +1505,19 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /**
+     * Определить город по текущему GPS для предзаполнения поля «Город» (старт/финиш).
+     * Молчит, если GPS нет или сервер не определил: поле останется пустым под ручной ввод.
+     */
+    fun suggestSettingsCity(serverUrl: String, apiKey: String, fieldKey: String) {
+        viewModelScope.launch {
+            if (serverUrl.isBlank() || apiKey.isBlank()) return@launch
+            val gps = lastKnownGps() ?: return@launch
+            val city = repository.cityByGps(serverUrl, apiKey, gps.first, gps.second) ?: return@launch
+            appSettingsState.update { it.copy(cityHints = it.cityHints + (fieldKey to city)) }
+        }
+    }
+
     fun saveAppSettings(serverUrl: String, apiKey: String, values: Map<String, Any?>) {
         viewModelScope.launch {
             if (values.isEmpty()) {
@@ -1808,6 +1821,9 @@ data class AppSettingsUiState(
     // Подсказки адресов для полей настроек (ключ поля → кандидаты) — тот же
     // серверный слой, что при оценке адреса заказа.
     val addressCandidates: Map<String, List<AddressCandidate>> = emptyMap(),
+    // Город, определённый по GPS для предзаполнения поля «Город» (ключ поля → город).
+    // Заполняется по запросу; пусто — не определили, поле останется на ручной ввод.
+    val cityHints: Map<String, String> = emptyMap(),
 )
 
 data class HomeUiState(

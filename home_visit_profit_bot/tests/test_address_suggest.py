@@ -268,3 +268,99 @@ def test_dadata_wrong_city_setting_still_resolves(config, monkeypatch):
     assert "resolved" in result
     # Было два вызова: с городом (пусто) и без города (нашёл).
     assert calls[0] is not None and calls[-1] is None
+
+
+# --- отчёт 3 из Telegram: город отдельно, улица+дом без города, reverse по GPS ---
+
+def test_dadata_candidate_carries_street_house(config, monkeypatch):
+    """Кандидат несёт улицу и дом БЕЗ города, с корпусом.
+
+    Клиент показывает street_house — номер дома виден целиком, а не съеден
+    префиксом «г Санкт-Петербург», как было (обрезка maxLines=1 на подсказке).
+    """
+    monkeypatch.setattr(orch, "geocode_address", lambda *a, **k: None)
+    monkeypatch.setattr(orch, "dadata_token", lambda: "k")
+    monkeypatch.setattr(orch, "dadata_daily_limit_per_user", lambda: 300)
+    monkeypatch.setattr(dadata_service, "suggest_addresses", lambda *a, **k: [
+        DadataSuggestion("г Москва, ул Ленина, д 40", 55.75, 37.61, "Москва", "ул Ленина", "40"),
+        DadataSuggestion("г СПб, ул Ленина, д 40 к 2", 59.96, 30.30, "Санкт-Петербург", "ул Ленина", "40"),
+    ])
+    result = _suggest(config, "Ленина 40")
+    assert "candidates" in result
+    houses = {c["street_house"] for c in result["candidates"]}
+    # Город отрезан, но корпус сохранён — ровно то, чего человек не видел.
+    assert "ул Ленина, д 40" in houses
+    assert "ул Ленина, д 40 к 2" in houses
+    assert all(c["city"] for c in result["candidates"])
+
+
+def test_weak_nominatim_candidate_has_no_invented_city(config, monkeypatch):
+    """Слабый Nominatim-кандидат НЕ выдумывает город из настроек — city честно None.
+
+    Иначе клиент, предзаполняя поле «Город» этим значением, соврал бы: показал бы
+    город настроек для точки, чей город на деле неизвестен.
+    """
+    monkeypatch.setattr(orch, "geocode_address", lambda text, *a, **k: GeocodingResult(
+        input_text=text, normalized_address="что-то похожее", district=None,
+        lat=59.9, lon=30.1, confidence=0.1, source="nominatim"))
+    monkeypatch.setattr(orch, "dadata_token", lambda: None)
+    result = _suggest(config, "улица Ленина, 40")
+    nominatim = next(c for c in result["candidates"] if c["source"] == "nominatim")
+    assert nominatim["city"] is None
+
+
+def test_reverse_city_returns_city(config, monkeypatch):
+    monkeypatch.setattr(orch, "dadata_token", lambda: "k")
+    monkeypatch.setattr(orch, "dadata_daily_limit_per_user", lambda: 300)
+    monkeypatch.setattr(dadata_service, "geolocate_city",
+                        lambda lat, lon, *, token, timeout_seconds=5.0: "Казань")
+    with connect(config) as conn:
+        conn.set_user(_uid())
+        assert orch.reverse_city(55.79, 49.12, conn, _uid()) == "Казань"
+
+
+def test_reverse_city_none_without_token(config, monkeypatch):
+    """Нет ключа DaData — честный None, а не выдуманный город."""
+    monkeypatch.setattr(orch, "dadata_token", lambda: None)
+    with connect(config) as conn:
+        conn.set_user(_uid())
+        assert orch.reverse_city(55.79, 49.12, conn, _uid()) is None
+
+
+def test_city_endpoint_returns_city(fresh_db, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.api.app import create_app
+
+    monkeypatch.setattr(orch, "dadata_token", lambda: "k")
+    monkeypatch.setattr(orch, "dadata_daily_limit_per_user", lambda: 300)
+    monkeypatch.setattr(dadata_service, "geolocate_city",
+                        lambda lat, lon, *, token, timeout_seconds=5.0: "Казань")
+    current_user_id.set(None)
+    app = create_app(fresh_db)
+    with TestClient(app) as client:
+        client.post("/api/auth/register",
+                    json={"email": "c@x.com", "password": "supersecret", "nickname": "Ник"})
+        client.post("/api/auth/verify-email", json={"email": "c@x.com", "code": "123456"})
+        token = client.post("/api/auth/login",
+                            json={"email": "c@x.com", "password": "supersecret"}).json()["token"]
+        resp = client.post("/api/address/city", json={"lat": 55.79, "lon": 49.12},
+                           headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+    assert resp.json()["city"] == "Казань"
+
+
+def test_city_endpoint_requires_coords(fresh_db):
+    from fastapi.testclient import TestClient
+    from app.api.app import create_app
+
+    current_user_id.set(None)
+    app = create_app(fresh_db)
+    with TestClient(app) as client:
+        client.post("/api/auth/register",
+                    json={"email": "d@x.com", "password": "supersecret", "nickname": "Ник"})
+        client.post("/api/auth/verify-email", json={"email": "d@x.com", "code": "123456"})
+        token = client.post("/api/auth/login",
+                            json={"email": "d@x.com", "password": "supersecret"}).json()["token"]
+        resp = client.post("/api/address/city", json={},
+                           headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 400

@@ -57,6 +57,7 @@ fun OnboardingScreen(
     onSave: (Map<String, Any?>) -> Unit,
     onFinish: () -> Unit,
     onSuggestAddress: (String, String) -> Unit = { _, _ -> },
+    onRequestCity: (String) -> Unit = {},
 ) {
     val snapshot = appSettings.snapshot
     // Дельта тронутых полей — как в Настройках (общая модель, общие Saver'ы бы
@@ -137,6 +138,8 @@ fun OnboardingScreen(
                         rejectedReasons = appSettings.rejected.associate { it.key to it.reason },
                         addressCandidates = appSettings.addressCandidates,
                         onSuggestAddress = onSuggestAddress,
+                        cityHints = appSettings.cityHints,
+                        onRequestCity = onRequestCity,
                         listDrafts = listDrafts,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

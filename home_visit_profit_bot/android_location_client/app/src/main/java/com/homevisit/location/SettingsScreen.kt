@@ -276,6 +276,7 @@ internal fun AppSettingsCard(
     onRefresh: () -> Unit,
     onSave: (Map<String, Any?>) -> Unit,
     onSuggestAddress: (String, String) -> Unit = { _, _ -> },
+    onRequestCity: (String) -> Unit = {},
 ) {
     val snapshot = appSettings.snapshot
     // ДЕЛЬТА-МОДЕЛЬ: карты хранят только то, что человек ТРОГАЛ; всё остальное
@@ -338,6 +339,8 @@ internal fun AppSettingsCard(
                         rejectedReasons = appSettings.rejected.associate { it.key to it.reason },
                         addressCandidates = appSettings.addressCandidates,
                         onSuggestAddress = onSuggestAddress,
+                        cityHints = appSettings.cityHints,
+                        onRequestCity = onRequestCity,
                         listDrafts = listDrafts,
                     )
                 }
@@ -393,6 +396,9 @@ internal fun AppSettingsSection(
     rejectedReasons: Map<String, String> = emptyMap(),
     addressCandidates: Map<String, List<AddressCandidate>> = emptyMap(),
     onSuggestAddress: (String, String) -> Unit = { _, _ -> },
+    // Город по GPS для предзаполнения поля «Город» (ключ поля → город) и запрос его.
+    cityHints: Map<String, String> = emptyMap(),
+    onRequestCity: (String) -> Unit = {},
     listDrafts: MutableMap<String, String> = mutableMapOf(),
 ) {
     // Зоны обслуживания — не поле, а отдельная страница со своим объяснением.
@@ -456,8 +462,10 @@ internal fun AppSettingsSection(
                 templates = templates,
                 candidates = addressCandidates[field.key].orEmpty(),
                 rejectedReason = rejectedReasons[field.key],
+                cityHint = cityHints[field.key],
                 onValue = { textEdits[field.key] = it },
                 onSuggest = { query -> onSuggestAddress(field.key, query) },
+                onRequestCity = { onRequestCity(field.key) },
             )
             SettingHint(field.hint)
             return@forEach
@@ -559,32 +567,66 @@ internal fun DefaultAddressField(
     templates: List<AddressTemplate>,
     candidates: List<AddressCandidate>,
     rejectedReason: String?,
+    cityHint: String?,
     onValue: (String) -> Unit,
     onSuggest: (String) -> Unit,
+    onRequestCity: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    // Выбранное из подсказок/шаблонов: не искать заново то, что человек только что
-    // выбрал (кандидаты в state уже пусты к моменту рестарта эффекта — сравнение
-    // с ними после выбора не срабатывало, и список подсказок возвращался).
+    // Город и улица-дом — два поля, но в настройку уходит одна склеенная строка (её
+    // резолвит сервер целиком, потребители не трогаем). Инициализируем из входного
+    // значения ОДИН раз (ключ — label, он различает старт и финиш): если ключевать по
+    // value, наш же push пересоздал бы поля из строки, и город из одного слова без
+    // запятой перепрыгнул бы в поле адреса. Дальше ведём локально.
+    var city by rememberSaveable(label) { mutableStateOf(splitCityAddress(value).first) }
+    var streetHouse by rememberSaveable(label) { mutableStateOf(splitCityAddress(value).second) }
+    // Выбранное из подсказок/шаблонов: не искать заново только что выбранное.
     var lastPicked by remember { mutableStateOf<String?>(null) }
-    // Подсказки — только по живому вводу человека, с паузой: сервер не дёргается
-    // на каждую букву.
-    LaunchedEffect(value, touched) {
+
+    fun push() = onValue(joinCityAddress(city, streetHouse))
+
+    // Предзаполнение города по GPS: спрашиваем один раз, когда город пуст и поле не
+    // трогали. Пришедший город подставляем только в пустое поле — руками введённое
+    // не затираем.
+    LaunchedEffect(Unit) {
+        if (city.isBlank() && !touched) onRequestCity()
+    }
+    LaunchedEffect(cityHint) {
+        if (!cityHint.isNullOrBlank() && city.isBlank()) {
+            city = cityHint
+            push()
+        }
+    }
+    // Подсказки — по живому вводу улицы, с паузой: сервер не дёргается на каждую букву.
+    LaunchedEffect(streetHouse, touched) {
         if (!touched) return@LaunchedEffect
-        if (value.isBlank() || value == lastPicked || candidates.any { it.label == value }) {
+        if (streetHouse.isBlank() || streetHouse == lastPicked || candidates.any { (it.streetHouse ?: it.label) == streetHouse }) {
             onSuggest("")
             return@LaunchedEffect
         }
         kotlinx.coroutines.delay(500)
-        onSuggest(value)
+        onSuggest(streetHouse)
+    }
+
+    OutlinedTextField(
+        modifier = Modifier.fillMaxWidth(),
+        value = city,
+        onValueChange = { city = it; push() },
+        singleLine = true,
+        label = { Text("Город") },
+        placeholder = { Text("определим по GPS") },
+    )
+    if (city.isBlank()) {
+        TextButton(onClick = onRequestCity) { Text("Определить город по GPS") }
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         OutlinedTextField(
             modifier = Modifier.weight(1f),
-            value = value,
-            onValueChange = onValue,
+            value = streetHouse,
+            onValueChange = { streetHouse = it; push() },
             singleLine = true,
-            label = { Text(label) },
+            // label подчёркивает, что город уже отдельным полем — не дублировать.
+            label = { Text("$label: улица и дом") },
             isError = rejectedReason != null,
             supportingText = rejectedReason?.let { reason ->
                 { Text(reason.substringAfter(": ", reason)) }
@@ -600,39 +642,53 @@ internal fun DefaultAddressField(
                         DropdownMenuItem(
                             text = { Text("${template.name} · ${template.address}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             onClick = {
-                                // В настройку кладём АДРЕС, а не название: координаты
-                                // считаются по адресу, за которым закреплён шаблон.
-                                lastPicked = template.address
-                                onValue(template.address)
+                                // Шаблон может содержать город — раскладываем в оба поля,
+                                // координаты считаются по адресу, за которым он закреплён.
+                                val (templateCity, templateStreet) = splitCityAddress(template.address)
+                                if (templateCity.isNotBlank()) city = templateCity
+                                streetHouse = templateStreet.ifBlank { template.address }
+                                lastPicked = streetHouse
+                                push()
                                 expanded = false
                             },
                         )
                     }
                     DropdownMenuItem(
                         text = { Text("Очистить") },
-                        onClick = { onValue(""); expanded = false },
+                        onClick = { city = ""; streetHouse = ""; push(); expanded = false },
                     )
                 }
             }
         }
     }
-    // Кандидаты сервера — как при оценке адреса: тап подставляет точный вариант.
+    // Кандидаты сервера: показываем улицу и дом БЕЗ города и с переносом — номер дома
+    // виден целиком (раньше maxLines=1 обрезал его вместе с корпусом). Тап подставляет
+    // и улицу-дом, и город (если поле города ещё пусто).
     candidates.forEach { candidate ->
+        val streetText = candidate.streetHouse ?: candidate.label
         OutlinedButton(
             modifier = Modifier.fillMaxWidth(),
             onClick = {
-                lastPicked = candidate.label
-                onValue(candidate.label)
+                streetHouse = streetText
+                if (city.isBlank()) candidate.city?.let { city = it }
+                lastPicked = streetText
+                push()
                 onSuggest("")
             },
         ) {
-            Text(candidate.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(streetText)
+                candidate.city?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
     }
-    val matchesTemplate = templates.any { it.address == value || it.name.equals(value, ignoreCase = true) }
-    if (value.isNotBlank() && !matchesTemplate && !looksLikeAddress(value)) {
+    val joined = joinCityAddress(city, streetHouse)
+    val matchesTemplate = templates.any { it.address == joined || it.name.equals(streetHouse, ignoreCase = true) }
+    if (streetHouse.isNotBlank() && !matchesTemplate && !looksLikeAddress(joined)) {
         Text(
-            "«$value» не похоже на адрес и не совпадает ни с одним шаблоном — карта его не найдёт, " +
+            "«$streetHouse» не похоже на адрес и не совпадает ни с одним шаблоном — карта его не найдёт, " +
                 "и смена начнётся без точки старта.",
             style = MaterialTheme.typography.bodySmall,
             color = VerdictColors.edge,

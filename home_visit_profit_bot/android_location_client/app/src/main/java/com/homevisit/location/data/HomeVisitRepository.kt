@@ -965,9 +965,23 @@ class HomeVisitRepository private constructor(
             lat = json.optDouble("lat"),
             lon = json.optDouble("lon"),
             city = json.optString("city").ifBlank { null },
+            streetHouse = json.optString("street_house").ifBlank { null },
             source = json.optString("source"),
         )
     }
+
+    /**
+     * Город по координатам GPS для предзаполнения поля «Город» в настройках.
+     * null — сервер честно не определил (нет ключа/лимит/точка вне адресов): поле
+     * останется пустым, человек введёт сам. Ошибки сети тоже дают null, не падаем.
+     */
+    suspend fun cityByGps(serverUrl: String, apiKey: String, lat: Double, lon: Double): String? =
+        withContext(Dispatchers.IO) {
+            val payload = JSONObject().put("lat", lat).put("lon", lon)
+            val response = postJson(normalizeApiUrl(serverUrl, "/api/address/city"), apiKey, payload)
+                ?: return@withContext null
+            response.optString("city").ifBlank { null }
+        }
 
     suspend fun acceptCandidate(
         serverUrl: String,

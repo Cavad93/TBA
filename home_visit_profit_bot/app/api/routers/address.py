@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.deps import ApiError, Authed, authed, parse_json, raw_body
 from app.repositories import SettingsRepository
-from app.services.address_suggest_service import suggest
+from app.services.address_suggest_service import reverse_city, suggest
 from app.services.batch_parser import parse_order_lines
 
 router = APIRouter()
@@ -48,6 +48,21 @@ def suggest_address(body: bytes = Depends(raw_body), auth: Authed = Depends(auth
         return suggest(query, auth.db, SettingsRepository(auth.db), auth.user_id, lat=lat, lon=lon)
     except (ValueError, TypeError) as error:
         raise ApiError(400, {"error": "bad_request", "detail": str(error)})
+
+
+@router.post("/api/address/city")
+def city_by_gps(body: bytes = Depends(raw_body), auth: Authed = Depends(authed)) -> dict:
+    """Город по координатам GPS — для предзаполнения поля «Город» в настройках.
+
+    Всегда 200: {"city": "..."} или {"city": null}. null — честное «не определили»,
+    поле останется пустым, а не подставит выдуманный город.
+    """
+    payload = parse_json(body, {"error": "bad_request"}, with_detail=True)
+    lat = _optional_float(payload.get("lat"))
+    lon = _optional_float(payload.get("lon"))
+    if lat is None or lon is None:
+        raise ApiError(400, {"error": "bad_request", "detail": "нужны lat и lon"})
+    return {"city": reverse_city(lat, lon, auth.db, auth.user_id)}
 
 
 def _optional_float(value) -> float | None:
