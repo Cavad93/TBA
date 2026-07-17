@@ -657,6 +657,14 @@ internal fun StartShiftSheet(
                 BreakCard(startPrompt!!)
             } else {
                 FirstShiftBreakInput(value = firstBreakText, onValue = { firstBreakText = it })
+                // «2,5ч» с буквой молча превращался в 0 — и перерыв «исчезал».
+                if (firstBreakText.isNotBlank() && parseNumber(firstBreakText) == null) {
+                    Text(
+                        "Перерыв не распознан — введите число часов или очистите поле.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -678,6 +686,7 @@ internal fun StartShiftSheet(
             }
 
             Button(
+                enabled = hasPrev || firstBreakText.isBlank() || parseNumber(firstBreakText) != null,
                 onClick = {
                     val odometer = odometerText.toDoubleOrNull() ?: 0.0
                     // На повторных сменах перерыв считает сервер — с телефона не шлём ничего.

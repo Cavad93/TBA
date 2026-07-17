@@ -31,9 +31,12 @@ internal fun parseBaseZones(raw: String, dropBlank: Boolean = true): List<BaseZo
         (0 until array.length()).mapNotNull { index ->
             val item = array.optJSONObject(index) ?: return@mapNotNull null
             val districtsJson = item.optJSONArray("districts") ?: JSONArray()
-            val districts = (0 until districtsJson.length())
+            val allDistricts = (0 until districtsJson.length())
                 .map { districtsJson.optString(it).trim() }
-                .filter { it.isNotEmpty() }
+            // При редактировании пустой район ЖИВ: человек стёр текст, чтобы вписать
+            // новый, а безусловный фильтр удалял строку на следующем кадре — та же
+            // болезнь, что была у пустой зоны. Отсев пустых — только при сохранении.
+            val districts = if (dropBlank) allDistricts.filter { it.isNotEmpty() } else allDistricts
             val zone = BaseZone(
                 region = item.optString("region").trim(),
                 city = item.optString("city").trim(),

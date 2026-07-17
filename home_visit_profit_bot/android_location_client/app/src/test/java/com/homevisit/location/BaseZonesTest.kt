@@ -55,4 +55,19 @@ class BaseZonesTest {
         assertTrue(parseBaseZones("не json", dropBlank = false).isEmpty())
         assertTrue(parseBaseZones("").isEmpty())
     }
+
+    @Test
+    fun `пустой район жив при редактировании и отсеян при сохранении`() {
+        // Регресс Этапа 24: человек стёр текст района, чтобы вписать новый, — а
+        // безусловный фильтр удалял строку на следующем кадре (экран перечитывает
+        // JSON на каждой перерисовке). Пустое отсеивается только при dropBlank=true.
+        val zone = BaseZone(city = "Санкт-Петербург", districts = listOf("Приморский", ""))
+        val json = serializeBaseZones(listOf(zone))
+
+        val editing = parseBaseZones(json, dropBlank = false)
+        assertEquals(listOf("Приморский", ""), editing.single().districts)
+
+        val saving = parseBaseZones(json)
+        assertEquals(listOf("Приморский"), saving.single().districts)
+    }
 }

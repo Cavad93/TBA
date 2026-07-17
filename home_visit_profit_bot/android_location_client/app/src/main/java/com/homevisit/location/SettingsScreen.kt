@@ -250,6 +250,10 @@ internal fun AppSettingsCard(
     // Локальное редактируемое состояние, пересобирается при новой загрузке с сервера.
     val textEdits = remember(snapshot) { mutableStateMapOf<String, String>() }
     val boolEdits = remember(snapshot) { mutableStateMapOf<String, Boolean>() }
+    // Черновик шаблона «Название+Адрес» живёт на уровне экрана: раньше набранное
+    // без нажатия «Добавить шаблон» молча пропадало при «Сохранить настройки».
+    var templateDraftName by rememberSaveable { mutableStateOf("") }
+    var templateDraftAddress by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(snapshot) {
         if (snapshot != null) {
             textEdits.clear()
@@ -292,13 +296,38 @@ internal fun AppSettingsCard(
                 }
             } else {
                 snapshot.sections.forEach { section ->
-                    AppSettingsSection(section = section, textEdits = textEdits, boolEdits = boolEdits)
+                    AppSettingsSection(
+                        section = section,
+                        textEdits = textEdits,
+                        boolEdits = boolEdits,
+                        templateDraftName = templateDraftName,
+                        templateDraftAddress = templateDraftAddress,
+                        onTemplateDraftName = { templateDraftName = it },
+                        onTemplateDraftAddress = { templateDraftAddress = it },
+                    )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         modifier = Modifier.weight(1f),
                         enabled = !appSettings.isLoading,
-                        onClick = { onSave(collectSettingsChanges(snapshot.sections, textEdits, boolEdits)) },
+                        onClick = {
+                            // Недобавленный черновик шаблона — часть сохранения, а не потеря.
+                            if (templateDraftAddress.isNotBlank()) {
+                                val key = "address_templates"
+                                val raw = textEdits[key]
+                                    ?: snapshot.sections.flatMap { it.fields }
+                                        .firstOrNull { it.key == key }?.textValue
+                                    ?: "[]"
+                                val address = templateDraftAddress.trim()
+                                textEdits[key] = serializeAddressTemplates(
+                                    parseAddressTemplates(raw) +
+                                        AddressTemplate(templateDraftName.trim().ifBlank { address }, address),
+                                )
+                                templateDraftName = ""
+                                templateDraftAddress = ""
+                            }
+                            onSave(collectSettingsChanges(snapshot.sections, textEdits, boolEdits))
+                        },
                     ) {
                         Text(if (appSettings.isLoading) "Сохраняю..." else "Сохранить настройки")
                     }
@@ -316,6 +345,10 @@ internal fun AppSettingsSection(
     section: SettingsSection,
     textEdits: MutableMap<String, String>,
     boolEdits: MutableMap<String, Boolean>,
+    templateDraftName: String = "",
+    templateDraftAddress: String = "",
+    onTemplateDraftName: (String) -> Unit = {},
+    onTemplateDraftAddress: (String) -> Unit = {},
 ) {
     // Зоны обслуживания — не поле, а отдельная страница со своим объяснением.
     val fields = section.fields.filter { it.type != SettingType.Zones }
@@ -353,6 +386,10 @@ internal fun AppSettingsSection(
                 label = field.label,
                 templates = parseAddressTemplates(raw),
                 onChange = { items -> textEdits[field.key] = serializeAddressTemplates(items) },
+                draftName = templateDraftName,
+                draftAddress = templateDraftAddress,
+                onDraftName = onTemplateDraftName,
+                onDraftAddress = onTemplateDraftAddress,
             )
             SettingHint(field.hint)
             return@forEach
@@ -573,9 +610,15 @@ internal fun AddressTemplatesEditor(
     label: String,
     templates: List<AddressTemplate>,
     onChange: (List<AddressTemplate>) -> Unit,
+    // Черновик хранит родитель: «Сохранить настройки» обязан подхватить набранное
+    // без «Добавить шаблон» — раньше такой черновик молча пропадал.
+    draftName: String = "",
+    draftAddress: String = "",
+    onDraftName: (String) -> Unit = {},
+    onDraftAddress: (String) -> Unit = {},
 ) {
-    var newName by rememberSaveable { mutableStateOf("") }
-    var newAddress by rememberSaveable { mutableStateOf("") }
+    val newName = draftName
+    val newAddress = draftAddress
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(label, style = MaterialTheme.typography.bodyLarge)
         Text(
@@ -601,14 +644,14 @@ internal fun AddressTemplatesEditor(
         OutlinedTextField(
             modifier = Modifier.fillMaxWidth(),
             value = newName,
-            onValueChange = { newName = it },
+            onValueChange = onDraftName,
             singleLine = true,
             label = { Text("Название (например, Дом)") },
         )
         OutlinedTextField(
             modifier = Modifier.fillMaxWidth(),
             value = newAddress,
-            onValueChange = { newAddress = it },
+            onValueChange = onDraftAddress,
             singleLine = true,
             label = { Text("Адрес") },
         )
@@ -618,8 +661,8 @@ internal fun AddressTemplatesEditor(
             onClick = {
                 val address = newAddress.trim()
                 onChange(templates + AddressTemplate(newName.trim().ifBlank { address }, address))
-                newName = ""
-                newAddress = ""
+                onDraftName("")
+                onDraftAddress("")
             },
         ) {
             Text("Добавить шаблон")

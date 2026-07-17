@@ -19,7 +19,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -64,6 +66,9 @@ internal fun BaseZonesPage(appSettings: AppSettingsUiState, workActions: WorkAct
     // её здесь — карточка исчезала бы на следующем кадре, а «Добавить зону» выглядела бы
     // сломанной. Пустые отсекаются ниже, на сохранении (и ещё раз на сервере).
     val zones = parseBaseZones(zonesJson, dropBlank = false)
+    // Черновики «Добавить район» по индексу зоны: «Сохранить зоны» подхватывает
+    // набранное без «+» — раньше такой район молча пропадал при сохранении.
+    val districtDrafts = remember(field?.textValue) { mutableStateMapOf<Int, String>() }
 
     ScreenColumn {
         ZonesIntroCard()
@@ -82,10 +87,13 @@ internal fun BaseZonesPage(appSettings: AppSettingsUiState, workActions: WorkAct
         zones.forEachIndexed { index, zone ->
             ZoneCard(
                 zone = zone,
+                districtDraft = districtDrafts[index].orEmpty(),
+                onDistrictDraft = { districtDrafts[index] = it },
                 onChange = { updated ->
                     zonesJson = serializeBaseZones(zones.toMutableList().also { it[index] = updated })
                 },
                 onRemove = {
+                    districtDrafts.remove(index)
                     zonesJson = serializeBaseZones(zones.toMutableList().also { it.removeAt(index) })
                 },
             )
@@ -102,7 +110,19 @@ internal fun BaseZonesPage(appSettings: AppSettingsUiState, workActions: WorkAct
             modifier = Modifier.fillMaxWidth(),
             enabled = !appSettings.isLoading,
             onClick = {
-                val cleaned = zones.filter { it.city.isNotBlank() || it.region.isNotBlank() || it.districts.isNotEmpty() }
+                // Черновик района без «+» — часть сохранения; пустые строки районов
+                // (человек стёр текст) отсеиваются здесь, а не молча на перерисовке.
+                val enriched = zones.mapIndexed { index, zone ->
+                    val draft = districtDrafts[index]?.trim().orEmpty()
+                    val withDraft = if (draft.isNotEmpty()) {
+                        zone.copy(districts = zone.districts + draft)
+                    } else {
+                        zone
+                    }
+                    withDraft.copy(districts = withDraft.districts.filter { it.isNotBlank() })
+                }
+                districtDrafts.clear()
+                val cleaned = enriched.filter { it.city.isNotBlank() || it.region.isNotBlank() || it.districts.isNotEmpty() }
                 workActions.onSaveAppSettings(mapOf("base_zones" to serializeBaseZones(cleaned)))
             },
         ) {
@@ -149,8 +169,14 @@ private fun ZonesIntroCard() {
 }
 
 @Composable
-private fun ZoneCard(zone: BaseZone, onChange: (BaseZone) -> Unit, onRemove: () -> Unit) {
-    var newDistrict by rememberSaveable { mutableStateOf("") }
+private fun ZoneCard(
+    zone: BaseZone,
+    districtDraft: String,
+    onDistrictDraft: (String) -> Unit,
+    onChange: (BaseZone) -> Unit,
+    onRemove: () -> Unit,
+) {
+    val newDistrict = districtDraft
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -213,7 +239,7 @@ private fun ZoneCard(zone: BaseZone, onChange: (BaseZone) -> Unit, onRemove: () 
                 OutlinedTextField(
                     modifier = Modifier.weight(1f),
                     value = newDistrict,
-                    onValueChange = { newDistrict = it },
+                    onValueChange = onDistrictDraft,
                     singleLine = true,
                     label = { Text("Добавить район") },
                 )
@@ -221,7 +247,7 @@ private fun ZoneCard(zone: BaseZone, onChange: (BaseZone) -> Unit, onRemove: () 
                     enabled = newDistrict.isNotBlank(),
                     onClick = {
                         onChange(zone.copy(districts = zone.districts + newDistrict.trim()))
-                        newDistrict = ""
+                        onDistrictDraft("")
                     },
                 ) {
                     Text("+")

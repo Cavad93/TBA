@@ -301,6 +301,32 @@ internal fun EndDayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActio
     val endOdometer = parseNumber(endOdometerText)
     val userWorkload = parseNumber(workloadRatingText)?.coerceIn(0.0, 100.0)
 
+    // Опечатка в любом поле — не «поля не было»: раньше необязательные поля с
+    // мусором молча уходили нулями (та же потеря денег, что в мастере), а
+    // загруженность 150 молча срезалась в 100. Отказ всегда виден.
+    val unreadableFields = listOf(
+        "Рабочие км" to actualKmText,
+        "Заказов" to completedVisitsText,
+        "Работа" to workHoursText,
+        "Дорога" to routeHoursText,
+        "Одометр" to endOdometerText,
+        "Расход л/100" to fuelConsumptionText,
+        "Заправка" to fuelExpensesText,
+        "Литры" to fuelLitersText,
+        "Комп. топлива" to fuelCompensationText,
+        "Комп. парковки" to parkingCompensationText,
+        "Платная дорога" to tollExpensesText,
+        "Комп. дороги" to tollCompensationText,
+        "Прочее" to otherExpensesText,
+    ).filter { (_, text) -> text.isNotBlank() && parseNumber(text) == null }
+        .map { (label, _) -> label } +
+        listOfNotNull(
+            "Загруженность 0-100".takeIf {
+                workloadRatingText.isNotBlank() &&
+                    (parseNumber(workloadRatingText) ?: 101.0) > 100.0
+            },
+        )
+
     InputCard("Полное завершение дня") {
         Text(
             "Для чистого дохода/час, топлива, личного коэффициента дороги и нагрузки.",
@@ -353,9 +379,18 @@ internal fun EndDayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActio
             MoneyField(modifier = Modifier.weight(1f), value = otherExpensesText, onValueChange = { otherExpensesText = it }, label = "Прочее")
             MoneyField(modifier = Modifier.weight(1f), value = workloadRatingText, onValueChange = { workloadRatingText = it }, label = "Загруженность 0-100")
         }
+        if (unreadableFields.isNotEmpty()) {
+            Text(
+                "Не распознано: ${unreadableFields.joinToString(", ")}. " +
+                    "Поправьте число или очистите поле.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         Button(
             modifier = Modifier.fillMaxWidth(),
-            enabled = actualKm != null && workHours != null && routeHours != null && completedVisits != null && endOdometer != null,
+            enabled = actualKm != null && workHours != null && routeHours != null &&
+                completedVisits != null && endOdometer != null && unreadableFields.isEmpty(),
             onClick = {
                 workActions.onEndDayWithDetails(
                     EndDayDetails(
