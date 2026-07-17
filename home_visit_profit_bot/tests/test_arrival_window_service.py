@@ -63,6 +63,50 @@ def test_window_text_is_human_readable():
     assert "–" in windows[0].text
 
 
+def test_anchor_window_starts_from_its_planned_time():
+    """Окно якоря — от его НАЗНАЧЕННОГО времени, не от сырого прибытия.
+
+    Регресс Этапа 31: max(clock, planned_start) применялся ПОСЛЕ построения
+    окна — визит, назначенный на 14:00, показывал «примерно 08:30–10:30».
+    """
+    from dataclasses import replace
+
+    day = _day()
+    anchor = replace(_visit(1), kind="onsite",
+                     planned_start_at="2026-07-13T14:00:00", service_minutes=120)
+    windows = arrival_windows(day, [anchor], _route([1], {1: 30}), now=NOW)
+
+    assert len(windows) == 1
+    assert windows[0].eta_at >= "2026-07-13T14:00"
+    assert windows[0].from_at >= "2026-07-13T13:00"
+
+
+def test_no_travel_data_means_no_windows():
+    """Маршрут без плеч и без ручных минут → окон НЕТ, а не выдумка от «сейчас».
+
+    Старт без координат + заказ, принятый без оценки: цепочка «ехала за ноль
+    минут», и человеку показывались фантомные окна.
+    """
+    day = _day()
+    visit = _visit(1)  # estimated_extra_minutes=0 по фикстуре
+    route = RouteSummary(visits_count=1, total_km=0, total_minutes=0, order=[1], legs=[])
+
+    assert arrival_windows(day, [visit], route, now=NOW) == []
+
+
+def test_manual_minutes_still_build_windows_without_legs():
+    """Ручные минуты — честный источник: окна строятся и без legs."""
+    from dataclasses import replace
+
+    day = _day()
+    visit = replace(_visit(1), estimated_extra_minutes=40)
+    route = RouteSummary(visits_count=1, total_km=0, total_minutes=0, order=[1], legs=[])
+
+    windows = arrival_windows(day, [visit], route, now=NOW)
+    assert len(windows) == 1
+    assert windows[0].eta_at.startswith("2026-07-13T09:40")
+
+
 def test_boundaries_rounded_to_half_hour():
     day = _day()
     visits = [_visit(1), _visit(2)]

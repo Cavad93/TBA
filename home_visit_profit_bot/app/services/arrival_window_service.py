@@ -77,6 +77,12 @@ def arrival_windows(
 
     by_id = {visit.id: visit for visit in visits}
     legs = _leg_minutes_by_visit(route)
+    # Нет НИ ОДНОГО источника минут дороги (маршрут без плеч и без ручных минут —
+    # старт без координат, заказы приняты без оценки) — окон нет. Раньше цепочка
+    # «ехала за ноль минут», и человеку показывались выдуманные окна от «сейчас».
+    ordered_visits = [by_id[v] for v in order if v in by_id]
+    if not legs and not any((v.estimated_extra_minutes or 0) > 0 for v in ordered_visits):
+        return []
     clock = now or datetime.now()
     count = len(order)
     scale = max(0.0, dispersion)
@@ -88,6 +94,12 @@ def arrival_windows(
             continue
 
         clock += timedelta(minutes=_drive_minutes(visit, legs))
+        # Якорь начинается не раньше СВОЕГО времени: окно строится от него.
+        # Раньше max(clock, planned_start) применялся ПОСЛЕ построения окна —
+        # визит, назначенный на 14:00, показывал «примерно 08:30–10:30».
+        anchor_start = _parse(visit.planned_start_at) if visit.kind == "onsite" else None
+        if anchor_start is not None and anchor_start > clock:
+            clock = anchor_start
         eta = clock
 
         # Полуширина растёт линейно с позицией: первый визит — base, последний — max.
@@ -111,9 +123,7 @@ def arrival_windows(
 
         # Якорь занимает свой слот до конца, обычный заказ — среднюю длительность
         # (та же логика, что в late_warnings, чтобы цепочки времени совпадали).
-        planned_start = _parse(visit.planned_start_at) if visit.kind == "onsite" else None
-        if planned_start is not None:
-            clock = max(clock, planned_start)
+        # Ожидание до planned_start уже учтено выше, ДО построения окна.
         if visit.kind == "onsite":
             clock += timedelta(minutes=visit.service_minutes or 0)
         else:

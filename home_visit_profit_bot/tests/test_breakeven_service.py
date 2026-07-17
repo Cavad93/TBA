@@ -36,6 +36,42 @@ def test_no_fixed_costs_no_block(config) -> None:
         assert shift_breakeven(day, completed, settings, stats) is None
 
 
+def test_rent_paid_as_fact_shows_block_without_settings(config) -> None:
+    """Аренда внесена расходом дня, настройки пусты — блок обязан появиться.
+
+    Регресс Этапа 31: порог смотрел только на настройки, и реально платящий
+    аренду человек видел «смена в плюсе с первого заказа» при минусе на аренду.
+    """
+    with connect(config) as connection:
+        day, completed, settings, stats = _shift(connection, [400], rent=0)
+        connection.execute(
+            "UPDATE work_days SET vehicle_rent = 1000 WHERE id = ?", (day.id,)
+        )
+        day = WorkDayRepository(connection).get(day.id)
+        status = shift_breakeven(day, completed, settings, stats)
+
+    assert status is not None, "фикс-расход существует фактом — блок показывается"
+    assert status.fixed_costs == 1000.0
+    assert not status.is_paid_off
+
+
+def test_fact_rent_larger_than_setting_raises_the_bar(config) -> None:
+    """Внесено больше, чем в настройке: порог — реальная касса, не старая цифра."""
+    with connect(config) as connection:
+        day, completed, settings, stats = _shift(connection, [1100], rent=1000)
+        connection.execute(
+            "UPDATE work_days SET vehicle_rent = 1200 WHERE id = ?", (day.id,)
+        )
+        day = WorkDayRepository(connection).get(day.id)
+        status = shift_breakeven(day, completed, settings, stats)
+
+    assert status is not None
+    assert status.fixed_costs == 1200.0
+    # operating_net = 1100 (чистый с визитов) + 1200 (возврат внесённой аренды)
+    # − 1200 (вычтена в net)… итого чистыми с визитов 1100 < порога 1200.
+    assert not status.is_paid_off
+
+
 def test_paid_off_when_net_exceeds_fixed(config) -> None:
     with connect(config) as connection:
         day, completed, settings, stats = _shift(connection, [1500], rent=1000)
