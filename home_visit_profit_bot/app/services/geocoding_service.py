@@ -19,6 +19,9 @@ class GeocodingResult:
     lon: float | None = None
     confidence: float | None = None
     source: str = "manual_mvp"
+    # Город адреса: нужен, когда базовая зона задана городом целиком, а района
+    # Nominatim не отдал (районы Петербурга). None — город неизвестен.
+    city: str | None = None
 
 
 class GeocodingError(RuntimeError):
@@ -104,6 +107,7 @@ def geocode_address(
         lon=float(item["lon"]),
         confidence=float(item.get("importance") or 0),
         source="nominatim",
+        city=_extract_city(address),
     )
     if cache_repo and result.lat is not None and result.lon is not None:
         cache_repo.put(
@@ -130,11 +134,40 @@ def manual_geocoding_result(input_text: str, lat: float, lon: float, district: s
     )
 
 
-def is_base_district(district: str | None, base_districts: list[str]) -> bool:
-    if not district:
+def is_base_district(
+    district: str | None,
+    base_districts: list[str],
+    *,
+    city: str | None = None,
+    address_text: str | None = None,
+) -> bool:
+    """В базовой ли зоне адрес. Совпадение по РАЙОНУ или, если зона задана городом
+    целиком, по ГОРОДУ.
+
+    Определять район СПб по названию нельзя: Nominatim для его адресов не отдаёт
+    «Приморский район» вовсе, только муниципальный округ и город (проверено на живом
+    Nominatim, отчёт 8 из TG). Поэтому базовую зону на уровне города («Санкт-Петербург»)
+    сверяем по городу адреса. Запасной путь — город как отдельный компонент строки
+    адреса: для адресов из старого кэша, где город отдельным полем не сохранён.
+    """
+    names = [item.lower().replace(" район", "").strip() for item in base_districts if item]
+    if not names:
         return False
-    normalized = district.lower().replace(" район", "").strip()
-    return any(normalized == item.lower().replace(" район", "").strip() for item in base_districts)
+    if district:
+        if district.lower().replace(" район", "").strip() in names:
+            return True
+    if city:
+        city_norm = city.lower().replace("город ", "").replace("г ", "").strip()
+        if city_norm in names:
+            return True
+    if address_text:
+        text = address_text.lower()
+        for name in names:
+            # По границам-запятым, а не подстрокой: «Санкт-Петербург» как компонент
+            # адреса, но не «улица Пушкина» для базового «Пушкин».
+            if len(name) >= 4 and (f", {name}," in text or text.endswith(", " + name)):
+                return True
+    return False
 
 
 def detect_base_district_by_location(
@@ -311,13 +344,28 @@ def _extract_district(address: dict) -> str | None:
         address.get("town"),
         address.get("city"),
     ]
+    # Сначала ищем поле, где явно назван РАЙОН: у Nominatim «... район» нередко лежит
+    # в county, а в suburb/city_district — муниципальный округ («округ Озеро Долгое»).
+    # Прежний код возвращал первый непустой кандидат = мунокруг, и адрес в базовом
+    # районе молча уходил «вне зоны» (отчёт 8 из TG).
     for value in candidates:
-        if not value:
-            continue
-        value = str(value)
-        if "район" in value.lower():
-            return value.replace(" район", "").strip()
-        return value.strip()
+        if value and "район" in str(value).lower():
+            return str(value).replace(" район", "").strip()
+    # Явного района нет — берём первый непустой топоним (как раньше).
+    for value in candidates:
+        if value:
+            return str(value).strip()
+    return None
+
+
+def _extract_city(address: dict) -> str | None:
+    """Город/населённый пункт адреса — для случая, когда базовая зона задана городом
+    целиком. Nominatim почти всегда отдаёт город, даже когда района (в понимании
+    пользователя) в ответе нет вовсе — как для районов Петербурга (отчёт 8 из TG)."""
+    for key in ("city", "town", "village", "municipality", "state"):
+        value = address.get(key)
+        if value:
+            return str(value).strip()
     return None
 
 

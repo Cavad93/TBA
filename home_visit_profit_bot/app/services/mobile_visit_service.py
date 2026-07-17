@@ -238,7 +238,11 @@ class MobileVisitService:
             route_km=route_km or 0.0,
             route_minutes=route_minutes or 0.0,
             district=district,
-            is_base_district=is_base_district(district, base_districts),
+            is_base_district=is_base_district(
+                district, base_districts,
+                city=geo.city if geo is not None else None,
+                address_text=geo.normalized_address if geo is not None else None,
+            ),
             lat=geo.lat if geo is not None else None,
             lon=geo.lon if geo is not None else None,
             normalized_address=geo.normalized_address if geo is not None else address,
@@ -530,6 +534,7 @@ class MobileVisitService:
         base_districts = self.settings.base_districts()
         district = None
         normalized = address
+        city = None
         if lat is None or lon is None:
             try:
                 geo = self._geocode_layered(address)
@@ -540,6 +545,7 @@ class MobileVisitService:
             lat, lon = geo.lat, geo.lon
             district = geo.district
             normalized = geo.normalized_address or address
+            city = geo.city
 
         visit = self.visits.create_onsite(
             day_id=day.id,
@@ -552,7 +558,7 @@ class MobileVisitService:
             lon=lon,
             clinic=clinic,
             district=district,
-            is_base_district=is_base_district(district, base_districts),
+            is_base_district=is_base_district(district, base_districts, city=city, address_text=normalized),
         )
         response = self._route_response(day.id, "onsite_added", visit.id)
         response["visit"] = visit_payload(visit)

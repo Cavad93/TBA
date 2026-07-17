@@ -3,8 +3,10 @@ from __future__ import annotations
 from app.services import geocoding_service
 from app.services.geocoding_service import (
     _address_query_variants,
+    _extract_district,
     detect_base_district_by_location,
     geocode_address,
+    is_base_district,
     parse_coordinates,
 )
 
@@ -28,6 +30,50 @@ def test_detect_base_district_matches_zone_by_name_in_any_city() -> None:
         == "Ленинский"
     )
     assert detect_base_district_by_location("Кировский", 55.75, 37.62, ["Ленинский"]) is None
+
+
+# --- отчёт 8 из TG: базовая зона городом целиком + приоритет района ---
+
+def test_extract_district_prefers_field_with_rayon() -> None:
+    """Для СПб «... район» лежит в county, а в suburb — муниципальный округ.
+
+    Прежний код брал первый непустой кандидат (мунокруг «Озеро Долгое») и адрес в
+    базовом районе уходил «вне зоны». Теперь приоритет полю со словом «район».
+    """
+    address = {
+        "suburb": "Озеро Долгое",
+        "city_district": "округ Озеро Долгое",
+        "county": "Приморский район",
+        "city": "Санкт-Петербург",
+    }
+    assert _extract_district(address) == "Приморский"
+
+
+def test_base_zone_by_city_when_district_missing() -> None:
+    """Базовая зона задана городом целиком — адрес базовый по ГОРОДУ.
+
+    Nominatim для адресов Петербурга не отдаёт «Приморский район» (проверено вживую),
+    только мунокруг и город. Если пользователь внёс базовой зоной «Санкт-Петербург»,
+    его город и должен решать — иначе весь город молча «вне зоны» с надбавкой.
+    """
+    # Район адреса — мунокруг, в базовые не входит; но город совпал с зоной.
+    assert is_base_district("Озеро Долгое", ["Санкт-Петербург"], city="Санкт-Петербург")
+    # Город не тот — не базовый.
+    assert not is_base_district("Озеро Долгое", ["Санкт-Петербург"], city="Москва")
+
+
+def test_base_zone_by_city_from_address_text_for_old_cache() -> None:
+    """Старый кэш без отдельного города: сверяем по компоненту строки адреса."""
+    text = "8, Комендантский проспект, округ Озеро Долгое, Санкт-Петербург, Россия"
+    assert is_base_district("Озеро Долгое", ["Санкт-Петербург"], address_text=text)
+    # Подстрока внутри другого компонента базовой не делает («улица Пушкина» ≠ «Пушкин»).
+    assert not is_base_district(None, ["Пушкин"], address_text="улица Пушкина, 5, Москва")
+
+
+def test_base_zone_still_matches_by_district_name() -> None:
+    """Где Nominatim район отдаёт — сравнение по району работает как раньше."""
+    assert is_base_district("Ленинский район", ["Ленинский", "Советский"])
+    assert not is_base_district("Кировский", ["Ленинский"])
 
 
 def test_geocode_empty_nominatim_payload_returns_none(monkeypatch) -> None:

@@ -436,10 +436,14 @@ class MobileApiService:
 
         base_districts = self.settings.base_districts()
         district = None
+        city = None
+        normalized = address
         if lat is None or lon is None:
             geo = self._geocode(address, base_districts)
             if geo is not None:
                 lat, lon, district = geo.lat, geo.lon, geo.district
+                city = geo.city
+                normalized = geo.normalized_address or address
 
         visit = self.visits.create_onsite(
             day_id=day_id,
@@ -452,7 +456,7 @@ class MobileApiService:
             lon=float(lon) if lon is not None else None,
             clinic=clinic,
             district=district,
-            is_base_district=is_base_district(district, base_districts),
+            is_base_district=is_base_district(district, base_districts, city=city, address_text=normalized),
         )
         self._map(client_entity_id, "office_entry", visit.id)
         return visit.id
