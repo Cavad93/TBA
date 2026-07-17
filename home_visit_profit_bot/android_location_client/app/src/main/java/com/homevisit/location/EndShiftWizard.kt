@@ -226,7 +226,19 @@ private fun WizardContent(
             // ввода: человек видит полную картину расходов, но не может случайно
             // задвоить сумму, вписав её ещё раз.
             RecordedExpenses(preview)
-            StepButtons(onNext = { next() }, onSkip = { next() })
+            StepButtons(
+                onNext = { next() },
+                onSkip = {
+                    // «Пропустить» = вернуть расчётные значения, а не унести правку молча.
+                    meal = preview.moneyText { it.foodMealExpenses }
+                    coffee = preview.moneyText { it.coffeeExpenses }
+                    drinks = preview.moneyText { it.drinksExpenses }
+                    toll = preview.moneyText { it.tollExpenses }
+                    parking = preview.moneyText { it.parkingExpenses }
+                    other = preview.moneyText { it.otherExpenses }
+                    next()
+                },
+            )
         }
 
         WizardStep.Fuel -> {
@@ -239,6 +251,12 @@ private fun WizardContent(
                 priceConfirmed = fuelPriceConfirmed,
                 onConfirmPrice = { fuelPriceConfirmed = true },
                 onNext = { next() },
+                onSkip = {
+                    fuelAmount = ""
+                    fuelLiters = ""
+                    fuelPriceConfirmed = false
+                    next()
+                },
             )
         }
 
@@ -255,6 +273,7 @@ private fun WizardContent(
                         "${formatKm(preview.suggestedKm)} (${preview.kmSourceTitle()})"
                 },
                 onNext = { next() },
+                onReset = { odometer = preview?.suggestedEndOdometer.numberText() },
             )
             val driven = parseNumber(odometer)?.minus(startOdometer)
             if (preview != null && driven != null && driven < preview.suggestedKm - 0.5) {
@@ -282,6 +301,7 @@ private fun WizardContent(
             hint = preview?.let { "Расчёт: ${minutesText(it.drivingMinutes)} (${it.minutesSourceTitle()})" }
                 ?: "Сколько часов провели за рулём",
             onNext = { next() },
+            onReset = { drivingHours = preview?.drivingMinutes.hoursText() },
         )
 
         WizardStep.WorkTime -> {
@@ -292,6 +312,7 @@ private fun WizardContent(
                 hint = preview?.let { "Расчёт: ${minutesText(it.totalWorkMinutes)} (${it.minutesSourceTitle()})" }
                     ?: "От выезда до возвращения",
                 onNext = { next() },
+                onReset = { workHours = preview?.totalWorkMinutes.hoursText() },
             )
             val work = parseNumber(workHours)
             val driving = parseNumber(drivingHours)
@@ -308,6 +329,7 @@ private fun WizardContent(
                 "Расчёт: ${minutesText(it.avgServiceMinutes)} · заказов ${it.completedVisitsCount}"
             } ?: "Сколько в среднем занимает один адрес",
             onNext = { next() },
+            onReset = { serviceMinutes = preview?.avgServiceMinutes.numberText() },
         )
 
         WizardStep.WorkloadRating -> WorkloadRatingStep(
@@ -385,6 +407,8 @@ private fun FuelStep(
     priceConfirmed: Boolean,
     onConfirmPrice: () -> Unit,
     onNext: () -> Unit,
+    // «Пропустить» = «не заправлялся»: введённое очищается, а не уезжает молча.
+    onSkip: () -> Unit = onNext,
 ) {
     Text(
         "Заправлялись сегодня? Если нет — пролистайте, топливо посчитаем по прошлой цене.",
@@ -415,7 +439,7 @@ private fun FuelStep(
             Text("Всё верно, цена изменилась")
         }
     } else {
-        StepButtons(onNext = onNext, onSkip = onNext)
+        StepButtons(onNext = onNext, onSkip = onSkip)
     }
 }
 
@@ -428,10 +452,13 @@ private fun ValueStep(
     hint: String,
     nextTitle: String = "Дальше",
     onNext: () -> Unit,
+    // «Пропустить» обещает «останется расчётное» — значит правку шага надо ОТКАТИТЬ.
+    // Раньше skip и «Дальше» были одним колбэком, и правка молча уезжала в итог.
+    onReset: (() -> Unit)? = null,
 ) {
     Text(hint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     MoneyField(value, onValue, label)
-    StepButtons(onNext = onNext, onSkip = onNext, nextTitle = nextTitle)
+    StepButtons(onNext = onNext, onSkip = { onReset?.invoke(); onNext() }, nextTitle = nextTitle)
 }
 
 @Composable

@@ -694,8 +694,17 @@ internal fun ListFieldEditor(
                 OutlinedTextField(
                     modifier = Modifier.weight(1f),
                     value = item,
-                    onValueChange = { value -> onItemsChange(items.toMutableList().also { it[index] = value }) },
+                    // Запятая — разделитель хранения списка (и у сервера тоже):
+                    // название с запятой молча разрезалось бы на два элемента.
+                    onValueChange = { value ->
+                        onItemsChange(items.toMutableList().also { it[index] = value.replace(",", "") })
+                    },
                     singleLine = true,
+                    supportingText = if (item.isEmpty()) {
+                        { Text("Без запятых — это разделитель списка") }
+                    } else {
+                        null
+                    },
                 )
                 IconButton(onClick = { onItemsChange(items.toMutableList().also { it.removeAt(index) }) }) {
                     Icon(Icons.Filled.Delete, contentDescription = "Удалить")

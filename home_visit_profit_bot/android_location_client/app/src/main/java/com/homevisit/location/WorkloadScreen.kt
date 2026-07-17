@@ -367,7 +367,11 @@ internal fun WorkloadFeedbackCard(
                 OutlinedButton(modifier = Modifier.weight(1f), onClick = { onSubmit("higher", null) }) { Text("Выше") }
                 OutlinedButton(modifier = Modifier.weight(1f), onClick = { onSubmit("lower", null) }) { Text("Ниже") }
             }
-            val manualScore = parseNumber(manualScoreText)?.coerceIn(0.0, 100.0)
+            // 150 раньше молча срезалось в 100 и отправлялось — человек не узнавал,
+            // что его число подменили. Вне шкалы — это отказ, а не тихий кламп.
+            val manualRaw = parseNumber(manualScoreText)
+            val manualOutOfRange = manualRaw != null && manualRaw > 100.0
+            val manualScore = manualRaw?.takeIf { it <= 100.0 }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 MoneyField(
                     modifier = Modifier.weight(1f),
@@ -381,6 +385,13 @@ internal fun WorkloadFeedbackCard(
                 ) {
                     Text("Сохранить")
                 }
+            }
+            if (manualOutOfRange) {
+                Text(
+                    "Шкала — от 0 до 100.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
             snapshot.latestFeedback?.let {
                 Text(
