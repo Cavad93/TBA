@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -480,6 +481,7 @@ internal fun GpsEstimateControls(state: GpsEstimateUiState, onRefresh: () -> Uni
 internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
     val candidate = uiState.candidate
     var showResult by rememberSaveable { mutableStateOf(false) }
+    var showAnchors by rememberSaveable { mutableStateOf(false) }
     // Датчик выгоды всплывает, как только пришёл расчёт (или нужен ручной маршрут), и
     // сам уходит, когда заказ принят/отклонён: считать больше нечего. Раньше лист на
     // терминальном состоянии не закрывался — приём переоткрывал его (у промежуточного
@@ -508,8 +510,61 @@ internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
             onPickCandidate = workActions.onPickAddressCandidate,
             onReopenResult = { showResult = true },
             onPickOrderPhoto = workActions.onParseOrderPhoto,
+            onEditRoute = { showAnchors = true },
         )
         OtherEntriesSection(uiState, workActions)
+    }
+
+    // Всплывающее окно быстрого ввода старта/финиша прямо с экрана оценки. Пишет
+    // координаты в АКТИВНЫЙ день (onUpdateStart/onUpdateFinish идут через путь Ленты),
+    // поэтому применяется сразу — не как дефолт настроек, который активную смену не
+    // трогает и создавал ощущение «задал, а не работает» (отчёт 7 из TG).
+    if (showAnchors) {
+        val templates = uiState.appSettings.addressTemplates()
+        ModalBottomSheet(
+            onDismissRequest = { showAnchors = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("Старт и финиш смены", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(
+                    "Откуда выезжаешь и куда возвращаешься. От старта считается дорога до " +
+                        "заказа — применится сразу к текущей смене.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                RouteAnchor(
+                    title = "Старт",
+                    icon = Icons.Filled.PlayArrow,
+                    accent = VerdictColors.go,
+                    address = uiState.startAddress,
+                    templates = templates,
+                    isLoading = uiState.serverRoute.isLoading,
+                    onSave = workActions.onUpdateStart,
+                    candidates = if (uiState.serverRoute.anchorTarget == "start") uiState.serverRoute.anchorCandidates else emptyList(),
+                    onPickCandidate = workActions.onPickAddressCandidate,
+                )
+                RouteAnchor(
+                    title = "Финиш",
+                    icon = Icons.Filled.NearMe,
+                    accent = MaterialTheme.colorScheme.primary,
+                    address = uiState.finishAddress,
+                    templates = templates,
+                    isLoading = uiState.serverRoute.isLoading,
+                    onSave = workActions.onUpdateFinish,
+                    candidates = if (uiState.serverRoute.anchorTarget == "finish") uiState.serverRoute.anchorCandidates else emptyList(),
+                    onPickCandidate = workActions.onPickAddressCandidate,
+                )
+            }
+        }
     }
 
     if (showResult) {
@@ -592,6 +647,7 @@ internal fun EvaluateForm(
     onPickCandidate: (AddressCandidate) -> Unit,
     onReopenResult: () -> Unit,
     onPickOrderPhoto: (ByteArray) -> Unit = {},
+    onEditRoute: () -> Unit = {},
 ) {
     // Рубильник «Работа / Личная поездка» (Ф11.5). В личном режиме нет дохода и вердикта:
     // человек не зарабатывает, а хочет знать, во сколько обойдётся съездить туда-обратно.
@@ -742,6 +798,13 @@ internal fun EvaluateForm(
                 Icon(Icons.Filled.AddAPhoto, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Добавить фото со списком заказов")
+            }
+            // Быстро задать старт/финиш смены прямо здесь: от старта считается дорога
+            // до заказа. Без него оценка честно предупреждает, что расчёт неполный.
+            OutlinedButton(onClick = onEditRoute, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Задать старт и финиш смены")
             }
         }
         // Набрали название шаблона — показываем, какой адрес за ним стоит.
