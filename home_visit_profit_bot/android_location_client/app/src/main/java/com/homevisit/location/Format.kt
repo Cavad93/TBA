@@ -280,7 +280,12 @@ internal fun collectSettingsChanges(
                 SettingType.Number -> {
                     val edited = (textEdits[field.key] ?: field.textValue).trim()
                     val number = edited.replace(',', '.').toDoubleOrNull()
-                    if (number != null && edited != field.textValue) changes[field.key] = number
+                    if (edited != field.textValue) {
+                        // Нераспознанное (и очищенное) уходит как есть: сервер отвергнет
+                        // поключево с причиной, и человек её увидит («Сохранено, кроме…»).
+                        // Молча выбрасывать правку нельзя — поле откатывалось без слов.
+                        changes[field.key] = number ?: edited
+                    }
                 }
                 SettingType.ListValue -> {
                     val editedRaw = textEdits[field.key] ?: field.listValue.joinToString(", ")

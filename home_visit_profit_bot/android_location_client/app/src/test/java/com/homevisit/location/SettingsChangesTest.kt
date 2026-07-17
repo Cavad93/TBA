@@ -74,6 +74,50 @@ class SettingsChangesTest {
         assertFalse(changes.containsKey("osago_expires_at"))
     }
 
+    private fun numberSection(current: String = "600") = listOf(
+        SettingsSection(
+            key = "money",
+            title = "Деньги",
+            fields = listOf(
+                SettingField(
+                    key = "min_hourly_income",
+                    label = "Минимум ₽/час",
+                    type = SettingType.Number,
+                    textValue = current,
+                )
+            ),
+        )
+    )
+
+    @Test
+    fun `нечисловой Number уходит как есть — отказ сформулирует сервер`() {
+        // Раньше опечатка молча выбрасывалась: «Настройки сохранены», поле откатилось.
+        // Теперь сырая строка едет на сервер, тот отвергает поключево с причиной,
+        // и человек видит «Сохранено, кроме: …».
+        val changes = collectSettingsChanges(
+            sections = numberSection(),
+            textEdits = mapOf("min_hourly_income" to "6ОО"), // кириллические «О»
+            boolEdits = emptyMap(),
+        )
+        assertEquals("6ОО", changes["min_hourly_income"])
+    }
+
+    @Test
+    fun `валидный Number уходит числом, нетронутый — не уходит`() {
+        val changes = collectSettingsChanges(
+            sections = numberSection(),
+            textEdits = mapOf("min_hourly_income" to "750,5"),
+            boolEdits = emptyMap(),
+        )
+        assertEquals(750.5, changes["min_hourly_income"])
+        val untouched = collectSettingsChanges(
+            sections = numberSection(),
+            textEdits = emptyMap(),
+            boolEdits = emptyMap(),
+        )
+        assertFalse(untouched.containsKey("min_hourly_income"))
+    }
+
     @Test
     fun `normalizeDateInput — границы`() {
         assertEquals("2027-07-16", normalizeDateInput("16.07.2027"))

@@ -33,6 +33,43 @@ internal fun EndDayPreview.minutesSourceTitle(): String =
 
 internal fun formatKm(value: Double): String = oneDecimal(value).removeSuffix(",0") + " км"
 
+/**
+ * Поля мастера, чей ввод НЕ распознан: не пусто, но не число (или меньше нуля).
+ *
+ * Молча подставлять 0 или расчётное значение вместо нераспознанной правки нельзя:
+ * поля предзаполнены реальными суммами дня, и опечатка при правке обнуляла расход
+ * на сервере — тот же механизм «сервер подставляет присланное вместо накопленного»,
+ * которым уже теряли vehicle_expenses. Пустое поле — осознанное «не было», это ок.
+ */
+internal fun invalidEndShiftInputs(
+    meal: String,
+    coffee: String,
+    drinks: String,
+    toll: String,
+    parking: String,
+    other: String,
+    fuelAmount: String,
+    fuelLiters: String,
+    odometer: String,
+    drivingHours: String,
+    workHours: String,
+    serviceMinutes: String,
+): List<String> = listOf(
+    "Еда" to meal,
+    "Кофе" to coffee,
+    "Вода/напитки" to drinks,
+    "Платная дорога" to toll,
+    "Парковка" to parking,
+    "Прочее" to other,
+    "Заправка" to fuelAmount,
+    "Литры" to fuelLiters,
+    "Одометр" to odometer,
+    "За рулём" to drivingHours,
+    "Всего работали" to workHours,
+    "Минут на адрес" to serviceMinutes,
+).filter { (_, text) -> text.isNotBlank() && parseNumber(text) == null }
+    .map { (label, _) -> label }
+
 /** Цена литра по введённой заправке — по ней ловим опечатку в сумме или объёме. */
 internal fun fuelPricePerLiter(amount: String, liters: String): Double? {
     val sum = parseNumber(amount) ?: return null

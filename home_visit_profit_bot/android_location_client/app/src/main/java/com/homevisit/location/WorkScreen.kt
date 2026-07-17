@@ -186,6 +186,9 @@ internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions)
     if (uiState.status == WorkDayStatus.Active) {
         var endOdometerText by rememberSaveable { mutableStateOf("") }
         val endOdometer = parseNumber(endOdometerText)
+        // Мусор в поле ≠ пустое поле: пустое — осознанное «без одометра», а опечатку
+        // молча превращать в «без одометра» нельзя — человек уверен, что ввёл число.
+        val endOdometerInvalid = endOdometerText.isNotBlank() && endOdometer == null
         InputCard("Параметры дня") {
             Text(
                 "Старт: ${uiState.startAddress.ifBlank { "не указан" }}. Финиш: ${uiState.finishAddress.ifBlank { "не указан" }}.",
@@ -198,8 +201,16 @@ internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions)
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             MoneyField(value = endOdometerText, onValueChange = { endOdometerText = it }, label = "Одометр на конец")
+            if (endOdometerInvalid) {
+                Text(
+                    "Одометр не распознан — введите число или очистите поле.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
+                enabled = !endOdometerInvalid,
                 onClick = { workActions.onEndDayWithOdometer(endOdometer) },
             ) {
                 Text("Завершить день с одометром")
@@ -218,6 +229,10 @@ internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions)
     var finishAddress by rememberSaveable(defaultFinish) { mutableStateOf(defaultFinish) }
     var startOdometerText by rememberSaveable { mutableStateOf("") }
     val startOdometer = parseNumber(startOdometerText) ?: 0.0
+    // Опечатка в одометре молча стартовала смену с нулём — весь дневной пробег
+    // потом считался неверно. Нераспознанный непустой ввод блокирует старт.
+    val startOdometerInvalid = startOdometerText.isNotBlank() &&
+        parseNumber(startOdometerText) == null
 
     InputCard("Начало дня") {
         OutlinedTextField(
@@ -243,9 +258,16 @@ internal fun DayDetailsCard(uiState: HomeVisitUiState, workActions: WorkActions)
             onValueChange = { startOdometerText = it },
             label = "Одометр",
         )
+        if (startOdometerInvalid) {
+            Text(
+                "Одометр не распознан — введите число или очистите поле.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         Button(
             modifier = Modifier.fillMaxWidth(),
-            enabled = startAddress.isNotBlank() && finishAddress.isNotBlank(),
+            enabled = startAddress.isNotBlank() && finishAddress.isNotBlank() && !startOdometerInvalid,
             onClick = {
                 workActions.onStartDayDetails(startAddress, finishAddress, startOdometer)
             },
@@ -648,13 +670,26 @@ internal fun EvaluateForm(
                     MoneyField(modifier = Modifier.weight(1f), value = routeKmText, onValueChange = { routeKmText = it }, label = "Км вручную")
                     MoneyField(modifier = Modifier.weight(1f), value = routeMinutesText, onValueChange = { routeMinutesText = it }, label = "Мин вручную")
                 }
-                Text(
-                    // Не «адрес не распознан»: сюда попадают и случаи, когда адрес найден,
-                    // а не построился МАРШРУТ (нет старта смены, вне покрытия карт).
-                    "Маршрут не построился автоматически — укажите километраж и время вручную.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                // Заполнено, но не распозналось (или только одно из двух) — раньше оба
+                // значения молча выбрасывались, уходили null,null, и сервер снова просил
+                // «уточните маршрут». Человек «всё заполнил» и ходил по кругу без слов.
+                val manualRouteBroken =
+                    (routeKmText.isNotBlank() || routeMinutesText.isNotBlank()) && !hasManualRoute
+                if (manualRouteBroken) {
+                    Text(
+                        "Км и мин не распознаны: нужны оба числа, без минусов и букв.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                } else {
+                    Text(
+                        // Не «адрес не распознан»: сюда попадают и случаи, когда адрес найден,
+                        // а не построился МАРШРУТ (нет старта смены, вне покрытия карт).
+                        "Маршрут не построился автоматически — укажите километраж и время вручную.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
         if (personalMode) {

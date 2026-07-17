@@ -166,10 +166,27 @@ private fun WizardContent(
         workloadRating = workloadRating,
     )
 
+    // Нераспознанные правки: показать и не отправлять. Молчание здесь = потеря денег.
+    var inputError by rememberSaveable { mutableStateOf("") }
+
+    fun finish() {
+        val bad = invalidEndShiftInputs(
+            meal, coffee, drinks, toll, parking, other,
+            fuelAmount, fuelLiters, odometer, drivingHours, workHours, serviceMinutes,
+        )
+        if (bad.isNotEmpty()) {
+            inputError = "Не распознано: ${bad.joinToString(", ")}. " +
+                "Поправьте число или очистите поле — пустое значит «не было»."
+            return
+        }
+        inputError = ""
+        onFinish(details())
+    }
+
     fun next() {
         val index = QUESTION_STEPS.indexOf(step)
         if (step == WizardStep.WorkloadRating || index == QUESTION_STEPS.lastIndex) {
-            onFinish(details())
+            finish()
         } else {
             step = QUESTION_STEPS[index + 1]
         }
@@ -178,12 +195,19 @@ private fun WizardContent(
     if (step != WizardStep.Intro) {
         StepHeader(step)
     }
+    if (inputError.isNotEmpty()) {
+        Text(
+            inputError,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
 
     when (step) {
         WizardStep.Intro -> IntroStep(
             message = message,
             onYes = { step = WizardStep.Expenses },
-            onNo = { onFinish(details()) },
+            onNo = { finish() },
         )
 
         WizardStep.Expenses -> {
