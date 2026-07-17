@@ -188,15 +188,37 @@ def reconcile_end_day_data(data: EndDayData) -> EndDayData:
         else data.odometer_km
     )
     actual_km = data.actual_km
+    end_odometer = data.end_odometer
+    fixed_odometer_km = data.odometer_km
+    if odometer_km <= 0 and actual_km > 0:
+        # Кривой одометр старого клиента: конец ≤ старта (опечатка) или оба нуля
+        # при реальном пробеге. finalize_day ответил бы «пробег по одометру меньше
+        # рабочего» → 400 → вечный зомби-ретрай, а день навсегда открыт на сервере.
+        # Принимаем рабочий пробег как одометражный (личный пробег дня = 0) и
+        # чиним end_odometer до согласованного.
+        fixed_odometer_km = actual_km
+        end_odometer = data.start_odometer + actual_km if data.start_odometer > 0 else 0.0
+        odometer_km = actual_km
     if odometer_km > 0 and actual_km > odometer_km:
         actual_km = odometer_km
 
     busy_minutes = data.actual_route_minutes + data.telemed_minutes + data.office_minutes
     total_work_minutes = max(data.total_work_minutes, busy_minutes)
 
-    if actual_km == data.actual_km and total_work_minutes == data.total_work_minutes:
+    if (
+        actual_km == data.actual_km
+        and total_work_minutes == data.total_work_minutes
+        and end_odometer == data.end_odometer
+        and fixed_odometer_km == data.odometer_km
+    ):
         return data
-    return replace(data, actual_km=actual_km, total_work_minutes=total_work_minutes)
+    return replace(
+        data,
+        actual_km=actual_km,
+        total_work_minutes=total_work_minutes,
+        end_odometer=end_odometer,
+        odometer_km=fixed_odometer_km,
+    )
 
 
 def preview_payload(preview: EndDayPreview) -> dict[str, Any]:

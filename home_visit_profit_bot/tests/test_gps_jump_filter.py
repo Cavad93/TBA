@@ -141,3 +141,20 @@ def test_honest_gps_gap_still_lets_a_far_point_through(config) -> None:
         after_gap = gps.at(LADOGA_LAT, LADOGA_LON, START + timedelta(minutes=60))
 
     assert after_gap.sample_valid is True
+
+
+def test_nonsense_coordinates_never_become_the_anchor(config) -> None:
+    """lat=999 первой точкой смены (Этап 25): фантом не должен стать «достоверным».
+
+    Фильтр скачков бессилен против ПЕРВОЙ точки — истории ещё нет, и до правки
+    фантом становился последней валидной точкой: все реальные точки после него
+    браковались по запредельной скорости, GPS смены был окирпичен до вечера.
+    """
+    with connect(config) as connection:
+        gps = _Ingest(connection)
+        phantom = gps.at(999.0, 999.0, START)
+        real = gps.at(SPB_LAT, SPB_LON, START + timedelta(minutes=1))
+
+    assert phantom.sample_valid is False
+    assert phantom.reason == "invalid_coordinates"
+    assert real.sample_valid is True, "реальная точка обязана пройти после фантома"

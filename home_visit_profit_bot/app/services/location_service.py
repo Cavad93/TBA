@@ -90,6 +90,12 @@ def process_location_update(
     captured_at = captured_at or now
     now_text = now.isoformat(timespec="seconds")
     captured_text = captured_at.isoformat(timespec="seconds")
+    # Координаты вне физического диапазона (lat=999 от сбойного датчика).
+    # Опасна не сама точка, а ПЕРВАЯ точка смены: истории ещё нет, фильтр скачков
+    # пропустил бы фантом как «последнюю достоверную», и все реальные точки после
+    # него браковались бы по запредельной скорости — GPS смены окирпичен до вечера.
+    if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+        return LocationCheckResult(True, "invalid_coordinates", avg_speed_kmh=0.0, sample_valid=False)
     day = days.active()
     if day is None:
         return LocationCheckResult(False, "no_active_day")
