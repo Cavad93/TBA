@@ -106,6 +106,11 @@ def test_block_url_carries_dates_and_marker():
                           fetch=lambda url: _resp([_variant(3000)]))
     assert block is not None
     url = block["url"]
+    # Рабочий хост (проверен живым переходом): search.aviasales.com/flights отдавал
+    # 302 на пустую главную — параметры терялись, форма пустая (отчёт 11 из TG).
+    assert url.startswith("https://www.aviasales.ru/search?")
+    assert "search.aviasales.com" not in url
+    assert "with_request=true" in url  # запускает поиск, а не открывает пустую форму
     assert "origin_iata=MOW" in url and "destination_iata=AER" in url
     assert "depart_date=2026-07-16" in url
     assert "return_date=2026-07-20" in url

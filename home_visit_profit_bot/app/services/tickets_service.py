@@ -24,10 +24,12 @@ DEFAULT_SAVINGS_THRESHOLD = 0.10
 # ТОЛЬКО https: token уходит в query-строке, и по голому http партнёрский ключ
 # читался бы любым наблюдателем сети (эндпоинт по TLS проверен: отвечает).
 _CHEAP_URL = "https://api.travelpayouts.com/v1/prices/cheap"
-# Поисковая выдача Aviasales. Формат сверен с докой Travelpayouts «Aviasales affiliate
-# links»: origin_iata/destination_iata + depart_date/return_date в виде Y-m-d.
-# Прошлый вид (/search/MOWLED1) дат не нёс вовсе — Aviasales на нём выдавал ошибку.
-_SEARCH_URL = "https://search.aviasales.com/flights/"
+# Поисковая выдача Aviasales. ХОСТ ПРОВЕРЕН ЖИВЫМ ПЕРЕХОДОМ (18.07.2026): прежний
+# search.aviasales.com/flights/?origin_iata=... отдавал 302 на ПУСТУЮ главную
+# aviasales.ru/?refhost=... — параметры терялись, форма открывалась пустой (отчёт 11
+# из TG). Рабочий хост — www.aviasales.ru/search?...&with_request=true (200 OK, поиск
+# запускается сразу). Не доверять комментарию «сверено с докой» — проверять переходом.
+_SEARCH_URL = "https://www.aviasales.ru/search"
 
 # Окно обратного билета: не раньше чем через столько дней и не позже.
 MIN_RETURN_DAYS = 3
@@ -166,6 +168,8 @@ def partner_flight_url(
         "infants": 0,
         "trip_class": 0,
         "one_way": "false" if return_date else "true",
+        # Запускает поиск сразу (иначе открывается форма) — сверено живым переходом.
+        "with_request": "true",
     }
     if depart_date:
         params["depart_date"] = depart_date
