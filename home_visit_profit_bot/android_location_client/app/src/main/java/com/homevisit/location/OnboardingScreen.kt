@@ -75,8 +75,21 @@ fun OnboardingScreen(
     var page by rememberSaveable { mutableStateOf(0) }
     var saveRequested by rememberSaveable { mutableStateOf(false) }
     val sections = onboardingSections(snapshot?.sections.orEmpty())
-    // Страницы: 0 — зачем это; 1..N — секции; N+1 — сохранение.
-    val lastPage = sections.size + 1
+
+    // Базовые зоны — отдельный шаг мастера (в секции их нет: тип Zones вырезается).
+    // Тот же редактор, что в Настройках; сохраняются в общий батч base_zones.
+    val zonesField = snapshot?.sections?.flatMap { it.fields }?.firstOrNull { it.type == SettingType.Zones }
+    var zonesDirty by rememberSaveable { mutableStateOf(false) }
+    var zonesJson by rememberSaveable { mutableStateOf(zonesField?.textValue ?: "[]") }
+    androidx.compose.runtime.LaunchedEffect(zonesField?.textValue) {
+        val server = zonesField?.textValue ?: "[]"
+        if (!zonesDirty) zonesJson = server else if (server == zonesJson) zonesDirty = false
+    }
+    val districtDrafts = remember { mutableStateMapOf<Int, String>() }
+
+    // Страницы: 0 — зачем это; 1..N — секции; N+1 — базовые зоны; N+2 — сохранение.
+    val zonesPage = sections.size + 1
+    val lastPage = sections.size + 2
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -156,6 +169,52 @@ fun OnboardingScreen(
                     }
                 }
 
+                page == zonesPage -> {
+                    Text(
+                        "Базовые зоны обслуживания важны: заказы внутри них считаются по обычной " +
+                            "планке, а всё за их пределами — по повышенной с надбавкой. Без них " +
+                            "система не знает, какой заказ «свой», а какой — дальняя дорога.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    ZonesIntroCard()
+                    val zones = parseBaseZones(zonesJson, dropBlank = false)
+                    zones.forEachIndexed { index, zone ->
+                        ZoneCard(
+                            zone = zone,
+                            districtDraft = districtDrafts[index].orEmpty(),
+                            onDistrictDraft = { districtDrafts[index] = it; zonesDirty = true },
+                            onChange = { updated ->
+                                zonesDirty = true
+                                zonesJson = serializeBaseZones(zones.toMutableList().also { it[index] = updated })
+                            },
+                            onRemove = {
+                                districtDrafts.remove(index)
+                                zonesDirty = true
+                                zonesJson = serializeBaseZones(zones.toMutableList().also { it.removeAt(index) })
+                            },
+                        )
+                    }
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { zonesDirty = true; zonesJson = serializeBaseZones(zones + BaseZone()) },
+                    ) {
+                        Text("Добавить зону")
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(modifier = Modifier.weight(1f), onClick = { page -= 1 }) {
+                            Text("Назад")
+                        }
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = VerdictColors.go),
+                            onClick = { page += 1 },
+                        ) {
+                            Text("Дальше")
+                        }
+                    }
+                }
+
                 else -> {
                     Text(
                         "Готово",
@@ -194,7 +253,11 @@ fun OnboardingScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = VerdictColors.go),
                             onClick = {
                                 mergeListDrafts(snapshot.sections, textEdits, listDrafts)
-                                onSave(collectSettingsChanges(snapshot.sections, textEdits, boolEdits))
+                                val values = collectSettingsChanges(snapshot.sections, textEdits, boolEdits).toMutableMap()
+                                // Базовые зоны из отдельного шага мастера — в тот же батч.
+                                val zones = enrichZonesForSave(parseBaseZones(zonesJson, dropBlank = false), districtDrafts)
+                                values["base_zones"] = serializeBaseZones(zones)
+                                onSave(values)
                                 saveRequested = true
                             },
                         ) {

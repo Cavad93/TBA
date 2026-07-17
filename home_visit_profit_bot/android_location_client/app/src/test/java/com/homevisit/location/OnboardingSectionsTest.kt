@@ -6,7 +6,8 @@ import com.homevisit.location.domain.SettingsSection
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** Онбординг (Этап 26): зоны обслуживания живут на своей странице — в мастер не идут. */
+/** Онбординг: зоны не рендерятся как обычная секция (у них свой шаг мастера с
+ *  редактором область→город→районы, а не поле в общем списке настроек). */
 class OnboardingSectionsTest {
 
     @Test

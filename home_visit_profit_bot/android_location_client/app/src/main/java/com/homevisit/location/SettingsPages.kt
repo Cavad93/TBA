@@ -131,19 +131,8 @@ internal fun BaseZonesPage(appSettings: AppSettingsUiState, workActions: WorkAct
             modifier = Modifier.fillMaxWidth(),
             enabled = !appSettings.isLoading,
             onClick = {
-                // Черновик района без «+» — часть сохранения; пустые строки районов
-                // (человек стёр текст) отсеиваются здесь, а не молча на перерисовке.
-                val enriched = zones.mapIndexed { index, zone ->
-                    val draft = districtDrafts[index]?.trim().orEmpty()
-                    val withDraft = if (draft.isNotEmpty()) {
-                        zone.copy(districts = zone.districts + draft)
-                    } else {
-                        zone
-                    }
-                    withDraft.copy(districts = withDraft.districts.filter { it.isNotBlank() })
-                }
+                val cleaned = enrichZonesForSave(zones, districtDrafts)
                 districtDrafts.clear()
-                val cleaned = enriched.filter { it.city.isNotBlank() || it.region.isNotBlank() || it.districts.isNotEmpty() }
                 workActions.onSaveAppSettings(mapOf("base_zones" to serializeBaseZones(cleaned)))
             },
         ) {
@@ -160,8 +149,22 @@ internal fun BaseZonesPage(appSettings: AppSettingsUiState, workActions: WorkAct
     }
 }
 
+/**
+ * Дополнить зоны недобавленными черновиками районов (набранными без «+») и отсеять
+ * пустые. Общий шаг сохранения для страницы настроек и онбординга — чтобы правило
+ * «черновик района не теряется» жило в одном месте.
+ */
+internal fun enrichZonesForSave(zones: List<BaseZone>, districtDrafts: Map<Int, String>): List<BaseZone> {
+    val enriched = zones.mapIndexed { index, zone ->
+        val draft = districtDrafts[index]?.trim().orEmpty()
+        val withDraft = if (draft.isNotEmpty()) zone.copy(districts = zone.districts + draft) else zone
+        withDraft.copy(districts = withDraft.districts.filter { it.isNotBlank() })
+    }
+    return enriched.filter { it.city.isNotBlank() || it.region.isNotBlank() || it.districts.isNotEmpty() }
+}
+
 @Composable
-private fun ZonesIntroCard() {
+internal fun ZonesIntroCard() {
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -190,7 +193,7 @@ private fun ZonesIntroCard() {
 }
 
 @Composable
-private fun ZoneCard(
+internal fun ZoneCard(
     zone: BaseZone,
     districtDraft: String,
     onDistrictDraft: (String) -> Unit,
