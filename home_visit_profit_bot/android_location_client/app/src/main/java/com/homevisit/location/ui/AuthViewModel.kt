@@ -33,6 +33,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     // Не персистится и не попадает в UI-состояние.
     private var pendingPassword: String = ""
 
+    /** Вход случился через подтверждение регистрации — MainActivity запускает онбординг. */
+    var registrationJustCompleted: Boolean = false
+        private set
+
     private val _state = MutableStateFlow(AuthUiState())
     val state: StateFlow<AuthUiState> = _state
 
@@ -73,6 +77,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 val login = repository.login(serverUrl, email, pendingPassword)
                 pendingPassword = ""
                 if (login.ok && login.token != null) {
+                    registrationJustCompleted = true
                     onAuthenticated(login.token, login.user)
                     return@launchGuard
                 }
@@ -96,6 +101,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         launchGuard {
             val result = repository.login(serverUrl, email, password)
             if (result.ok && result.token != null) {
+                registrationJustCompleted = false
                 onAuthenticated(result.token, result.user)
             } else if (result.message.contains("Подтвердите", ignoreCase = true)) {
                 // Незавершённая регистрация — уводим на ввод кода и запоминаем пароль,

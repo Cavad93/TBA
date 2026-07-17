@@ -210,12 +210,37 @@ class MainActivity : ComponentActivity() {
                         viewModel = authViewModel,
                         onAuthenticated = { token, user ->
                             persistSession(token, user)
+                            // Свежая регистрация → онбординг: спросить настройки и
+                            // объяснить, зачем они (иначе советы будут по средним).
+                            if (authViewModel.registrationJustCompleted) {
+                                prefs.edit().putBoolean(KEY_ONBOARDING_PENDING, true).apply()
+                            }
                             sessionToken = token
                         },
                     )
                 } else {
                 val viewModel: HomeVisitViewModel = viewModel()
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+                var onboardingPending by rememberSaveable {
+                    mutableStateOf(prefs.getBoolean(KEY_ONBOARDING_PENDING, false))
+                }
+                if (onboardingPending) {
+                    LaunchedEffect(Unit) {
+                        if (uiState.appSettings.snapshot == null) {
+                            viewModel.refreshAppSettings(DEFAULT_SERVER_URL, sessionToken)
+                        }
+                    }
+                    OnboardingScreen(
+                        appSettings = uiState.appSettings,
+                        onRefresh = { viewModel.refreshAppSettings(DEFAULT_SERVER_URL, sessionToken) },
+                        onSave = { values -> viewModel.saveAppSettings(DEFAULT_SERVER_URL, sessionToken, values) },
+                        onFinish = {
+                            prefs.edit().putBoolean(KEY_ONBOARDING_PENDING, false).apply()
+                            onboardingPending = false
+                        },
+                    )
+                    return@HomeVisitTheme
+                }
                 // Share-target (Ф15.1/15.2): пришёл «Поделиться» текстом — разбираем пакетным
                 // парсером и показываем экран подтверждения (зелёные/жёлтые/красные).
                 val sharedText = remember { extractSharedText(intent) }
@@ -489,6 +514,9 @@ class MainActivity : ComponentActivity() {
         const val KEY_SESSION_TOKEN = "session_token"
         const val KEY_USER_EMAIL = "user_email"
         const val KEY_USER_NICKNAME = "user_nickname"
+        // Онбординг после регистрации не завершён: спрашиваем настройки, пока
+        // человек не сохранил их или не отложил осознанно.
+        const val KEY_ONBOARDING_PENDING = "onboarding_pending"
         // Последняя точка GPS — её шлём в подсказки адреса, чтобы сервер понимал город
         // по местоположению (Фаза 2). Пишет LocationUploadService на каждом фиксе.
         const val KEY_LAST_GPS_LAT = "last_gps_lat"
