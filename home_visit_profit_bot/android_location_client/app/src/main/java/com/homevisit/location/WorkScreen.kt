@@ -8,7 +8,9 @@ import com.homevisit.location.voice.ServerVoiceRecorder
 import android.content.Intent
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.runtime.DisposableEffect
@@ -505,6 +507,7 @@ internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
             onServerVoiceTranscribe = workActions.onServerVoiceTranscribe,
             onPickCandidate = workActions.onPickAddressCandidate,
             onReopenResult = { showResult = true },
+            onPickOrderPhoto = workActions.onParseOrderPhoto,
         )
         OtherEntriesSection(uiState, workActions)
     }
@@ -588,6 +591,7 @@ internal fun EvaluateForm(
     onServerVoiceTranscribe: (ByteArray, (String?) -> Unit) -> Unit = { _, cb -> cb(null) },
     onPickCandidate: (AddressCandidate) -> Unit,
     onReopenResult: () -> Unit,
+    onPickOrderPhoto: (ByteArray) -> Unit = {},
 ) {
     // Рубильник «Работа / Личная поездка» (Ф11.5). В личном режиме нет дохода и вердикта:
     // человек не зарабатывает, а хочет знать, во сколько обойдётся съездить туда-обратно.
@@ -634,6 +638,19 @@ internal fun EvaluateForm(
     val micPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted -> if (granted) recording = recorder.start() }
+    // Кнопка «Добавить фото»: выбрать скриншот списка заказов из галереи и распознать
+    // адреса тем же путём, что «Поделиться». PickVisualMedia — системный фотопикер,
+    // разрешений на доступ к галерее не требует.
+    val orderPhotoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) {
+            val bytes = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            }.getOrNull()
+            if (bytes != null && bytes.isNotEmpty()) onPickOrderPhoto(bytes)
+        }
+    }
     // Остановить запись и распознать на сервере; результат — в поле адреса.
     fun stopAndTranscribe() {
         recording = false
@@ -710,6 +727,22 @@ internal fun EvaluateForm(
         // мгновенно из learned-кеша (Ф13.2). Показываем, только когда поле пустое.
         if (address.isBlank() && recentAddresses.isNotEmpty()) {
             RecentAddressChips(recentAddresses) { address = it }
+        }
+        // Добавить фото со списком заказов (скриншот приложения-агрегатора) → OCR
+        // распознаёт адреса. В личном режиме списка заказов нет — кнопки тоже.
+        if (!personalMode) {
+            OutlinedButton(
+                onClick = {
+                    orderPhotoPicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Filled.AddAPhoto, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Добавить фото со списком заказов")
+            }
         }
         // Набрали название шаблона — показываем, какой адрес за ним стоит.
         val resolved = resolveAddressTemplate(address, templates)

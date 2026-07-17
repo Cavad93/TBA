@@ -323,6 +323,7 @@ class MainActivity : ComponentActivity() {
                     onPersonalEstimate = viewModel::runPersonalEstimate,
                     onClearPersonalEstimate = viewModel::clearPersonalEstimate,
                     onServerVoiceTranscribe = viewModel::transcribeServerVoice,
+                    onParseOrderPhoto = viewModel::parseSharedImage,
                     onPickAddressCandidate = viewModel::pickAddressCandidate,
                     onAcceptCandidate = viewModel::acceptCandidate,
                     onDismissDuplicate = viewModel::dismissDuplicateConfirm,
@@ -587,6 +588,8 @@ internal data class WorkActions(
     val onClearPersonalEstimate: () -> Unit,
     /** Голос через наш ASR (Ф14.4): байты записи → текст колбэком (для телефонов без Google). */
     val onServerVoiceTranscribe: (ByteArray, (String?) -> Unit) -> Unit,
+    /** Фото со списком заказов (Ф15.4): байты картинки → OCR → пакет заказов. */
+    val onParseOrderPhoto: (ByteArray) -> Unit,
     /** Тап по варианту адреса из кандидатов (Фаза 2): докрутить расчёт по его координатам. */
     val onPickAddressCandidate: (AddressCandidate) -> Unit,
     /** Принять адрес. force=true — подтверждённый повтор адреса, уже есть в ленте. */
@@ -672,6 +675,7 @@ internal fun HomeVisitApp(
     onPersonalEstimate: (String, String, String) -> Unit,
     onClearPersonalEstimate: () -> Unit,
     onServerVoiceTranscribe: (String, String, ByteArray, (String?) -> Unit) -> Unit,
+    onParseOrderPhoto: (String, String, ByteArray) -> Unit,
     onPickAddressCandidate: (AddressCandidate) -> Unit,
     onAcceptCandidate: (String, String, Boolean) -> Unit,
     onDismissDuplicate: () -> Unit,
@@ -768,6 +772,7 @@ internal fun HomeVisitApp(
         onPersonalEstimate = { address -> onPersonalEstimate(serverUrl, apiKey, address) },
         onClearPersonalEstimate = onClearPersonalEstimate,
         onServerVoiceTranscribe = { audio, cb -> onServerVoiceTranscribe(serverUrl, apiKey, audio, cb) },
+        onParseOrderPhoto = { bytes -> onParseOrderPhoto(serverUrl, apiKey, bytes) },
         onPickAddressCandidate = onPickAddressCandidate,
         onAcceptCandidate = { force -> onAcceptCandidate(serverUrl, apiKey, force) },
         onDismissDuplicate = onDismissDuplicate,

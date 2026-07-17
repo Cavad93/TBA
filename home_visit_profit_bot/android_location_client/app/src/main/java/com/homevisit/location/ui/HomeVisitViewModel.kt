@@ -953,6 +953,13 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             shareImageState.value = ShareImageUi(loading = true)
             val orders = repository.ocrExtract(serverUrl, apiKey, image)
+            if (orders == null) {
+                // OCR не ответил (сеть/сервис) — честно скажем «сервис недоступен»,
+                // не «адресов не нашлось»: фото могло быть годным.
+                batchOrdersState.value = emptyList()
+                shareImageState.value = ShareImageUi(loading = false, failed = true, transportError = true)
+                return@launch
+            }
             batchOrdersState.value = orders
             shareImageState.value = ShareImageUi(loading = false, failed = orders.isEmpty())
         }

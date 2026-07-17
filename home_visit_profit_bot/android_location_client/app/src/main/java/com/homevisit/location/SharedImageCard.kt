@@ -38,6 +38,8 @@ data class ShareImageUi(
     val loading: Boolean = false,
     /** OCR отработал и не нашёл ни одного адреса. */
     val failed: Boolean = false,
+    /** OCR не ответил (сеть/сервис недоступен) — это НЕ «нет адресов». */
+    val transportError: Boolean = false,
 )
 
 /**
@@ -116,6 +118,7 @@ fun SharedImageCard(
                 Text(
                     when {
                         ui.loading -> "Ищу адреса на фото…"
+                        ui.transportError -> "Не удалось распознать: сервис недоступен. Попробуй ещё раз."
                         ui.failed -> "Адресов на фото не нашлось — введите вручную"
                         else -> "Готово"
                     },

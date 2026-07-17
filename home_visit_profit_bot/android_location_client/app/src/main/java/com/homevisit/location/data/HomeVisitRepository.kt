@@ -835,9 +835,14 @@ class HomeVisitRepository private constructor(
      * (Ф15.4). Тело — сырые байты картинки. OCR выключен/недоступен → пустой список,
      * поток добавления идёт ручным вводом (мягкая деградация).
      */
-    suspend fun ocrExtract(serverUrl: String, apiKey: String, image: ByteArray): List<BatchOrder> = withContext(Dispatchers.IO) {
+    /**
+     * Картинка → распознанные заказы. null — OCR НЕ ответил (сеть/сервис лёг/503):
+     * это надо отличать от пустого списка (OCR ответил, но адресов на фото нет),
+     * иначе «сервер недоступен» и «нет адресов» сливаются в одно ложное сообщение.
+     */
+    suspend fun ocrExtract(serverUrl: String, apiKey: String, image: ByteArray): List<BatchOrder>? = withContext(Dispatchers.IO) {
         val response = postBytes(normalizeApiUrl(serverUrl, "/api/ocr/extract"), apiKey, image, "image/png")
-            ?: return@withContext emptyList()
+            ?: return@withContext null
         parseBatchOrders(response)
     }
 
