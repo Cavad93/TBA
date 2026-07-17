@@ -37,6 +37,9 @@ class WorkDay:
     coffee_expenses: float = 0.0
     drinks_expenses: float = 0.0
     planned_route_time_factor: float = 1.0
+    # Часовой пояс работника (смещение от UTC в минутах), присланный телефоном при
+    # старте смены. Всё время дня считается в нём. None — фолбэк на Москву.
+    utc_offset_minutes: int | None = None
     start_odometer: float = 0.0
     end_odometer: float = 0.0
     fuel_compensation: float = 0.0

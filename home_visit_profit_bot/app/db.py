@@ -853,6 +853,11 @@ def _ensure_columns(db: Database) -> None:
     _ensure_column(db, "parking_state", "entered_at", "TEXT")
     _ensure_column(db, "parking_zones", "region", "TEXT DEFAULT ''")
     _ensure_column(db, "parking_tariffs", "price_text", "TEXT DEFAULT ''")
+    # Часовой пояс работника (смещение от UTC в минутах), присланный телефоном при
+    # старте смены. Всё время дня (окна прибытия, опоздания, фикс-время) считается в
+    # нём: продукт на 5 округов, у работника в Екатеринбурге своё «сейчас». NULL —
+    # старые смены и фолбэк: считаем в Москве, как было.
+    _ensure_column(db, "work_days", "utc_offset_minutes", "INTEGER")
     db.execute("CREATE INDEX IF NOT EXISTS idx_parking_zones_region ON parking_zones(region)")
     _ensure_column(db, "visits", "clinic", "TEXT")
     # Вердикт заказа ('go'|'edge'|'skip'), вычисленный из решения профитабельности.

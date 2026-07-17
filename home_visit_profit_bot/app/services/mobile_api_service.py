@@ -295,6 +295,7 @@ class MobileApiService:
                 self.stats,
                 fallback=_non_negative_float(payload.get("break_hours_before"), default=0.0),
             ),
+            utc_offset_minutes=_optional_offset(payload.get("utc_offset_minutes")),
         )
         self._map(client_entity_id, "work_day", day.id)
         return day.id
@@ -644,6 +645,15 @@ def _optional_str(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _optional_offset(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _non_negative_float(value: Any, default: float | None = None) -> float:

@@ -36,7 +36,7 @@ from app.services.income_service import confirm_month
 from app.services.rest_service import rest_facts
 from app.services.home_service import HomeService
 from app.services.location_service import calculate_location_day_estimate, process_location_update
-from app.services.mobile_api_service import MobileApiService
+from app.services.mobile_api_service import MobileApiService, _optional_offset
 from app.services.mobile_workload_service import MobileWorkloadService
 from app.services.mobile_report_service import MobileReportService
 from app.services.mobile_visit_service import MobileVisitService, candidate_result_payload
@@ -387,6 +387,7 @@ def _handler_factory(config: AppConfig):
                         fallback=float(payload.get("break_hours_before") or 0),
                     ),
                     route_time_factor=float(payload.get("route_time_factor") or settings.get_float("default_route_time_factor", config.defaults.route_time_factor)),
+                    utc_offset_minutes=_optional_offset(payload.get("utc_offset_minutes")),
                 )
             self._json_response({"ok": True, "day": _day_payload(day)})
 

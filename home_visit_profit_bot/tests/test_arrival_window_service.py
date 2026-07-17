@@ -63,6 +63,35 @@ def test_window_text_is_human_readable():
     assert "–" in windows[0].text
 
 
+def test_windows_follow_worker_now_across_timezones():
+    """Мультипояс: одно состояние, но «сейчас» в разных поясах — окна сдвинуты.
+
+    Окно к первому заказу отсчитывается от текущего момента РАБОТНИКА. Раньше «сейчас»
+    было московским для всех, и работник в другом поясе получал окна со сдвигом.
+    """
+    day = _day()
+    visits = [_visit(1)]
+    route = _route([1], {1: 30})
+    msk = arrival_windows(day, visits, route, now=datetime(2026, 7, 13, 10, 0))
+    ekb = arrival_windows(day, visits, route, now=datetime(2026, 7, 13, 12, 0))  # +2 ч
+    assert msk[0].text != ekb[0].text  # окна сдвинулись вместе с «сейчас»
+
+
+def test_worker_now_uses_day_offset():
+    """_worker_now берёт пояс смены (минуты от UTC); нет — Москва (+180)."""
+    from datetime import timezone
+    from types import SimpleNamespace
+
+    from app.services.mobile_visit_service import _worker_now, MSK_OFFSET_MINUTES
+
+    utc_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    ekb = _worker_now(SimpleNamespace(utc_offset_minutes=300))  # +5
+    assert 4.9 < (ekb - utc_naive).total_seconds() / 3600 < 5.1
+    msk = _worker_now(SimpleNamespace(utc_offset_minutes=None))  # фолбэк
+    assert 2.9 < (msk - utc_naive).total_seconds() / 3600 < 3.1
+    assert MSK_OFFSET_MINUTES == 180
+
+
 def test_anchor_window_starts_from_its_planned_time():
     """Окно якоря — от его НАЗНАЧЕННОГО времени, не от сырого прибытия.
 

@@ -99,8 +99,18 @@ def day_start(request: Request, body: bytes = Depends(raw_body), auth: Authed = 
             fallback=float(payload.get("break_hours_before") or 0),
         ),
         route_time_factor=float(payload.get("route_time_factor") or settings.get_float("default_route_time_factor", config.defaults.route_time_factor)),
+        utc_offset_minutes=_optional_int(payload.get("utc_offset_minutes")),
     )
     return {"ok": True, "day": _day_payload(day)}
+
+
+def _optional_int(value) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 @router.post("/api/day/end")

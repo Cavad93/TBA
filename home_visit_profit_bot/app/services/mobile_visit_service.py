@@ -3,6 +3,10 @@ from typing import Any
 from app.database import Database, db_user_id
 
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta, timezone
+
+# Пояс по умолчанию, когда телефон не прислал свой (старые смены, ошибка): Москва.
+MSK_OFFSET_MINUTES = 180
 
 from app.models import CandidateCalculation, Point, RouteSummary, Visit
 from app.repositories import (
@@ -681,15 +685,17 @@ class MobileVisitService:
         payload["order"] = [visit.id for visit in all_visits if visit.status == "accepted"]
         # Успеваем ли к работе на точке: оптимизатор её не двигает, но и за часами не
         # следит — перед приёмом в 9:00 может оказаться пара заказов, на которые уйдёт всё утро.
+        # Всё время дня — в поясе работника (окна прибытия, опоздания, фикс-время).
+        worker_now = _worker_now(day)
         payload["late_warnings"] = [
             warning.as_dict()
-            for warning in late_warnings(day, all_visits, _with_order(route, payload["order"]))
+            for warning in late_warnings(day, all_visits, _with_order(route, payload["order"]), now=worker_now)
         ]
         # Окно прибытия по цепочке дня (Фаза 4): «примерно 14:00–16:00» — честное
         # окно, а не фейково-точный ETA; неопределённость копится к концу дня.
         payload["arrival_windows"] = [
             window.as_dict()
-            for window in arrival_windows(day, all_visits, _with_order(route, payload["order"]))
+            for window in arrival_windows(day, all_visits, _with_order(route, payload["order"]), now=worker_now)
         ]
         # Цена фикс-времени (Фаза 4.3–4.4): для каждого заказа-якоря — во что обходится
         # жёсткое время (простой + крюк) в ₽/час дня и подсказка наценки. Пересчёт дня
@@ -698,7 +704,7 @@ class MobileVisitService:
         fix_prices = []
         for visit in all_visits:
             if visit.kind == "onsite" and visit.planned_start_at and visit.status == "accepted":
-                price = fix_time_price(day, all_visits, self.settings, visit.id)
+                price = fix_time_price(day, all_visits, self.settings, visit.id, now=worker_now)
                 if price is not None:
                     fix_prices.append(price.as_dict())
         payload["fix_time_prices"] = fix_prices
@@ -839,6 +845,20 @@ def visit_payload(visit: Visit | None) -> dict[str, Any] | None:
         "order_source": visit.order_source,
         "response_cost": visit.response_cost,
     }
+
+
+def _worker_now(day) -> datetime:
+    """«Сейчас» в настенном времени работника (naive), чтобы окна прибытия, опоздания
+    и фикс-время считались в ЕГО поясе, а не в московском поясе сервера.
+
+    planned_start_at приходит от телефона уже в местном настенном времени работника
+    (LocalDateTime без офсета), а «сейчас» на сервере было московским — у работника из
+    другого пояса окна съезжали. Пояс смены прислал телефон при старте (utc_offset_minutes);
+    нет — Москва, как раньше. Возвращаем naive, чтобы вычитание с naive planned_start
+    не ловило TypeError.
+    """
+    offset = day.utc_offset_minutes if day.utc_offset_minutes is not None else MSK_OFFSET_MINUTES
+    return (datetime.now(timezone.utc) + timedelta(minutes=offset)).replace(tzinfo=None)
 
 
 def _with_order(route: RouteSummary, order: list[int]) -> RouteSummary:

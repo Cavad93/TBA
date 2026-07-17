@@ -85,6 +85,7 @@ def _work_day_from_row(row: Any | None) -> WorkDay | None:
         vehicle_expenses=float(row["vehicle_expenses"] or 0),
         vehicle_rent=float(row["vehicle_rent"] or 0),
         break_hours_before=float(row["break_hours_before"] or 0),
+        utc_offset_minutes=(int(row["utc_offset_minutes"]) if row["utc_offset_minutes"] is not None else None),
     )
 
 
@@ -223,6 +224,7 @@ class WorkDayRepository:
         route_time_factor: float = 1.0,
         start_odometer: float = 0.0,
         break_hours_before: float = 0.0,
+        utc_offset_minutes: int | None = None,
     ) -> WorkDay:
         self.connection.execute("UPDATE work_days SET status = 'closed', ended_at = ? WHERE status = 'active'", (now_iso(),))
         new_id = self.connection.insert(
@@ -231,8 +233,8 @@ class WorkDayRepository:
                 date, status, start_address, start_lat, start_lon,
                 finish_address, finish_lat, finish_lon, started_at,
                 planned_avg_speed_kmh, planned_service_minutes, planned_route_time_factor,
-                start_odometer, break_hours_before, created_at
-            ) VALUES (date('now'), 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                start_odometer, break_hours_before, utc_offset_minutes, created_at
+            ) VALUES (date('now'), 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 start_address,
@@ -247,6 +249,7 @@ class WorkDayRepository:
                 route_time_factor,
                 start_odometer,
                 break_hours_before,
+                utc_offset_minutes,
                 now_iso(),
             ),
         )

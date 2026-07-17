@@ -96,6 +96,7 @@ import com.homevisit.location.domain.WorkDayStatus
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.util.TimeZone
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -1580,6 +1581,9 @@ class HomeVisitRepository private constructor(
         .put("start_odometer", day.startOdometer)
         .put("end_odometer", day.endOdometer)
         .put("break_hours_before", day.breakHoursBefore)
+        // Часовой пояс работника (минуты от UTC) — чтобы сервер считал окна прибытия,
+        // опоздания и фикс-время в ЕГО поясе, а не в московском. Телефон знает пояс точно.
+        .put("utc_offset_minutes", TimeZone.getDefault().getOffset(day.startEpochMillis) / 60000)
         .toString()
 
     private fun endDayPayload(day: WorkDayEntity, details: EndDayDetails?): String {
