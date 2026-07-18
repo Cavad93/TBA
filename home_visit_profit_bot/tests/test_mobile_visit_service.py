@@ -42,7 +42,7 @@ def test_missing_day_start_is_healed_from_settings(config, monkeypatch) -> None:
         service = MobileVisitService(connection)
         monkeypatch.setattr(
             service, "_geocode_layered",
-            lambda address: GeocodingResult(
+            lambda address, *a, **k: GeocodingResult(
                 input_text=address, normalized_address=address, district=None,
                 lat=59.93, lon=30.31, confidence=1.0, source="test",
             ),
@@ -148,6 +148,48 @@ def test_candidate_typo_address_rescued_by_fuzzy_layers(config, monkeypatch) -> 
         WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
         result = MobileVisitService(connection).create_candidate(
             {"address": "Коменданский проспект 17к1", "income": 2500, "clinic": "Династия"}
+        )
+    assert result.reason not in ("needs_coordinates", "geocoding_failed")
+
+
+def test_candidate_far_typo_not_silently_resolved(config, monkeypatch) -> None:
+    """Опечатка в улице увела геокодер за 1000+ км от старта смены — оценка НЕ считает
+    молча «ехать 1000 км», а честно просит уточнить адрес (отчёт 14).
+
+    Клиентский suggest этот случай обычно ловит кандидатами; но если он промолчал и
+    сырой адрес дошёл до серверного геокода, далёкий хит по опечатке тоже не подставляем.
+    """
+    from app.services import mobile_visit_service as mvs
+    from app.services.geocoding_service import GeocodingResult
+
+    # Nominatim «уверенно» нашёл одноимённую улицу за Уралом; прощающие слои молчат.
+    monkeypatch.setattr(mvs, "geocode_address", lambda *a, **k: GeocodingResult(
+        input_text="туристическая 18к1", normalized_address="Туристическая ул, 18, другой регион",
+        district=None, lat=55.0, lon=60.0, confidence=1.0, source="nominatim",
+    ))
+    monkeypatch.setattr(mvs, "resolve_fuzzy_geo", lambda *a, **k: None)
+    with connect(config) as connection:
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        result = MobileVisitService(connection).create_candidate(
+            {"address": "туристическая 18к1", "income": 2500, "clinic": "Династия"}
+        )
+    assert not result.ok
+    assert result.reason == "needs_coordinates"
+
+
+def test_candidate_near_hit_still_resolves(config, monkeypatch) -> None:
+    """Хит рядом со стартом смены (в пределах порога) резолвится как раньше — гард не мешает."""
+    from app.services import mobile_visit_service as mvs
+    from app.services.geocoding_service import GeocodingResult
+
+    monkeypatch.setattr(mvs, "geocode_address", lambda *a, **k: GeocodingResult(
+        input_text="Невский 5", normalized_address="Невский проспект, 5",
+        district=None, lat=59.936, lon=30.32, confidence=1.0, source="nominatim",
+    ))
+    with connect(config) as connection:
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        result = MobileVisitService(connection).create_candidate(
+            {"address": "Невский 5", "income": 2500, "clinic": "Династия"}
         )
     assert result.reason not in ("needs_coordinates", "geocoding_failed")
 

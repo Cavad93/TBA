@@ -22,7 +22,7 @@ from app.repositories import (
     WorkDayRepository,
 )
 from app.services.address_resolver import expand_template
-from app.services.address_suggest_service import resolve_fuzzy
+from app.services.address_suggest_service import resolve_fuzzy, too_far_to_trust
 from app.services.geocoding_service import (
     GeocodingError,
     geocode_address,
@@ -161,8 +161,13 @@ class QuickEstimateService:
             )
         except GeocodingError:
             geo = None
-        if geo is not None and geo.lat is not None and geo.lon is not None:
+        from_lat = _optional_float(payload.get("from_lat"))
+        from_lon = _optional_float(payload.get("from_lon"))
+        if (geo is not None and geo.lat is not None and geo.lon is not None
+                and not too_far_to_trust(from_lat, from_lon, float(geo.lat), float(geo.lon))):
             return Point(label=address, lat=float(geo.lat), lon=float(geo.lon))
+        # Далёкий от человека хит по опечатке не принимаем молча — прощающие слои с тем же
+        # порогом, иначе needs_coordinates: человек уточнит, а не увидит «1000+ км» (отчёт 14).
         return self._fuzzy_destination(address, payload, user_id)
 
     def _fuzzy_destination(self, address: str, payload: dict[str, Any], user_id: int | None) -> Point | None:

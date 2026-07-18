@@ -337,6 +337,46 @@ def test_gps_city_queried_before_wildcard(config, monkeypatch):
     assert calls.index("Казань") < (calls.index(None) if None in calls else len(calls))
 
 
+def test_far_confident_nominatim_gives_candidates(config, monkeypatch):
+    """DaData молчит, Nominatim уверенно нашёл далёкую одноимённую улицу по опечатке —
+    с GPS далёкий хит НЕ резолвим молча, отдаём в кандидаты (отчёт 14).
+
+    Раньше ветка Nominatim в suggest резолвила без учёта расстояния и подрывала фикс
+    DaData-ветки: «туристическая» вместо «Туристская» уводило за 1000+ км молча.
+    """
+    def fake_geocode(text, *a, **k):
+        # Уверенный (importance 0.7, есть номер дома), но за Уралом от питерского GPS.
+        return GeocodingResult(
+            input_text=text, normalized_address="Туристическая улица, 18, другой регион",
+            district=None, lat=55.0, lon=60.0, confidence=0.7, source="nominatim",
+        )
+    monkeypatch.setattr(orch, "geocode_address", fake_geocode)
+    monkeypatch.setattr(orch, "dadata_token", lambda: None)  # DaData-ветка молчит
+    with connect(config) as conn:
+        conn.set_user(_uid())
+        result = orch.suggest("туристическая 18к1", conn, SettingsRepository(conn), _uid(),
+                              lat=59.95, lon=30.31)
+    assert "resolved" not in result
+    assert "candidates" in result and result["candidates"]
+
+
+def test_near_confident_nominatim_still_resolves(config, monkeypatch):
+    """Уверенный Nominatim рядом с GPS резолвится сразу — гард не мешает нормальному пути."""
+    def fake_geocode(text, *a, **k):
+        return GeocodingResult(
+            input_text=text, normalized_address="улица Ленина, 40, Санкт-Петербург",
+            district="Выборгский", lat=59.96, lon=30.29, confidence=0.7, source="nominatim",
+        )
+    monkeypatch.setattr(orch, "geocode_address", fake_geocode)
+    monkeypatch.setattr(orch, "dadata_token", lambda: None)
+    with connect(config) as conn:
+        conn.set_user(_uid())
+        result = orch.suggest("улица Ленина 40", conn, SettingsRepository(conn), _uid(),
+                              lat=59.95, lon=30.31)
+    assert "resolved" in result
+    assert result["resolved"]["source"] == "nominatim"
+
+
 # --- отчёт 3 из Telegram: город отдельно, улица+дом без города, reverse по GPS ---
 
 def test_dadata_candidate_carries_street_house(config, monkeypatch):

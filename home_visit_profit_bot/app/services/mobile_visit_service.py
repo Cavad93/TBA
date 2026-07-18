@@ -20,7 +20,7 @@ from app.repositories import (
 )
 from app.repositories_districts import DistrictZoneRepository
 from app.services.address_resolver import expand_template
-from app.services.address_suggest_service import resolve_fuzzy_geo
+from app.services.address_suggest_service import resolve_fuzzy_geo, too_far_to_trust
 from app.services.district_service import districts_at as _districts_covering, pick_district_name as _pick_district
 from app.services.schedule_service import late_warnings
 from app.services.address_building import canonical_building
@@ -81,7 +81,8 @@ class MobileVisitService:
         self.visits = VisitRepository(connection)
         self.stats = DailyStatsRepository(connection)
 
-    def _geocode_layered(self, address: str):
+    def _geocode_layered(self, address: str,
+                         ref_lat: float | None = None, ref_lon: float | None = None):
         """Слоёный геокодинг: Nominatim, при его молчании — learned-кеш + DaData.
 
         Опечатка («Коменданский» без «т») не должна быть тупиком там, где DaData
@@ -89,6 +90,12 @@ class MobileVisitService:
         ответили — ошибку не поднимаем: человеку важны координаты, а не слой.
         Неоднозначность (несколько разных точек) сюда не просочится — resolve_fuzzy
         отдаёт только уверенный вариант, остальное честно уходит в needs_coordinates.
+
+        ref_lat/ref_lon — опорная точка (старт смены): далёкий от неё хит по опечатке
+        («туристическая» → одноимённая улица в другом регионе за 1000+ км) молча НЕ
+        принимаем — так же, как на подсказках. Отбрасываем далёкий Nominatim и передаём
+        опору в прощающие слои (там тот же порог); ничего близкого нет — None, и человек
+        уточнит адрес, а не увидит «ехать 1000+ км» (отчёт 14 из TG).
         """
         error: GeocodingError | None = None
         try:
@@ -104,9 +111,11 @@ class MobileVisitService:
             )
         except GeocodingError as exc:
             geo, error = None, exc
-        if geo is not None and geo.lat is not None and geo.lon is not None:
+        if (geo is not None and geo.lat is not None and geo.lon is not None
+                and not too_far_to_trust(ref_lat, ref_lon, geo.lat, geo.lon)):
             return geo
-        fuzzy = resolve_fuzzy_geo(address, self.connection, self.settings, db_user_id(self.connection))
+        fuzzy = resolve_fuzzy_geo(address, self.connection, self.settings, db_user_id(self.connection),
+                                  lat=ref_lat, lon=ref_lon)
         if fuzzy is not None:
             return fuzzy
         if error is not None:
@@ -222,7 +231,9 @@ class MobileVisitService:
             geo = manual_geocoding_result(address, lat, lon, None if manual_district == "-" else manual_district)
         else:
             try:
-                geo = self._geocode_layered(address)
+                # Опора — старт смены (после _ensure_day_anchors он уже с координатами):
+                # далёкий от него хит по опечатке молча не подставляем (отчёт 14 из TG).
+                geo = self._geocode_layered(address, day.start_lat, day.start_lon)
             except GeocodingError as error:
                 # Сервис карт недоступен по сети. Если дорога уже задана руками —
                 # это не тупик: создаём заказ без координат, как при молчании
@@ -563,7 +574,9 @@ class MobileVisitService:
         city = None
         if lat is None or lon is None:
             try:
-                geo = self._geocode_layered(address)
+                # Заказ-якорь тоже привязан к смене: далёкий от старта хит по опечатке
+                # не принимаем молча (отчёт 14 из TG).
+                geo = self._geocode_layered(address, day.start_lat, day.start_lon)
             except GeocodingError as error:
                 return {"ok": False, "reason": "geocoding_failed", "detail": str(error)}
             if geo is None or geo.lat is None or geo.lon is None:

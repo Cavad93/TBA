@@ -62,6 +62,19 @@ DADATA_COUNT = 7
 MAX_GPS_RESOLVE_KM = 150.0
 
 
+def too_far_to_trust(ref_lat: float | None, ref_lon: float | None,
+                     lat: float, lon: float) -> bool:
+    """Далеко ли точка от опорной (GPS человека или старт смены), чтобы не доверять ей молча.
+
+    Единый порог MAX_GPS_RESOLVE_KM для всех путей разрешения адреса (подсказки, оценка
+    заказа, личная поездка): опечатка в улице находит одноимённую в другом регионе, и по
+    номеру дома совпадение выглядит точным — но за 1000+ км от человека это подмена, а не
+    адрес. Нет опорной точки — судить нечем, не блокируем (отчёты 13–14 из TG)."""
+    if ref_lat is None or ref_lon is None:
+        return False
+    return _haversine_km(ref_lat, ref_lon, lat, lon) > MAX_GPS_RESOLVE_KM
+
+
 def suggest(query: str, connection, settings: SettingsRepository, user_id: int,
             lat: float | None = None, lon: float | None = None) -> dict:
     """Разобрать адрес слоями. Возвращает {"resolved": ...} или {"candidates": [...]}.
@@ -101,9 +114,15 @@ def suggest(query: str, connection, settings: SettingsRepository, user_id: int,
     if decision is not None:
         return decision
 
-    # 2. Nominatim: уверенное совпадение — resolved; слабое — придержим в кандидаты.
+    # 2. Nominatim: уверенное совпадение — resolved; слабое или далёкое — в кандидаты.
     nominatim_hit = _try_nominatim(text, connection, settings, city, region)
-    if nominatim_hit and _is_confident(text, nominatim_hit):
+    if (nominatim_hit and _is_confident(text, nominatim_hit)
+            and not too_far_to_trust(lat, lon, nominatim_hit.lat, nominatim_hit.lon)):
+        # Тот же порог, что и в DaData-ветке: если DaData промолчал (нет ключа/лимит/пусто),
+        # уверенный, но далёкий хит Nominatim по опечатке («туристическая» → одноимённая
+        # улица в другом регионе) молча НЕ резолвим — падаем в кандидаты ниже, где виден
+        # чужой город (отчёт 14 из TG). Прежде этот путь резолвил без учёта расстояния и
+        # подрывал фикс DaData-ветки.
         geo = nominatim_hit
         return {"resolved": _resolved(geo.normalized_address or text, geo.lat, geo.lon,
                                       source="nominatim", city=city, district=geo.district)}

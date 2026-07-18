@@ -85,6 +85,41 @@ def test_quick_estimate_without_user_id_skips_fuzzy(config, monkeypatch) -> None
     assert not called
 
 
+def test_quick_estimate_far_typo_not_silently_accepted(config, monkeypatch) -> None:
+    """Опечатка увела Nominatim за 1000+ км от человека — личная оценка не считает молча,
+    падает в прощающие слои; их молчание → needs_coordinates, а не «ехать 1000 км» (отчёт 14)."""
+    from app.services.geocoding_service import GeocodingResult
+
+    monkeypatch.setattr(flow, "geocode_address", lambda *a, **k: GeocodingResult(
+        input_text="туристическая 18", normalized_address="Туристическая ул, 18, другой регион",
+        district=None, lat=55.0, lon=60.0, confidence=1.0, source="nominatim",
+    ))
+    monkeypatch.setattr(flow, "resolve_fuzzy", lambda *a, **k: None)
+    with connect(config) as connection:
+        result = QuickEstimateService(connection).estimate(
+            {"address": "туристическая 18", "from_lat": 59.930, "from_lon": 30.310},
+            user_id=1,
+        )
+    assert result["ok"] is False
+    assert result["reason"] == "needs_coordinates"
+
+
+def test_quick_estimate_near_hit_still_accepted(config, monkeypatch) -> None:
+    """Близкий к человеку Nominatim-хит принимается сразу — гард расстояния не мешает."""
+    from app.services.geocoding_service import GeocodingResult
+
+    monkeypatch.setattr(flow, "geocode_address", lambda *a, **k: GeocodingResult(
+        input_text="Точка", normalized_address="Точка рядом", district=None,
+        lat=59.980, lon=30.360, confidence=1.0, source="nominatim",
+    ))
+    with connect(config) as connection:
+        result = QuickEstimateService(connection).estimate(
+            {"address": "Точка", "from_lat": 59.930, "from_lon": 30.310}, user_id=1,
+        )
+    assert result["ok"]
+    assert result["round_trip_km"] > 0
+
+
 # --- Билеты (Ф11.6): гейты личного режима и межгорода -------------------------
 
 
