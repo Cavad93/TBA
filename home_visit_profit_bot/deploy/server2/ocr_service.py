@@ -2,7 +2,12 @@
 
 Зачем свой OCR: ML Kit Text Recognition кириллицу НЕ поддерживает (сверено, Ф15.3), а
 это единственный on-device вариант для Android. Поэтому распознаём на сервере 2 через
-PaddleOCR (модель `cyrillic_PP-OCRv3_mobile_rec` — мобильная, лёгкая для CPU).
+PaddleOCR (rec `cyrillic_PP-OCRv5_mobile_rec` — мобильная для CPU, но v5: +21% к
+кириллице против v3, отчёт 16 из TG; серверной кириллической rec-модели не существует —
+v5 mobile единственная актуальная). Det — `PP-OCRv5_mobile_det` (быстрый, детекция и на
+v3 работала верно; server-det даёт +0.05 качества, но втрое медленнее — не берём).
+Замер на сервере 2: v5 «Санкт-Петербург, Бухарестская 47, кв 1361» уверенность 0.99–1.00
+против «Cанкт-етepбург…» и потерянного числа у v3.
 
 Приватность (152-ФЗ): картинка НИГДЕ не сохраняется — декодируется из памяти (numpy) и
 выбрасывается, в логи не пишется. Сервис слушает ТОЛЬКО приватный wg-адрес 10.8.0.2:5101:
@@ -24,7 +29,7 @@ from PIL import Image
 
 TOKEN = os.getenv("OCR_TOKEN", "")
 DET_MODEL = os.getenv("OCR_DET_MODEL", "PP-OCRv5_mobile_det")
-REC_MODEL = os.getenv("OCR_REC_MODEL", "cyrillic_PP-OCRv3_mobile_rec")
+REC_MODEL = os.getenv("OCR_REC_MODEL", "cyrillic_PP-OCRv5_mobile_rec")
 
 app = FastAPI(title="Vizitorkrut OCR")
 
