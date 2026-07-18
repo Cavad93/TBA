@@ -23,7 +23,13 @@ from urllib.request import Request, urlopen
 DEFAULT_SAVINGS_THRESHOLD = 0.10
 # ТОЛЬКО https: token уходит в query-строке, и по голому http партнёрский ключ
 # читался бы любым наблюдателем сети (эндпоинт по TLS проверен: отвечает).
-_CHEAP_URL = "https://api.travelpayouts.com/v1/prices/cheap"
+# v3/prices_for_dates — актуальный endpoint (сверено с доками Travelpayouts, отчёт 19).
+# Ключевое: `one_way` управляет направлением — при one_way=false `price` это ПОЛНАЯ
+# стоимость туда-обратно (не за одну сторону), при one_way=true — цена в одну сторону.
+# Проверено живьём на сервере 1 (LED→VOG): one_way=false → ~16951 ₽ (round-trip, есть
+# return_at/duration_back), one_way=true → ~7744 ₽ (одна сторона). Дефолт v3 — one_way=true,
+# поэтому направление задаём ЯВНО, иначе молча пришла бы половина (отчёт 19 из TG).
+_PRICES_URL = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
 # Поисковая выдача Aviasales. ХОСТ ПРОВЕРЕН ЖИВЫМ ПЕРЕХОДОМ (18.07.2026): прежний
 # search.aviasales.com/flights/?origin_iata=... отдавал 302 на ПУСТУЮ главную
 # aviasales.ru/?refhost=... — параметры терялись, форма открывалась пустой (отчёт 11
@@ -72,42 +78,50 @@ def cheapest_flight_offer(
     token: str,
     *,
     depart_date: date | None = None,
+    one_way: bool = False,
     currency: str = "rub",
     fetch: Callable[[str], dict[str, Any]] = _http_get_json,
 ) -> FlightOffer | None:
-    """Самый дешёвый билет туда-обратно С ДАТАМИ. None при любой неудаче.
+    """Самый дешёвый билет С ДАТАМИ. one_way=False — туда-обратно, True — в одну сторону.
 
-    Обратную дату выбираем в окне MIN..MAX дней от вылета — так просил продукт. Одним
-    запросом, а не пятью: ответ `v1/prices/cheap` уже несёт `departure_at`/`return_at`
-    у каждого варианта, поэтому окно фильтруется на месте и лишних походов в сеть нет.
-
-    Если в окно не попал ни один вариант, берём просто самый дешёвый — с ЕГО датами.
-    Врать датой ради красивой ссылки нельзя: ссылка должна вести на тот самый билет,
-    цену которого мы показали.
+    Направление задаём ЯВНО (`one_way`), потому что дефолт v3 — one-way: без явного
+    false пришла бы цена за одну сторону, а сравнивали бы её с круговой машиной —
+    выгода самолёта вдвое завышена (отчёт 19). Обратную дату (для round-trip) берём в
+    окне MIN..MAX дней: ответ уже несёт `departure_at`/`return_at`, окно фильтруется на
+    месте. В окно не попало — самый дешёвый с ЕГО датами: ссылка обязана вести на тот
+    самый билет, чью цену показали. Протухшие по `expires_at` варианты отбрасываем.
     """
     if not token or not origin_iata or not dest_iata:
         return None
     departure = depart_date or date.today()
-    url = _CHEAP_URL + "?" + urlencode({
+    params: dict[str, Any] = {
         "origin": origin_iata.upper(),
         "destination": dest_iata.upper(),
-        "depart_date": departure.isoformat(),
+        "departure_at": departure.strftime("%Y-%m"),
+        "one_way": "true" if one_way else "false",
+        "sorting": "price",
+        "direct": "false",
         "currency": currency,
+        "limit": 30,
         "token": token,
-    })
+    }
+    if not one_way:
+        params["return_at"] = departure.strftime("%Y-%m")
+    url = _PRICES_URL + "?" + urlencode(params)
     try:
         payload = fetch(url)
     except Exception:
         # API недоступен — молчим, выдуманных цен не бывает.
         return None
     data = payload.get("data") if isinstance(payload, dict) else None
-    dest = data.get(dest_iata.upper()) if isinstance(data, dict) else None
-    if not isinstance(dest, dict) or not dest:
+    if not isinstance(data, list) or not data:
         return None
 
-    offers = _parse_offers(dest, departure)
+    offers = _parse_offers(data, departure, one_way=one_way)
     if not offers:
         return None
+    if one_way:
+        return min(offers, key=lambda offer: offer.price)
     in_window = [
         offer for offer in offers
         if offer.return_date is not None and _return_gap_days(offer) is not None
@@ -117,23 +131,38 @@ def cheapest_flight_offer(
     return min(pool, key=lambda offer: offer.price)
 
 
-def _parse_offers(dest: dict, departure: date) -> list[FlightOffer]:
-    """Варианты из ответа API. Кривое поле — пропускаем вариант, а не роняем оценку."""
+def _is_expired(value: Any) -> bool:
+    """Протух ли кэш-вариант по expires_at. Нет поля/кривое — считаем свежим (не режем)."""
+    text = str(value or "").strip()
+    if not text:
+        return False
+    try:
+        moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if moment.tzinfo is None:
+        return False
+    return moment < datetime.now(moment.tzinfo)
+
+
+def _parse_offers(items: list, departure: date, *, one_way: bool) -> list[FlightOffer]:
+    """Варианты из ответа v3 (список). Кривое поле/протухший — пропускаем вариант."""
     offers: list[FlightOffer] = []
-    for variant in dest.values():
+    for variant in items:
         if not isinstance(variant, dict):
             continue
         try:
             price = float(variant.get("price") or 0)
         except (TypeError, ValueError):
             continue
-        if price <= 0:
+        if price <= 0 or _is_expired(variant.get("expires_at")):
             continue
         depart_at = _as_date(variant.get("departure_at")) or departure
+        return_at = None if one_way else _as_date(variant.get("return_at"))
         offers.append(FlightOffer(
             price=price,
             depart_date=depart_at.isoformat(),
-            return_date=(lambda d: d.isoformat() if d else None)(_as_date(variant.get("return_at"))),
+            return_date=return_at.isoformat() if return_at else None,
         ))
     return offers
 
@@ -190,18 +219,21 @@ def tickets_block(
     savings_threshold: float = DEFAULT_SAVINGS_THRESHOLD,
     currency: str = "rub",
     depart_date: date | None = None,
+    one_way: bool = False,
     fetch: Callable[[str], dict[str, Any]] = _http_get_json,
 ) -> dict[str, Any] | None:
     """Блок билетов для личного режима на межгороде. None, если билеты не выгоднее машины.
 
-    car_cost — расчёт поездки на машине туда-обратно (из quick_estimate). Блок появляется
-    только если самый дешёвый билет ≤ car_cost × (1 − порог): почти равная цена — шум.
+    car_cost — расчёт поездки на машине в ТОМ ЖЕ направлении, что и билет (туда-обратно
+    при one_way=False, в одну сторону при one_way=True): сравниваем сопоставимое, иначе
+    односторонний билет против круговой машины завышал бы выгоду вдвое (отчёт 19). Блок
+    появляется только если самый дешёвый билет ≤ car_cost × (1 − порог).
     """
     if not token or car_cost <= 0:
         return None
     offer = cheapest_flight_offer(
         origin_iata, dest_iata, token,
-        depart_date=depart_date, currency=currency, fetch=fetch,
+        depart_date=depart_date, one_way=one_way, currency=currency, fetch=fetch,
     )
     if offer is None:
         return None

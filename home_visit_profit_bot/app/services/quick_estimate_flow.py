@@ -110,10 +110,12 @@ class QuickEstimateService:
     ) -> dict[str, Any] | None:
         """Блок «дешевле долететь» (Ф11.6): только личный режим и только межгород.
 
-        Сравниваем туда-обратно с туда-обратно: `car_cost` — дорога в обе стороны ×
-        себестоимость км, а `price` у Travelpayouts (`v1/prices/cheap`) — цена билета
-        именно за перелёт туда и обратно (сверено с доками). Сравнить круговую машину с
-        билетом в одну сторону значило бы завысить выгоду самолёта вдвое.
+        Сравниваем сопоставимое направление: при туда-обратно — круговой `car_cost`
+        против round-trip билета (v3 `one_way=false`, `price` = полная стоимость туда и
+        обратно, сверено живьём), при «только туда» — половина `car_cost` против
+        одностороннего билета (`one_way=true`). Иначе односторонний билет против круговой
+        машины завышал бы выгоду самолёта вдвое (отчёт 19 из TG). Направление берём из
+        payload (`one_way`); по умолчанию туда-обратно.
 
         Молчим при любом сомнении: не личный режим, близко, нет ключа, город не опознан
         или он тот же самый (лететь некуда), API не ответил. Нет уверенности — нет блока;
@@ -121,6 +123,8 @@ class QuickEstimateService:
         """
         if str(payload.get("mode", "")).strip().lower() != "personal":
             return None
+        one_way = bool(payload.get("one_way"))
+        compare_car_cost = car_cost if not one_way else car_cost / 2.0
         # Порог в ОДНУ сторону: «межгород» — это про то, как далеко ехать, а не про сумму
         # пути туда-обратно. 100 км туда и 100 обратно межгородом не делают.
         if one_way_km <= tickets_min_distance_km():
@@ -137,10 +141,11 @@ class QuickEstimateService:
         return tickets_block(
             origin_iata,
             dest_iata,
-            car_cost,
+            compare_car_cost,
             token=token,
             marker=travelpayouts_marker(),
             savings_threshold=tickets_savings_threshold(),
+            one_way=one_way,
         )
 
     def _destination(self, address: str, payload: dict[str, Any], user_id: int | None) -> Point | None:

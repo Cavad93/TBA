@@ -24,15 +24,19 @@ from app.services.tickets_service import (
 DEPART = date(2026, 7, 16)
 
 
-def _variant(price: float, depart: str = "2026-07-16", back: str | None = "2026-07-20") -> dict:
+def _variant(price: float, depart: str = "2026-07-16", back: str | None = "2026-07-20",
+             expires: str | None = None) -> dict:
     variant: dict = {"price": price, "departure_at": depart}
     if back is not None:
         variant["return_at"] = back
+    if expires is not None:
+        variant["expires_at"] = expires
     return variant
 
 
 def _resp(variants: list[dict], dest: str = "AER") -> dict:
-    return {"data": {dest: {str(i): v for i, v in enumerate(variants)}}}
+    # v3/prices_for_dates: data — плоский СПИСОК вариантов (не dict-of-dicts как v1).
+    return {"data": list(variants)}
 
 
 def test_no_token_no_block():
@@ -134,13 +138,36 @@ def test_no_block_when_almost_equal():
 
 def test_malformed_price_is_skipped_not_crashing():
     """Кривое поле price от API не роняет расчёт — вариант просто пропускается."""
-    payload = {"data": {"AER": {
-        "0": {"price": "не число"},
-        "1": {"price": None},
-        "2": "не словарь",
-        "3": _variant(4200),
-    }}}
+    payload = {"data": [
+        {"price": "не число"},
+        {"price": None},
+        "не словарь",
+        _variant(4200),
+    ]}
     offer = cheapest_flight_offer("MOW", "AER", "tok", depart_date=DEPART, fetch=lambda url: payload)
+    assert offer is not None and offer.price == 4200.0
+
+
+def test_one_way_returns_cheapest_without_return_date():
+    """one_way=True: берём самый дешёвый односторонний, return_date пуст (отчёт 19)."""
+    offer = cheapest_flight_offer(
+        "MOW", "AER", "tok", depart_date=DEPART, one_way=True,
+        fetch=lambda url: _resp([_variant(3000, back=None), _variant(2500, back=None)]),
+    )
+    assert offer is not None
+    assert offer.price == 2500.0
+    assert offer.return_date is None
+
+
+def test_expired_variant_is_skipped():
+    """Протухший по expires_at кэш-вариант отбрасываем, берём свежий (отчёт 19)."""
+    offer = cheapest_flight_offer(
+        "MOW", "AER", "tok", depart_date=DEPART,
+        fetch=lambda url: _resp([
+            _variant(1000, expires="2020-01-01T00:00:00+00:00"),  # протух
+            _variant(4200, expires="2099-01-01T00:00:00+00:00"),  # свежий
+        ]),
+    )
     assert offer is not None and offer.price == 4200.0
 
 
@@ -154,10 +181,10 @@ def test_variant_without_return_date_still_counts():
     assert offer.return_date is None
 
 
-def test_cheap_url_is_https():
+def test_prices_url_is_https():
     """Токен уходит в query-строке — только TLS, по голому http ключ читается сетью."""
     from app.services import tickets_service
-    assert tickets_service._CHEAP_URL.startswith("https://")
+    assert tickets_service._PRICES_URL.startswith("https://")
 
 
 def test_api_error_is_silent():
@@ -169,5 +196,5 @@ def test_api_error_is_silent():
 
 def test_empty_data_no_block():
     assert cheapest_flight_offer(
-        "MOW", "AER", "tok", depart_date=DEPART, fetch=lambda url: {"data": {}}
+        "MOW", "AER", "tok", depart_date=DEPART, fetch=lambda url: {"data": []}
     ) is None
