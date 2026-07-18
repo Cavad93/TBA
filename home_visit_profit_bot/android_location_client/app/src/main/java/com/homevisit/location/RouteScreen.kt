@@ -46,6 +46,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Coffee
@@ -573,6 +574,16 @@ internal fun RouteAnchor(
                     onValueChange = { text = it },
                     label = { Text("Новый адрес") },
                     singleLine = true,
+                    // Текущий адрес подставлен для правки — а сброс очищает поле в один
+                    // тап, чтобы ввести новый с нуля (отчёт 12 из TG). Раньше очистить
+                    // можно было только через скрытый пункт меню шаблонов.
+                    trailingIcon = {
+                        if (text.isNotEmpty()) {
+                            IconButton(onClick = { text = "" }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Сбросить адрес")
+                            }
+                        }
+                    },
                 )
                 // Сервер не уверен в адресе — 2–3 варианта одним тапом, как у заказов.
                 // Тап подставляет выбранный текст в поле, чтобы редактор свернулся,
