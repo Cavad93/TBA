@@ -15,7 +15,7 @@ from app.services.optimization_service import optimize_route, optimize_route_est
 from app.services.overwork_pricing_service import build_pricing
 from app.services.vehicle_facts_service import measure
 from app.services.vehicle_service import KmCost, km_cost, osrm_profile
-from app.services.routing_service import RoutingError
+from app.services.routing_service import RoutingError, with_route_time_margin
 from app.services.server_settings import osrm_url as server_osrm_url, request_timeout_seconds as server_timeout
 
 
@@ -218,7 +218,9 @@ def calculate_remaining_route_summary(
                 osrm_url=server_osrm_url(profile),
                 profile=profile,
                 timeout_seconds=server_timeout(),
-                duration_factor=day.planned_route_time_factor,
+                # Время маршрута — с коэффициентом пробок И запасом на дорожные события
+                # (отчёт 18): вердикт ₽/час считается по времени с запасом, не оптимистично.
+                duration_factor=with_route_time_margin(day.planned_route_time_factor),
                 respect_feed_order=respect_feed_order,
             )
             return _merge_manual_visits(future_route, future_manual)

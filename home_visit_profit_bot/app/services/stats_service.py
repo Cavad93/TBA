@@ -380,7 +380,7 @@ def calculate_rolling_averages(
         route_time_factor=(
             sum(factors) / len(factors)
             if factors
-            else settings_repo.get_float("default_route_time_factor", 1.0)
+            else settings_repo.get_float("default_route_time_factor", 2.0)
         ),
         fuel_cost_per_km=fuel_price * fuel_consumption / 100,
         fuel_price_per_liter=fuel_price,

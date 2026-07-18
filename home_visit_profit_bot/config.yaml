@@ -12,7 +12,7 @@ defaults:
   avg_speed_kmh: 30
   service_minutes: 20
   telemed_minutes: 3
-  route_time_factor: 1.0
+  route_time_factor: 2.0
 
 route:
   always_return_to_finish: true

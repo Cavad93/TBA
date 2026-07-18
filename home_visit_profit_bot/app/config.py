@@ -149,7 +149,7 @@ def load_config(project_dir: Path | None = None) -> AppConfig:
             avg_speed_kmh=float(raw.get("defaults", {}).get("avg_speed_kmh", 30)),
             service_minutes=float(raw.get("defaults", {}).get("service_minutes", 20)),
             telemed_minutes=float(raw.get("defaults", {}).get("telemed_minutes", 3)),
-            route_time_factor=float(raw.get("defaults", {}).get("route_time_factor", 1.0)),
+            route_time_factor=float(raw.get("defaults", {}).get("route_time_factor", 2.0)),
         ),
         route=RouteConfig(
             always_return_to_finish=bool(raw.get("route", {}).get("always_return_to_finish", True)),

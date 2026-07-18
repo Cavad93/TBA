@@ -211,3 +211,13 @@ def test_order_around_anchors_applies_two_opt() -> None:
     # Якорь 3 на месте, а суммарное время не хуже честной жадной вставки [2,1,3] (8 мин).
     assert order[-1] == 3 or 3 in order
     assert _route_minutes(matrix, order, 4) <= 8
+
+
+def test_route_time_safety_margin_is_applied_over_factor() -> None:
+    """Отчёт 18: итоговое время = коэффициент пробок × запас (1.1). Запас отдельно
+    от коэффициента, чтобы обучение на факте его не «съело»."""
+    from app.services.routing_service import ROUTE_TIME_SAFETY_MARGIN, with_route_time_margin
+
+    assert ROUTE_TIME_SAFETY_MARGIN == 1.1
+    assert with_route_time_margin(2.0) == 2.2  # дефолт 2.0 × запас 1.1
+    assert with_route_time_margin(1.0) == 1.1

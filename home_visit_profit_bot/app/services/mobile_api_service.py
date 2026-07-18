@@ -285,7 +285,7 @@ class MobileApiService:
             finish_lon=finish.lon,
             avg_speed=self.settings.get_float("default_avg_speed_kmh", 30),
             service_minutes=self.settings.get_float("default_service_minutes", 20),
-            route_time_factor=self.settings.get_float("default_route_time_factor", 1),
+            route_time_factor=self.settings.get_float("default_route_time_factor", 2.0),
             start_odometer=_non_negative_float(payload.get("start_odometer"), default=0.0),
             # Перерыв между сменами СЧИТАЕТ СЕРВЕР: он равен промежутку между закрытием
             # прошлой смены и стартом текущей, и это известно точно. Значение с телефона

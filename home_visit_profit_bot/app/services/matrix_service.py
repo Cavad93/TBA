@@ -20,6 +20,7 @@ from app.services.routing_service import (
     OutsideCoverageError,
     RoutingError,
     get_estimated_distance_matrix,
+    with_route_time_margin,
 )
 from app.services.osrm_cache import cached_distance_matrix
 from app.services.server_settings import osrm_url as server_osrm_url, request_timeout_seconds
@@ -103,7 +104,10 @@ def build_matrix_response(
                 osrm_url=server_osrm_url(profile),
                 profile=profile,
                 timeout_seconds=request_timeout_seconds(),
-                duration_factor=route_time_factor,
+                # Матрица маршрута для клиента (Лента, окна прибытия) — время с
+                # коэффициентом пробок И запасом на дорожные события (отчёт 18): окна
+                # «Когда вас ждать» и плечи маршрута тоже становятся с запасом.
+                duration_factor=with_route_time_margin(route_time_factor),
             )
             distances = matrix.distances_km
             durations = matrix.durations_minutes
