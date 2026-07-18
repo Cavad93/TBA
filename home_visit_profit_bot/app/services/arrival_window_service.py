@@ -98,17 +98,35 @@ def arrival_windows(
         # Раньше max(clock, planned_start) применялся ПОСЛЕ построения окна —
         # визит, назначенный на 14:00, показывал «примерно 08:30–10:30».
         anchor_start = _parse(visit.planned_start_at) if visit.kind == "onsite" else None
+        anchor_end = _parse(visit.planned_end_at) if visit.kind == "onsite" else None
         if anchor_start is not None and anchor_start > clock:
             clock = anchor_start
         eta = clock
 
-        # Полуширина растёт линейно с позицией: первый визит — base, последний — max.
-        frac = index / (count - 1) if count > 1 else 0.0
-        half = (base_half_minutes + (max_half_minutes - base_half_minutes) * frac) * scale
-        half_minutes = int(round(half))
-        window_from = _floor_30(eta - timedelta(minutes=half))
-        window_to = _ceil_30(eta + timedelta(minutes=half))
+        if anchor_start is not None:
+            # Фиксированное время — это НЕ размытая оценка: клиент ждёт в назначенный
+            # интервал. Показываем сам приём [planned_start, planned_end], а не eta ± 2ч
+            # по жадной цепочке (отчёт 17 из TG): «Гороховая 10:00–11:00», не «09:30–13:30».
+            eta = anchor_start
+            window_from = anchor_start
+            window_to = (
+                anchor_end if (anchor_end is not None and anchor_end > anchor_start)
+                else anchor_start + timedelta(minutes=visit.service_minutes or 0)
+            )
+            half_minutes = int(round((window_to - window_from).total_seconds() / 120))
+        else:
+            # Полуширина растёт линейно с позицией: первый визит — base, последний — max.
+            frac = index / (count - 1) if count > 1 else 0.0
+            half = (base_half_minutes + (max_half_minutes - base_half_minutes) * frac) * scale
+            half_minutes = int(round(half))
+            window_from = _floor_30(eta - timedelta(minutes=half))
+            window_to = _ceil_30(eta + timedelta(minutes=half))
 
+        # Фиксированный приём — точный интервал, «примерно» тут неуместно.
+        text = (
+            f"{window_from:%H:%M}–{window_to:%H:%M}" if anchor_start is not None
+            else f"примерно {window_from:%H:%M}–{window_to:%H:%M}"
+        )
         windows.append(
             ArrivalWindow(
                 visit_id=visit.id,
@@ -117,15 +135,17 @@ def arrival_windows(
                 from_at=window_from.isoformat(timespec="minutes"),
                 to_at=window_to.isoformat(timespec="minutes"),
                 half_width_minutes=half_minutes,
-                text=f"примерно {window_from:%H:%M}–{window_to:%H:%M}",
+                text=text,
             )
         )
 
-        # Якорь занимает свой слот до конца, обычный заказ — среднюю длительность
-        # (та же логика, что в late_warnings, чтобы цепочки времени совпадали).
-        # Ожидание до planned_start уже учтено выше, ДО построения окна.
+        # Якорь занимает слот до конца приёма (planned_end), обычный заказ — среднюю
+        # длительность. Так следующие заказы планируются от реального конца встречи.
         if visit.kind == "onsite":
-            clock += timedelta(minutes=visit.service_minutes or 0)
+            if anchor_end is not None and anchor_end > clock:
+                clock = anchor_end
+            else:
+                clock += timedelta(minutes=visit.service_minutes or 0)
         else:
             clock += timedelta(minutes=day.planned_service_minutes or 0)
 

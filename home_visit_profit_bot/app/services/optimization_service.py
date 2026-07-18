@@ -175,7 +175,17 @@ def _order_around_anchors(
                 best_cost = cost
                 best_position = position
         order.insert(best_position, index)
-    return order
+    # Жадная вставка даёт крюки (сосед старта уезжает в конец, дальний вклинивается
+    # между близкими) — распрямляем 2-opt'ом, но НЕ трогаем относительный порядок
+    # якорей: у них фиксированное время (отчёт 17 из TG). Раньше к якорным маршрутам
+    # локальный поиск не применялся вовсе.
+    return _two_opt(matrix, order, finish_index, anchors=anchors)
+
+
+def _anchors_preserved(order: list[int], anchors: list[int]) -> bool:
+    """Якоря в order идут в том же относительном порядке, что и в anchors (по времени)."""
+    anchor_set = set(anchors)
+    return [index for index in order if index in anchor_set] == anchors
 
 
 def _route_minutes(matrix: DistanceMatrix, order: list[int], finish_index: int) -> float:
@@ -200,7 +210,8 @@ def _nearest_neighbor_order(matrix: DistanceMatrix, visit_indices: list[int], fi
     return order
 
 
-def _two_opt(matrix: DistanceMatrix, order: list[int], finish_index: int) -> list[int]:
+def _two_opt(matrix: DistanceMatrix, order: list[int], finish_index: int,
+             anchors: list[int] | None = None) -> list[int]:
     best = order[:]
     improved = True
     while improved:
@@ -208,6 +219,10 @@ def _two_opt(matrix: DistanceMatrix, order: list[int], finish_index: int) -> lis
         for left in range(len(best) - 1):
             for right in range(left + 2, len(best) + 1):
                 candidate = best[:left] + list(reversed(best[left:right])) + best[right:]
+                # Разворот, меняющий относительный порядок якорей, недопустим —
+                # фиксированное время нельзя переставлять (отчёт 17).
+                if anchors and not _anchors_preserved(candidate, anchors):
+                    continue
                 if _route_minutes(matrix, candidate, finish_index) < _route_minutes(matrix, best, finish_index):
                     best = candidate
                     improved = True

@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.models import Point, Visit
 from app.services import routing_service
 from app.services.optimization_service import optimize_route_estimated, optimize_route_manual
-from app.services.routing_service import RoutingError, get_distance_matrix
+from app.services.routing_service import DistanceMatrix, RoutingError, get_distance_matrix
 
 
 def test_manual_route_sums_accepted_order() -> None:
@@ -152,3 +152,62 @@ def test_osrm_duration_factor_changes_minutes_but_not_distance(monkeypatch) -> N
 
     assert matrix.distances_km[0][1] == 1
     assert matrix.durations_minutes[0][1] == 15
+
+
+# --- отчёт 17: 2-opt вокруг якорей распрямляет крюки жадной вставки ---
+
+def _durations_matrix(durations: list[list[float]]) -> DistanceMatrix:
+    """DistanceMatrix только с временами (расстояния для этих тестов не важны)."""
+    n = len(durations)
+    return DistanceMatrix(distances_km=[[0.0] * n for _ in range(n)], durations_minutes=durations)
+
+
+def test_two_opt_shortens_greedy_detour_and_keeps_anchor() -> None:
+    """Разворот сегмента без якоря сокращает крюк; якорь остаётся на месте (отчёт 17)."""
+    from app.services.optimization_service import _anchors_preserved, _route_minutes, _two_opt
+
+    # 0=старт, 1,2, 3=якорь, 4=финиш. Порядок [1,2,3] делает крюк; [2,1,3] короче.
+    matrix = _durations_matrix([
+        [0, 10, 1, 9, 0],
+        [10, 0, 1, 5, 3],
+        [1, 1, 0, 1, 3],
+        [9, 5, 1, 0, 1],
+        [0, 3, 3, 1, 0],
+    ])
+    improved = _two_opt(matrix, [1, 2, 3], finish_index=4, anchors=[3])
+    assert _route_minutes(matrix, improved, 4) < _route_minutes(matrix, [1, 2, 3], 4)
+    assert _anchors_preserved(improved, [3])  # якорь 3 не переставлен
+
+
+def test_two_opt_never_reorders_two_anchors() -> None:
+    """Даже если разворот якорей дешевле — их относительный порядок (по времени) свят."""
+    from app.services.optimization_service import _anchors_preserved, _route_minutes, _two_opt
+
+    # 0=старт, 1,2 = якоря, 3=финиш. [2,1] дешевле [1,2], но якоря менять нельзя.
+    matrix = _durations_matrix([
+        [0, 10, 1, 0],
+        [10, 0, 1, 5],
+        [1, 1, 0, 1],
+        [0, 5, 1, 0],
+    ])
+    assert _route_minutes(matrix, [2, 1], 3) < _route_minutes(matrix, [1, 2], 3)
+    result = _two_opt(matrix, [1, 2], finish_index=3, anchors=[1, 2])
+    assert result == [1, 2]  # порядок якорей сохранён вопреки более дешёвому [2,1]
+    assert _anchors_preserved(result, [1, 2])
+
+
+def test_order_around_anchors_applies_two_opt() -> None:
+    """Полный путь якорной оптимизации теперь распрямляет крюк жадной вставки."""
+    from app.services.optimization_service import _order_around_anchors, _route_minutes
+
+    matrix = _durations_matrix([
+        [0, 10, 1, 9, 0],
+        [10, 0, 1, 5, 3],
+        [1, 1, 0, 1, 3],
+        [9, 5, 1, 0, 1],
+        [0, 3, 3, 1, 0],
+    ])
+    order = _order_around_anchors(matrix, visit_indices=[1, 2, 3], anchors=[3], finish_index=4)
+    # Якорь 3 на месте, а суммарное время не хуже честной жадной вставки [2,1,3] (8 мин).
+    assert order[-1] == 3 or 3 in order
+    assert _route_minutes(matrix, order, 4) <= 8

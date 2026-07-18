@@ -184,8 +184,14 @@ object RouteOptimizer {
         return order
     }
 
-    // --- перенос _two_opt: разворот сегмента [left,right), принимаем при строгом улучшении ---
-    private fun twoOpt(durations: List<List<Double>>, order: List<Int>, finishIndex: Int): List<Int> {
+    // --- перенос _two_opt: разворот сегмента [left,right), принимаем при строгом улучшении.
+    // anchors непуст → разворот, меняющий относительный порядок якорей, отвергаем. ---
+    private fun twoOpt(
+        durations: List<List<Double>>,
+        order: List<Int>,
+        finishIndex: Int,
+        anchors: List<Int> = emptyList(),
+    ): List<Int> {
         var best = order.toList()
         var improved = true
         while (improved) {
@@ -195,6 +201,7 @@ object RouteOptimizer {
                     val candidate = best.subList(0, left) +
                         best.subList(left, right).reversed() +
                         best.subList(right, best.size)
+                    if (anchors.isNotEmpty() && !anchorsPreserved(candidate, anchors)) continue
                     if (routeMinutes(durations, candidate, finishIndex) < routeMinutes(durations, best, finishIndex)) {
                         best = candidate
                         improved = true
@@ -205,7 +212,13 @@ object RouteOptimizer {
         return best
     }
 
-    // --- перенос _order_around_anchors: cheapest insertion, якоря на местах ---
+    // Якоря в order идут в том же относительном порядке, что и в anchors (по времени).
+    private fun anchorsPreserved(order: List<Int>, anchors: List<Int>): Boolean {
+        val anchorSet = anchors.toSet()
+        return order.filter { it in anchorSet } == anchors
+    }
+
+    // --- перенос _order_around_anchors: cheapest insertion, якоря на местах, + 2-opt ---
     private fun orderAroundAnchors(
         durations: List<List<Double>>,
         visitIndices: List<Int>,
@@ -224,6 +237,7 @@ object RouteOptimizer {
             }
             order.add(bestPosition, index)
         }
-        return order
+        // Распрямляем крюки жадной вставки, сохраняя относительный порядок якорей (отчёт 17).
+        return twoOpt(durations, order, finishIndex, anchors)
     }
 }

@@ -157,3 +157,27 @@ def test_eta_center_follows_the_chain():
 
 def test_empty_route_gives_no_windows():
     assert arrival_windows(_day(), [], _route([], {}), now=NOW) == []
+
+
+def test_onsite_anchor_window_is_the_appointment_not_fuzzy():
+    """Отчёт 17: у заказа «на точке 10:00–11:00» окно = сам приём, а не eta±2ч.
+
+    Раньше окно центрировалось на жадной цепочке времени и расползалось с позицией
+    («Гороховая 09:30–13:30»). Для фиксированного времени это ложь: клиент ждёт в
+    назначенный интервал.
+    """
+    from dataclasses import replace
+
+    day = _day()
+    flex = _visit(1)
+    anchor = replace(_visit(2), kind="onsite",
+                     planned_start_at="2026-07-13T10:00:00",
+                     planned_end_at="2026-07-13T11:00:00", service_minutes=30)
+    windows = arrival_windows(day, [flex, anchor], _route([1, 2], {1: 30, 2: 30}), now=NOW)
+
+    by_id = {w.visit_id: w for w in windows}
+    assert by_id[2].from_at == "2026-07-13T10:00"
+    assert by_id[2].to_at == "2026-07-13T11:00"
+    # Точный интервал — без «примерно».
+    assert by_id[2].text == "10:00–11:00"
+    assert "примерно" not in by_id[2].text
