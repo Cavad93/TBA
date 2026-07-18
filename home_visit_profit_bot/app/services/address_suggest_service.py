@@ -55,6 +55,11 @@ MAX_CANDIDATES = 3
 # до ~100 м, чтобы такие схлопнулись в одну «точку», а разные города — остались разными.
 _DISTINCT_PRECISION = 3
 DADATA_COUNT = 7
+# Дальше этого от текущего GPS точный дом молча НЕ подставляем: опечатка в улице уводит
+# DaData в дом с тем же номером за тысячу км («Просвещение» вместо СПб «Просвещения»),
+# и совпадение по номеру не должно этого скрывать. Дальше — показываем варианты. Выезд
+# home-visit держится в пределах города/области, поэтому 150 км — с запасом (отчёт 13).
+MAX_GPS_RESOLVE_KM = 150.0
 
 
 def suggest(query: str, connection, settings: SettingsRepository, user_id: int,
@@ -91,7 +96,7 @@ def suggest(query: str, connection, settings: SettingsRepository, user_id: int,
     region = settings.get("default_region", "Ленинградская область") or "Ленинградская область"
 
     # 1. DaData — сильнейший слой на грязном вводе (опечатки, раскладка, сокращения).
-    suggestions = _fetch_dadata(text, connection, city, user_id)
+    suggestions = _fetch_dadata(text, connection, city, user_id, lat, lon)
     decision = _decide_from_dadata(text, suggestions, lat, lon, city)
     if decision is not None:
         return decision
@@ -135,7 +140,7 @@ def resolve_fuzzy(text: str, connection, settings: SettingsRepository, user_id: 
             float(learned["lat"]), float(learned["lon"]), source="learned",
         )
     city = settings.get("default_city", "Санкт-Петербург") or "Санкт-Петербург"
-    suggestions = _fetch_dadata(text, connection, city, user_id)
+    suggestions = _fetch_dadata(text, connection, city, user_id, lat, lon)
     decision = _decide_from_dadata(text, suggestions, lat, lon, city)
     if decision is not None:
         return decision.get("resolved")
@@ -184,13 +189,14 @@ def reverse_city(lat: float, lon: float, connection, user_id: int) -> str | None
     return city
 
 
-def _fetch_dadata(text: str, connection, city: str, user_id: int) -> list:
-    """Подсказки DaData с учётом лимита и с фолбэком без фильтра по городу.
+def _fetch_dadata(text: str, connection, city: str, user_id: int,
+                  lat: float | None = None, lon: float | None = None) -> list:
+    """Подсказки DaData с учётом лимита и приоритетом города по GPS.
 
-    Сначала спрашиваем с подсказкой города (если у пользователя он верный — точнее
-    ранжирование). Пусто — переспрашиваем без города: чужой город в настройках не
-    должен обнулять реально существующий адрес. Обе неудачи (нет ключа, лимит, сеть)
-    — тихо возвращаем пусто, оркестратор идёт дальше.
+    Порядок: сначала город из настроек; пусто — город по ТЕКУЩЕМУ GPS (человек стоит
+    именно там, опечатка в улице не должна уводить в чужой регион, отчёт 13); только
+    потом — без города (чужой город в настройках не должен обнулять реальный адрес).
+    Все неудачи (нет ключа, лимит, сеть) — тихо возвращаем пусто, оркестратор идёт дальше.
     """
     token = dadata_token()
     if not token:
@@ -198,14 +204,20 @@ def _fetch_dadata(text: str, connection, city: str, user_id: int) -> list:
     usage = DadataUsageRepository(connection)
     if not usage.within_limit(user_id, dadata_daily_limit_per_user()):
         return []
-    try:
-        found = dadata_service.suggest_addresses(
-            text, token=token, city=city, count=DADATA_COUNT, timeout_seconds=server_timeout(),
+
+    def _query(city_hint: str | None) -> list:
+        return dadata_service.suggest_addresses(
+            text, token=token, city=city_hint, count=DADATA_COUNT, timeout_seconds=server_timeout(),
         )
+
+    try:
+        found = _query(city)
+        if not found and lat is not None and lon is not None:
+            gps_city = reverse_city(lat, lon, connection, user_id)
+            if gps_city and gps_city != city:
+                found = _query(gps_city)
         if not found:
-            found = dadata_service.suggest_addresses(
-                text, token=token, city=None, count=DADATA_COUNT, timeout_seconds=server_timeout(),
-            )
+            found = _query(None)
     except dadata_service.DadataError:
         return []
     usage.increment(user_id)
@@ -265,13 +277,19 @@ def _decide_from_dadata(text: str, suggestions: list, lat: float | None, lon: fl
     distinct = _distinct_by_point(ranked)
     best = ranked[0]
 
-    # Близость по GPS НЕ отменяет совпадения по дому: иначе ближайший чужой дом
-    # выигрывал у введённого, а человек даже не видел вариантов — resolved уводил
-    # клиента с пути показа кандидатов.
+    # Совпадение по дому резолвим сразу ТОЛЬКО когда дом рядом с человеком (по GPS) или
+    # GPS нет и дом единственный. Далёкий дом с тем же номером (опечатка в улице увела
+    # DaData в чужой город за 1000+ км) молча НЕ подставляем — показываем варианты, где
+    # человек увидит подмену и введёт точнее (отчёт 13 из TG). Прежде «GPS есть → резолвим»
+    # игнорировало расстояние, и близость лишь сортировала уже пришедшие подсказки.
     if best.house and _house_matches(text, best.house):
-        # Точный дом: одна точка — сразу resolved; GPS — резолвим ближайшую; иначе,
-        # если домов в разных местах несколько, пусть выберет человек.
-        if len(distinct) == 1 or (lat is not None and lon is not None):
+        if lat is not None and lon is not None:
+            if _haversine_km(lat, lon, best.lat, best.lon) <= MAX_GPS_RESOLVE_KM:
+                return {"resolved": _resolved(best.value, best.lat, best.lon, source="dadata",
+                                              city=best.city or city)}
+            # Далёкий дом — не резолвим молча, падаем в кандидаты ниже.
+        elif len(distinct) == 1:
+            # Без GPS судить о расстоянии нечем — единственному точному дому доверяем.
             return {"resolved": _resolved(best.value, best.lat, best.lon, source="dadata",
                                           city=best.city or city)}
     # Улица без дома или несколько разных мест — отдаём на выбор.

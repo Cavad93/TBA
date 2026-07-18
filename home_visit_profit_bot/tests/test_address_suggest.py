@@ -270,6 +270,73 @@ def test_dadata_wrong_city_setting_still_resolves(config, monkeypatch):
     assert calls[0] is not None and calls[-1] is None
 
 
+# --- отчёт 13 из Telegram: опечатка «Просвещение» вместо «Просвещения» увела DaData
+# в дом с тем же номером за 1255 км, и адрес молча подставился. Далёкий дом при GPS —
+# не резолвим, показываем варианты; ближний — резолвим как раньше; при пустом ответе
+# по городу настроек ищем сперва в городе по GPS, а не «где угодно». ---
+
+def test_far_house_match_with_gps_gives_candidates(config, monkeypatch):
+    """Дом с тем же номером, но за сотни км от человека (опечатка в улице) — НЕ резолвим
+    молча, отдаём на выбор: человек увидит чужой город и введёт точнее (отчёт 13)."""
+    monkeypatch.setattr(orch, "geocode_address", lambda *a, **k: None)
+    monkeypatch.setattr(orch, "dadata_token", lambda: "k")
+    monkeypatch.setattr(orch, "dadata_daily_limit_per_user", lambda: 300)
+    # Единственный дом «82к2» — но в другом регионе (55.0, 60.0 ≈ Урал).
+    monkeypatch.setattr(dadata_service, "suggest_addresses", lambda *a, **k: [
+        _sugg("обл, пр-кт Просвещение, д 82 к 2", 55.0, 60.0, "82к2", city="Другой"),
+    ])
+    with connect(config) as conn:
+        conn.set_user(_uid())
+        # Человек в Петербурге — до найденного дома > 1000 км.
+        result = orch.suggest("проспект Просвещение 82к2", conn, SettingsRepository(conn), _uid(),
+                              lat=59.95, lon=30.31)
+    assert "candidates" in result
+    assert result["candidates"][0]["city"] == "Другой"
+
+
+def test_near_house_match_with_gps_resolves(config, monkeypatch):
+    """Точный дом рядом с человеком (в пределах порога) резолвим сразу — лишнего тапа нет."""
+    monkeypatch.setattr(orch, "geocode_address", lambda *a, **k: None)
+    monkeypatch.setattr(orch, "dadata_token", lambda: "k")
+    monkeypatch.setattr(orch, "dadata_daily_limit_per_user", lambda: 300)
+    monkeypatch.setattr(dadata_service, "suggest_addresses", lambda *a, **k: [
+        _sugg("г Санкт-Петербург, пр-кт Просвещения, д 82 к 2", 60.05, 30.40, "82к2"),
+    ])
+    with connect(config) as conn:
+        conn.set_user(_uid())
+        result = orch.suggest("проспект Просвещения 82к2", conn, SettingsRepository(conn), _uid(),
+                              lat=60.04, lon=30.41)
+    assert "resolved" in result
+    assert result["resolved"]["city"] == "Санкт-Петербург"
+
+
+def test_gps_city_queried_before_wildcard(config, monkeypatch):
+    """Пусто по городу настроек — сначала спрашиваем город по GPS, и лишь потом без города.
+
+    Так вариант в реальном городе человека находится раньше, чем «где угодно» (отчёт 13).
+    """
+    monkeypatch.setattr(orch, "geocode_address", lambda *a, **k: None)
+    monkeypatch.setattr(orch, "dadata_token", lambda: "k")
+    monkeypatch.setattr(orch, "dadata_daily_limit_per_user", lambda: 300)
+    monkeypatch.setattr(dadata_service, "geolocate_city",
+                        lambda lat, lon, *, token, timeout_seconds=5.0: "Казань")
+    calls = []
+    def fake(query, *, token, city=None, count=7, timeout_seconds=5.0):
+        calls.append(city)
+        if city == "Казань":
+            return [_sugg("г Казань, ул Баумана, д 10", 55.79, 49.12, "10", city="Казань")]
+        return []  # по городу настроек — пусто
+    monkeypatch.setattr(dadata_service, "suggest_addresses", fake)
+    with connect(config) as conn:
+        conn.set_user(_uid())
+        result = orch.suggest("Баумана 10", conn, SettingsRepository(conn), _uid(),
+                              lat=55.79, lon=49.12)
+    assert "resolved" in result
+    # Город по GPS спрошен ДО запроса без города (wildcard).
+    assert "Казань" in calls
+    assert calls.index("Казань") < (calls.index(None) if None in calls else len(calls))
+
+
 # --- отчёт 3 из Telegram: город отдельно, улица+дом без города, reverse по GPS ---
 
 def test_dadata_candidate_carries_street_house(config, monkeypatch):
