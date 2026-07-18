@@ -30,6 +30,44 @@ from app.services.server_settings import osrm_url as server_osrm_url, request_ti
 MIN_ROUTE_TIME_FACTOR = 0.5
 MAX_ROUTE_TIME_FACTOR = 3.0
 
+# Плавающее окно дневной EMA коэффициента пробок (отчёт 791): период 7 дней →
+# α = 2/(7+1) = 0.25. EMA сглаживает локальные перекосы (короткий день, разовая
+# пробка/ремонт), чтобы личный коэффициент не прыгал и статразброс не копился.
+ROUTE_FACTOR_EMA_PERIOD_DAYS = 7
+_ROUTE_FACTOR_EMA_ALPHA = 2.0 / (ROUTE_FACTOR_EMA_PERIOD_DAYS + 1)
+# Окно EMA: с α=0.25 вклад смены старше ~20 дней уже < 0.3%, 30 с запасом.
+_ROUTE_FACTOR_EMA_WINDOW = 30
+
+
+def learned_route_time_factor(
+    stats_repo: DailyStatsRepository,
+    settings_repo: SettingsRepository,
+) -> float:
+    """Личный коэффициент пробок по EMA дневных факторов (отчёт 791) — замыкает петлю.
+
+    Раньше личный коэффициент измерялся и показывался в профиле, но в план НЕ
+    возвращался (calculate_rolling_averages — мёртвый код). Теперь план дня берёт
+    EMA (период 7, α=0.25), засеянную дефолтом: пока данных нет — дефолт (2.0), первые
+    смены подтягивают мягко, дальше сходится к личному факту. Локальные перекосы EMA
+    гасит. Запас ×1.1 применяется ОТДЕЛЬНО на маршруте — сюда не входит.
+    """
+    default = settings_repo.get_float("default_route_time_factor", 2.0)
+    rows = stats_repo.last(_ROUTE_FACTOR_EMA_WINDOW)
+    factors = [
+        float(row["actual_route_time_factor"])
+        # last() отдаёт новые первыми — EMA идёт от старых смен к новым.
+        for row in reversed(rows)
+        if row["actual_route_time_factor"]
+        and row["planned_route_minutes"]
+        and float(row["planned_route_minutes"]) > 0
+    ]
+    if not factors:
+        return default
+    ema = default
+    for factor in factors:
+        ema = _ROUTE_FACTOR_EMA_ALPHA * factor + (1 - _ROUTE_FACTOR_EMA_ALPHA) * ema
+    return _clamp_factor(ema)
+
 
 def _started_at(day: WorkDay):
     """Момент старта смены — от него отсчитывается перерыв с прошлой смены."""

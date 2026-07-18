@@ -25,6 +25,7 @@ from app.services.address_resolver import resolve_address
 from app.services.day_summary_service import build_end_day_preview, preview_payload
 from app.services.location_service import calculate_location_day_estimate
 from app.services.rest_service import rest_facts
+from app.services.stats_service import learned_route_time_factor
 
 router = APIRouter()
 
@@ -98,7 +99,8 @@ def day_start(request: Request, body: bytes = Depends(raw_body), auth: Authed = 
             DailyStatsRepository(db),
             fallback=float(payload.get("break_hours_before") or 0),
         ),
-        route_time_factor=float(payload.get("route_time_factor") or settings.get_float("default_route_time_factor", config.defaults.route_time_factor)),
+        # Личный коэффициент пробок по EMA прошлых смен (отчёт 791); нет данных — дефолт.
+        route_time_factor=float(payload.get("route_time_factor") or learned_route_time_factor(DailyStatsRepository(db), settings)),
         utc_offset_minutes=_optional_int(payload.get("utc_offset_minutes")),
     )
     return {"ok": True, "day": _day_payload(day)}

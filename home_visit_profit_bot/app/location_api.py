@@ -34,6 +34,7 @@ from app.services.driving_service import save_segment as save_driving_segment
 from app.services.feedback_policy_service import should_ask_feedback
 from app.services.income_service import confirm_month
 from app.services.rest_service import rest_facts
+from app.services.stats_service import learned_route_time_factor
 from app.services.home_service import HomeService
 from app.services.location_service import calculate_location_day_estimate, process_location_update
 from app.services.mobile_api_service import MobileApiService, _optional_offset
@@ -386,7 +387,8 @@ def _handler_factory(config: AppConfig):
                         DailyStatsRepository(connection),
                         fallback=float(payload.get("break_hours_before") or 0),
                     ),
-                    route_time_factor=float(payload.get("route_time_factor") or settings.get_float("default_route_time_factor", config.defaults.route_time_factor)),
+                    # Личный коэффициент пробок по EMA прошлых смен (отчёт 791); нет данных — дефолт.
+                    route_time_factor=float(payload.get("route_time_factor") or learned_route_time_factor(DailyStatsRepository(connection), settings)),
                     utc_offset_minutes=_optional_offset(payload.get("utc_offset_minutes")),
                 )
             self._json_response({"ok": True, "day": _day_payload(day)})
