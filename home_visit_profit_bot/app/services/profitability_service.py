@@ -353,6 +353,7 @@ def calculate_candidate_impact(
         min_hourly=min_hourly,
         outside_min_hourly=outside_min_hourly,
         outside_min_extra=outside_min_extra,
+        marginal_profit=marginal_profit,
         blocks_outside_zone=pricing.blocks_outside_zone,
     )
     tariff = calculate_required_tariff(
@@ -369,6 +370,7 @@ def calculate_candidate_impact(
         min_marginal_hourly=min_marginal_hourly,
         outside_min_hourly=outside_min_hourly,
         outside_min_extra=outside_min_extra,
+        marginal_profit=marginal_profit,
     )
     visit_repo.update_estimates(candidate.id, marginal_profit, marginal_hourly, before_hourly, after_hourly)
     visit_repo.update_route_estimate(candidate.id, max(0.0, extra_km), max(0.0, extra_drive_minutes))
@@ -484,6 +486,7 @@ def make_decision(
     min_hourly: float,
     outside_min_hourly: float | None = None,
     outside_min_extra: float = 0.0,
+    marginal_profit: float = 0.0,
     blocks_outside_zone: bool = False,
 ) -> tuple[str, str]:
     outside_min_hourly = min_hourly if outside_min_hourly is None else outside_min_hourly
@@ -496,7 +499,14 @@ def make_decision(
                 "Высокий долг восстановления. Заказы вне базовой зоны сегодня брать не стоит.",
             )
         target = max(before_hourly, outside_min_hourly)
-        if after_hourly >= target and outside_min_extra <= 0:
+        # Надбавка вне зоны — доход-осознанно, а не слепым флагом (отчёт 15 из TG).
+        # Раньше любая настроенная надбавка (>0) гасила ЛЮБОЙ внезонный заказ в янтарь,
+        # даже сверхприбыльный: сравнения с доходом не было. Теперь надбавка считается
+        # выполненной, если маржинальная прибыль заказа сама её покрывает — тогда вердикт
+        # идёт от прибыльности. Дешёвый внезонный заказ, что надбавку не окупает, остаётся
+        # янтарным «только с надбавкой» — фича защиты сохранена.
+        premium_covered = outside_min_extra <= 0 or marginal_profit >= outside_min_extra
+        if after_hourly >= target and premium_covered:
             if existing_base_count < 5:
                 return (
                     "МОЖНО БРАТЬ",
@@ -509,7 +519,7 @@ def make_decision(
         if after_hourly >= target:
             return (
                 "ТОЛЬКО С НАДБАВКОЙ",
-                "Адрес вне базовой зоны проходит по часу, но для вне зоны задана минимальная надбавка.",
+                "Адрес вне базовой зоны проходит по часу, но его прибыль не покрывает заданную минимальную надбавку вне зоны.",
             )
         return (
             "ТОЛЬКО СО СПЕЦТАРИФОМ",
@@ -545,6 +555,7 @@ def calculate_required_tariff(
     min_marginal_hourly: float | None = None,
     outside_min_hourly: float | None = None,
     outside_min_extra: float = 0.0,
+    marginal_profit: float = 0.0,
 ) -> dict[str, float]:
     income_without_candidate = calculate_day_income(day, existing_visits)
     known_expenses = calculate_known_expenses(day, after_km, cost)
@@ -571,7 +582,10 @@ def calculate_required_tariff(
     required_extra_for_min_hourly = max(0.0, min_hourly_income - candidate.income)
     required_extra_for_keep_hourly = max(0.0, keep_hourly_income - candidate.income)
     required_extra_for_marginal_hourly = max(0.0, marginal_income - candidate.income)
-    required_extra_for_outside_zone = max(0.0, outside_extra)
+    # Доход-осознанно (отчёт 15): надбавку вне зоны считаем уже покрытой на столько,
+    # сколько заказ приносит маржинальной прибыли. Просить доплату надо лишь на разницу,
+    # а не на всю надбавку — иначе подсказка тарифа противоречила бы зелёному вердикту.
+    required_extra_for_outside_zone = max(0.0, outside_extra - marginal_profit)
     required_extra_payment = max(
         required_extra_for_min_hourly,
         required_extra_for_keep_hourly,

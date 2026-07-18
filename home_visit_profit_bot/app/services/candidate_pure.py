@@ -83,6 +83,7 @@ def evaluate(inputs: dict) -> dict:
         min_hourly=min_hourly,
         outside_min_hourly=outside_min_hourly,
         outside_min_extra=outside_min_extra,
+        marginal_profit=marginal_profit,
         blocks_outside_zone=blocks_outside_zone,
     )
     verdict = decision_to_verdict(decision)

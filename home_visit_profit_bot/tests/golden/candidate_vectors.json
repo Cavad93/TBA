@@ -122,7 +122,7 @@
       "min_hourly": 600,
       "min_marginal_hourly": 600,
       "outside_min_hourly": 700,
-      "outside_min_extra": 200,
+      "outside_min_extra": 2000,
       "is_base_district": false,
       "existing_base_count": 6
     },
@@ -135,6 +135,35 @@
       "decision": "ТОЛЬКО С НАДБАВКОЙ",
       "verdict": "edge",
       "score": 66
+    }
+  },
+  {
+    "name": "outside_zone_profitable_covers_markup",
+    "inputs": {
+      "income": 1600,
+      "extra_km": 20,
+      "extra_drive_minutes": 35,
+      "service_minutes": 20,
+      "fuel_per_km": 7.0,
+      "maintenance_per_km": 3.0,
+      "before_hourly": 700,
+      "after_hourly": 710,
+      "min_hourly": 600,
+      "min_marginal_hourly": 600,
+      "outside_min_hourly": 700,
+      "outside_min_extra": 200,
+      "is_base_district": false,
+      "existing_base_count": 6
+    },
+    "expected": {
+      "marginal_profit": 1400.0,
+      "marginal_hourly": 1527.27,
+      "marginal_per_km": 70.0,
+      "extra_car_cost": 200.0,
+      "extra_total_minutes": 55.0,
+      "decision": "МОЖНО БРАТЬ",
+      "verdict": "go",
+      "score": 96
     }
   },
   {

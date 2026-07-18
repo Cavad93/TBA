@@ -74,6 +74,7 @@ object ProfitabilityCalculator {
             minHourly = input.minHourly,
             outsideMinHourly = outsideMinHourly,
             outsideMinExtra = input.outsideMinExtra,
+            marginalProfit = marginalProfit,
             blocksOutsideZone = input.blocksOutsideZone,
         )
         val verdict = decisionToVerdict(decision)
@@ -119,12 +120,17 @@ object ProfitabilityCalculator {
         minHourly: Double,
         outsideMinHourly: Double,
         outsideMinExtra: Double,
+        marginalProfit: Double,
         blocksOutsideZone: Boolean,
     ): String {
         if (!isBaseDistrict) {
             if (blocksOutsideZone) return "ТОЛЬКО СО СПЕЦТАРИФОМ"
             val target = maxOf(beforeHourly, outsideMinHourly)
-            if (afterHourly >= target && outsideMinExtra <= 0) return "МОЖНО БРАТЬ"
+            // Надбавка вне зоны — доход-осознанно (отчёт 15): считается покрытой, если
+            // маржинальная прибыль заказа её окупает; тогда вердикт идёт от прибыльности.
+            // Точный перенос серверного make_decision.
+            val premiumCovered = outsideMinExtra <= 0 || marginalProfit >= outsideMinExtra
+            if (afterHourly >= target && premiumCovered) return "МОЖНО БРАТЬ"
             if (afterHourly >= target) return "ТОЛЬКО С НАДБАВКОЙ"
             return "ТОЛЬКО СО СПЕЦТАРИФОМ"
         }

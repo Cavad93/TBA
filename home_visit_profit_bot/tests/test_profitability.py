@@ -260,3 +260,32 @@ def test_outside_base_requires_extra_to_keep_current_hourly() -> None:
     assert tariff["required_extra_for_outside_zone"] == 500
     assert tariff["required_extra_payment"] == 1200
     assert tariff["required_candidate_income"] == 2200
+
+
+def test_outside_zone_markup_covered_by_margin_needs_no_extra() -> None:
+    """Отчёт 15: маржа заказа сама покрывает надбавку вне зоны — доплату не требуем.
+
+    Раньше required_extra_for_outside_zone был равен всей надбавке независимо от дохода,
+    и вердикт гасился в янтарь. Теперь просим лишь недостающую разницу (здесь — ноль).
+    """
+    day = WorkDay(
+        id=1, date="2026-07-07", status="active", start_address="Дом", start_lat=None,
+        start_lon=None, finish_address="Дом", finish_lat=None, finish_lon=None,
+        started_at=None, ended_at=None, planned_avg_speed_kmh=30, planned_service_minutes=20,
+        actual_km=None, actual_avg_speed_kmh=None, actual_service_minutes_per_visit=None,
+        telemed_income=0, telemed_minutes=0, parking_expenses=0, food_expenses=0,
+        clinic_compensation=0, other_expenses=0,
+    )
+    candidate = Visit(
+        id=2, work_day_id=1, status="candidate", order_number=None, address="B",
+        normalized_address="B", district="вне зоны", is_base_district=False, lat=None,
+        lon=None, income=1600, estimated_extra_km=0, estimated_extra_minutes=0,
+    )
+    tariff = calculate_required_tariff(
+        day=day, candidate=candidate, existing_visits=[], after_minutes=120, after_km=20,
+        extra_total_minutes=60, extra_car_cost=100, before_hourly=600,
+        cost=km_cost(FakeSettings({"cost_mode": "exact", "exact_cost_per_km": 10})),
+        min_hourly=600, min_marginal_hourly=600, outside_min_hourly=600,
+        outside_min_extra=500, marginal_profit=1400,  # маржа 1400 > надбавки 500
+    )
+    assert tariff["required_extra_for_outside_zone"] == 0

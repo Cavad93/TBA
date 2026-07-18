@@ -49,7 +49,19 @@ CASES: list[dict] = [
         "outside_min_hourly": 700, "is_base_district": False, "existing_base_count": 6,
     },
     {
+        # Надбавка (2000) БОЛЬШЕ маржи заказа (1400) — заказ её не окупает, значит
+        # честный янтарь «только с надбавкой» (отчёт 15: янтарь остаётся для дешёвых).
         "name": "outside_zone_needs_markup",
+        "income": 1600, "extra_km": 20, "extra_drive_minutes": 35, "service_minutes": 20,
+        "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "before_hourly": 700,
+        "after_hourly": 710, "min_hourly": 600, "min_marginal_hourly": 600,
+        "outside_min_hourly": 700, "outside_min_extra": 2000,
+        "is_base_district": False, "existing_base_count": 6,
+    },
+    {
+        # Отчёт 15: прибыльный внезонный заказ (маржа 1400) с умеренной надбавкой (200) —
+        # надбавка окупается прибылью, вердикт зелёный, а не гасится в янтарь из-за зоны.
+        "name": "outside_zone_profitable_covers_markup",
         "income": 1600, "extra_km": 20, "extra_drive_minutes": 35, "service_minutes": 20,
         "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "before_hourly": 700,
         "after_hourly": 710, "min_hourly": 600, "min_marginal_hourly": 600,
