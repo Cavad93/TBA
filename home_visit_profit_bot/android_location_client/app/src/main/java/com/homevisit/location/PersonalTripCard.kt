@@ -59,10 +59,13 @@ private fun PersonalTripResult(check: com.homevisit.location.domain.MinimumCheck
     var oneWay by rememberSaveable { mutableStateOf(false) }
     val factor = if (oneWay) 0.5 else 1.0
     val carCost = check.carCost * factor
-    val timeCost = check.timeCost * factor
     val km = check.roundTripKm * factor
     val minutes = check.roundTripMinutes * factor
-    val total = carCost + timeCost + check.parkingCost
+    // Личная поездка — НЕ работа: своё время человек себе не оплачивает, и «время в
+    // пути» в расход не идёт (отчёт 821). Считаем то, что реально уходит из кармана:
+    // топливо и износ плюс парковка. В рабочем режиме время по-прежнему в расчёте —
+    // там оно определяет цену, ниже которой выезд убыточен.
+    val total = carCost + check.parkingCost
 
     InputCard("Личная поездка") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -89,7 +92,6 @@ private fun PersonalTripResult(check: com.homevisit.location.domain.MinimumCheck
         )
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             TripCostRow("Дорога (топливо, износ)", carCost)
-            TripCostRow("Время в пути", timeCost)
             if (check.parkingCost > 0) TripCostRow("Парковка", check.parkingCost)
         }
         if (check.hourlyOnSite > 0) {
