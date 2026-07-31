@@ -113,7 +113,7 @@ class ProfileService:
         economy = economy_index(metrics, baselines)
         load = load_index(metrics, baselines)
         debt = float(metrics.get("overwork_index") or 0)
-        recovery = overwork_result(debt, metrics, baselines)
+        overwork = overwork_result(debt, metrics, baselines)
 
         return {
             # Пока смен мало, личной нормы нет, и любой индекс — цифра из воздуха.
