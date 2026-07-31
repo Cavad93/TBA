@@ -329,6 +329,7 @@ class MainActivity : ComponentActivity() {
                     onDismissDuplicate = viewModel::dismissDuplicateConfirm,
                     onRejectCandidate = viewModel::rejectCandidate,
                     onCompleteCurrentVisit = viewModel::completeCurrentVisit,
+                    onCloseByGpsHint = viewModel::closeByGpsHint,
                     onCancelCurrentVisit = viewModel::cancelCurrentVisit,
                     onCancelVisitById = viewModel::cancelVisitById,
                     onArchiveRange = viewModel::setArchiveRange,
@@ -598,6 +599,8 @@ internal data class WorkActions(
     val onDismissDuplicate: () -> Unit,
     val onRejectCandidate: () -> Unit,
     val onCompleteCurrentVisit: () -> Unit,
+    /** «Закрыть по GPS»: закрывает заказ ИЗ ПОДСКАЗКИ, а не первый в ленте. */
+    val onCloseByGpsHint: () -> Unit,
     val onCancelCurrentVisit: () -> Unit,
     /** Убрать ЛЮБОЙ заказ из очереди «Далее», а не только текущий (клиент отменился). */
     val onCancelVisitById: (String) -> Unit,
@@ -681,6 +684,7 @@ internal fun HomeVisitApp(
     onDismissDuplicate: () -> Unit,
     onRejectCandidate: (String, String) -> Unit,
     onCompleteCurrentVisit: (String, String) -> Unit,
+    onCloseByGpsHint: (String, String) -> Unit,
     onCancelCurrentVisit: (String, String) -> Unit,
     onCancelInRoute: (String, String) -> Unit,
     onCancelVisitById: (String, String, String) -> Unit,
@@ -778,6 +782,7 @@ internal fun HomeVisitApp(
         onDismissDuplicate = onDismissDuplicate,
         onRejectCandidate = { onRejectCandidate(serverUrl, apiKey) },
         onCompleteCurrentVisit = { onCompleteCurrentVisit(serverUrl, apiKey) },
+        onCloseByGpsHint = { onCloseByGpsHint(serverUrl, apiKey) },
         onCancelCurrentVisit = { onCancelCurrentVisit(serverUrl, apiKey) },
         onCancelVisitById = { localId -> onCancelVisitById(serverUrl, apiKey, localId) },
         onArchiveRange = onArchiveRange,

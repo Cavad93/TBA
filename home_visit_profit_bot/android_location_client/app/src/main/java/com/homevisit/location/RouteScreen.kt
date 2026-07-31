@@ -320,6 +320,7 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
                 onGo = { navTarget?.let(go) },
                 onCopyCoordinates = { navTarget?.let(copyCoordinates) },
                 onComplete = workActions.onCompleteCurrentVisit,
+                onCloseByGps = workActions.onCloseByGpsHint,
                 onCancel = workActions.onCancelCurrentVisit,
                 onCancelInRoute = workActions.onCancelInRoute,
             )
@@ -627,6 +628,7 @@ internal fun FocusOrderCard(
     onGo: () -> Unit,
     onCopyCoordinates: () -> Unit,
     onComplete: () -> Unit,
+    onCloseByGps: () -> Unit,
     onCancel: () -> Unit,
     onCancelInRoute: () -> Unit,
 ) {
@@ -678,7 +680,7 @@ internal fun FocusOrderCard(
                     onGo = onGo,
                     onCopyCoordinates = onCopyCoordinates,
                 )
-                GpsHintBlock(gpsHint = gpsHint, onRefresh = onRefreshGpsHint, onComplete = onComplete)
+                GpsHintBlock(gpsHint = gpsHint, onRefresh = onRefreshGpsHint, onComplete = onCloseByGps)
                 // Таймер простоя на точке (Ф10.4): пока ждёте, ₽/час тает на глазах —
                 // ожидание молча съедает выгодность, и это должно быть видно.
                 val dwell = gpsHint.hint?.dwellMinutes ?: 0.0

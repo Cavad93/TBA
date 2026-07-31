@@ -809,9 +809,22 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
      * Поэтому закрытие показывается ему и откатывается одной кнопкой: простоять он мог
      * и в кафе напротив, а «долго простоял» — всего лишь догадка.
      */
-    private fun autoCloseCurrentVisit(serverUrl: String, apiKey: String) {
+    /**
+     * Закрыть по GPS ИМЕННО ТОТ заказ, о котором говорит подсказка.
+     *
+     * Раньше закрывался первый заказ ленты, а готовность сервер считал по заказу с
+     * реальными GPS-событиями (он ходит по событиям, а не по порядку ленты — это чинилось
+     * отдельно). Когда эти двое расходились, приложение молча, фоном закрывало ЧУЖОЙ
+     * адрес: человек стоял у одного заказа, а закрывался другой. Отсюда же брались
+     * «призрачные» карточки, которые потом не завершались (отчёт 806).
+     *
+     * targetVisitId — visit_id из подсказки. Не нашли такой заказ у себя — не закрываем
+     * ничего: лучше не закрыть, чем закрыть не то.
+     */
+    private fun autoCloseCurrentVisit(serverUrl: String, apiKey: String, targetVisitId: Int) {
         viewModelScope.launch {
-            val activeVisit = uiState.value.activeVisit ?: return@launch
+            val activeVisit = uiState.value.routeVisits.firstOrNull { it.serverId == targetVisitId }
+                ?: return@launch
             val serverId = activeVisit.serverId ?: return@launch
             val ok = repository.completeVisit(serverUrl, apiKey, serverId)
             if (!ok) return@launch
@@ -835,9 +848,24 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             val hint = repository.fetchCurrentGpsHint(serverUrl, apiKey) ?: return@launch
             gpsHintState.value = GpsHintUiState(hint = hint)
             if (hint.readyToComplete) {
-                autoCloseCurrentVisit(serverUrl, apiKey)
+                // Закрываем заказ ИЗ ПОДСКАЗКИ, а не первый в ленте: они расходятся,
+                // когда человек стоит не у ближайшего по порядку адреса.
+                autoCloseCurrentVisit(serverUrl, apiKey, hint.visitId)
             }
         }
+    }
+
+    /**
+     * Кнопка «Закрыть по GPS»: закрывает заказ ИЗ ПОДСКАЗКИ, а не текущий в ленте.
+     *
+     * Кнопка включается по готовности, которую сервер посчитал для КОНКРЕТНОГО заказа
+     * (того, у которого есть GPS-стоянка). Раньше она вела в общее завершение и закрывала
+     * первый заказ ленты — то есть могла закрыть не тот адрес, у которого человек стоит.
+     */
+    fun closeByGpsHint(serverUrl: String, apiKey: String) {
+        val hint = gpsHintState.value.hint ?: return
+        if (!hint.readyToComplete) return
+        autoCloseCurrentVisit(serverUrl, apiKey, hint.visitId)
     }
 
     /** Вернуть заказ, который приложение закрыло само. */
