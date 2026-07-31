@@ -221,3 +221,41 @@ def test_route_time_safety_margin_is_applied_over_factor() -> None:
     assert ROUTE_TIME_SAFETY_MARGIN == 1.1
     assert with_route_time_margin(2.0) == 2.2  # дефолт 2.0 × запас 1.1
     assert with_route_time_margin(1.0) == 1.1
+
+
+def test_profile_reaches_matrix_for_routes_with_visits(monkeypatch) -> None:
+    """Профиль доезжает до матрицы и в основной ветке, а не только когда заказов нет.
+
+    От профиля зависит радиус привязки к дороге (машина 2000 м, пешеход и велосипед
+    1000 м) и ключ кэша. С дефолтным «driving» пеший работник молча получал
+    автомобильный радиус: точка в двух километрах считалась достижимой, и «вне
+    покрытия» не срабатывало там, где должно.
+    """
+    from app.services import optimization_service as opt
+
+    seen: list[str] = []
+
+    def fake_matrix(points, *, osrm_url, profile="driving", timeout_seconds=10, duration_factor=1.0):
+        seen.append(profile)
+        size = len(points)
+        return DistanceMatrix(
+            distances_km=[[0.0 if i == j else 1.0 for j in range(size)] for i in range(size)],
+            durations_minutes=[[0.0 if i == j else 5.0 for j in range(size)] for i in range(size)],
+        )
+
+    monkeypatch.setattr(opt, "cached_distance_matrix", fake_matrix)
+    visits = [Visit(1, 1, "accepted", 1, "A", "A", None, False, 59.95, 30.30, 1000, 0, 0)]
+
+    opt.optimize_route(
+        Point("start", 59.93, 30.31), visits, Point("finish", 59.93, 30.31),
+        osrm_url="http://example.test", profile="foot",
+    )
+    # Заказы есть — раньше сюда уходил дефолт «driving».
+    assert seen == ["foot"], f"профиль потерялся: {seen}"
+
+    seen.clear()
+    opt.optimize_route(
+        Point("start", 59.93, 30.31), [], Point("finish", 59.93, 30.31),
+        osrm_url="http://example.test", profile="foot",
+    )
+    assert seen == ["foot"], f"профиль потерялся в пустой ветке: {seen}"
