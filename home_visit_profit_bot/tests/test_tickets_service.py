@@ -171,14 +171,17 @@ def test_expired_variant_is_skipped():
     assert offer is not None and offer.price == 4200.0
 
 
-def test_variant_without_return_date_still_counts():
-    """Билет без даты возврата — не повод падать: показываем как в одну сторону."""
+def test_round_trip_ignores_variant_without_return_date():
+    """В режиме «туда-обратно» вариант без обратной даты НЕ показываем (отчёты 19, 815).
+
+    Раньше он проходил как «в одну сторону», и односторонняя цена сравнивалась с
+    круговой стоимостью машины — выгода самолёта завышалась вдвое. Для одной стороны
+    есть явный режим one_way=True (см. тест ниже)."""
     offer = cheapest_flight_offer(
         "MOW", "AER", "tok", depart_date=DEPART,
         fetch=lambda url: _resp([_variant(3000, back=None)]),
     )
-    assert offer is not None
-    assert offer.return_date is None
+    assert offer is None
 
 
 def test_prices_url_is_https():
@@ -198,3 +201,64 @@ def test_empty_data_no_block():
     assert cheapest_flight_offer(
         "MOW", "AER", "tok", depart_date=DEPART, fetch=lambda url: {"data": []}
     ) is None
+
+
+# --- отчёт 815: даты ссылки должны быть будущими и с зазором, иначе блока нет ---
+
+def test_past_departures_are_rejected():
+    """Конец месяца: в текущем месяце остались только прошедшие вылеты — блока нет.
+
+    Раньше брался самый дешёвый вариант «с его датами», и ссылка открывалась на
+    прошедшую дату — Aviasales отвечал «ничего не нашлось».
+    """
+    past = _resp([_variant(3000, depart="2026-07-05", back="2026-07-09")])
+    offer = cheapest_flight_offer(
+        "MOW", "AER", "tok", depart_date=date(2026, 7, 31),
+        fetch=lambda url: past,
+    )
+    assert offer is None
+
+
+def test_same_day_return_is_rejected():
+    """«Туда-обратно одним днём» — не поездка: такой вариант не показываем."""
+    same_day = _resp([_variant(3000, depart="2026-08-10", back="2026-08-10")])
+    offer = cheapest_flight_offer(
+        "MOW", "AER", "tok", depart_date=date(2026, 7, 31),
+        fetch=lambda url: same_day,
+    )
+    assert offer is None
+
+
+def test_next_month_is_queried_at_month_end():
+    """31-го числа спрашиваем и следующий месяц — иначе будущих вылетов не найти."""
+    asked: list[str] = []
+
+    def fake(url: str):
+        asked.append(url)
+        if "departure_at=2026-08" in url:
+            return _resp([_variant(4000, depart="2026-08-12", back="2026-08-17")])
+        return _resp([])
+
+    offer = cheapest_flight_offer(
+        "MOW", "AER", "tok", depart_date=date(2026, 7, 31), fetch=fake,
+    )
+    assert any("departure_at=2026-07" in u for u in asked)
+    assert any("departure_at=2026-08" in u for u in asked)
+    assert offer is not None
+    assert offer.depart_date == "2026-08-12" and offer.return_date == "2026-08-17"
+
+
+def test_december_rolls_over_to_january():
+    """Декабрь → следующий месяц январь СЛЕДУЮЩЕГО года, а не тринадцатый месяц."""
+    from app.services.tickets_service import _months_ahead
+
+    assert [d.isoformat() for d in _months_ahead(date(2026, 12, 15))] == ["2026-12-01", "2027-01-01"]
+
+
+def test_one_way_also_rejects_past_departures():
+    past = _resp([_variant(2000, depart="2026-07-02", back=None)])
+    offer = cheapest_flight_offer(
+        "MOW", "AER", "tok", depart_date=date(2026, 7, 31), one_way=True,
+        fetch=lambda url: past,
+    )
+    assert offer is None

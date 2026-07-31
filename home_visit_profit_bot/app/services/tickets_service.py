@@ -82,53 +82,85 @@ def cheapest_flight_offer(
     currency: str = "rub",
     fetch: Callable[[str], dict[str, Any]] = _http_get_json,
 ) -> FlightOffer | None:
-    """Самый дешёвый билет С ДАТАМИ. one_way=False — туда-обратно, True — в одну сторону.
+    """Самый дешёвый билет С БУДУЩИМИ ДАТАМИ. one_way=False — туда-обратно, True — туда.
 
     Направление задаём ЯВНО (`one_way`), потому что дефолт v3 — one-way: без явного
     false пришла бы цена за одну сторону, а сравнивали бы её с круговой машиной —
-    выгода самолёта вдвое завышена (отчёт 19). Обратную дату (для round-trip) берём в
-    окне MIN..MAX дней: ответ уже несёт `departure_at`/`return_at`, окно фильтруется на
-    месте. В окно не попало — самый дешёвый с ЕГО датами: ссылка обязана вести на тот
-    самый билет, чью цену показали. Протухшие по `expires_at` варианты отбрасываем.
+    выгода самолёта вдвое завышена (отчёт 19).
+
+    Даты (отчёт 815). Запрашиваем ТЕКУЩИЙ и СЛЕДУЮЩИЙ месяц: в конце месяца (31-е)
+    в текущем будущих вылетов почти не остаётся, и поиск возвращал прошедшие даты —
+    ссылка открывалась на «31 июл — 31 июл» и Aviasales честно отвечал «ничего не
+    нашлось». Дальше жёсткий фильтр: вылет НЕ РАНЬШЕ сегодня, а для round-trip возврат
+    строго через MIN..MAX дней после вылета (человеку нужен зазор, а не «туда-обратно
+    одним днём»). Ничего подходящего — возвращаем None и блок не показываем: лучше
+    промолчать, чем дать ссылку в никуда. Протухшие по `expires_at` отбрасываем.
     """
     if not token or not origin_iata or not dest_iata:
         return None
     departure = depart_date or date.today()
-    params: dict[str, Any] = {
-        "origin": origin_iata.upper(),
-        "destination": dest_iata.upper(),
-        "departure_at": departure.strftime("%Y-%m"),
-        "one_way": "true" if one_way else "false",
-        "sorting": "price",
-        "direct": "false",
-        "currency": currency,
-        "limit": 30,
-        "token": token,
-    }
-    if not one_way:
-        params["return_at"] = departure.strftime("%Y-%m")
-    url = _PRICES_URL + "?" + urlencode(params)
-    try:
-        payload = fetch(url)
-    except Exception:
-        # API недоступен — молчим, выдуманных цен не бывает.
-        return None
-    data = payload.get("data") if isinstance(payload, dict) else None
-    if not isinstance(data, list) or not data:
-        return None
 
-    offers = _parse_offers(data, departure, one_way=one_way)
-    if not offers:
+    offers: list[FlightOffer] = []
+    for month_start in _months_ahead(departure):
+        params: dict[str, Any] = {
+            "origin": origin_iata.upper(),
+            "destination": dest_iata.upper(),
+            "departure_at": month_start.strftime("%Y-%m"),
+            "one_way": "true" if one_way else "false",
+            "sorting": "price",
+            "direct": "false",
+            "currency": currency,
+            "limit": 30,
+            "token": token,
+        }
+        if not one_way:
+            params["return_at"] = month_start.strftime("%Y-%m")
+        try:
+            payload = fetch(_PRICES_URL + "?" + urlencode(params))
+        except Exception:
+            # API недоступен — молчим, выдуманных цен не бывает.
+            continue
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if isinstance(data, list) and data:
+            offers.extend(_parse_offers(data, departure, one_way=one_way))
+
+    # Прошедшие вылеты не предлагаем: ссылка должна вести на билет, который можно купить.
+    future = [offer for offer in offers if _not_before(offer.depart_date, departure)]
+    if not future:
         return None
     if one_way:
-        return min(offers, key=lambda offer: offer.price)
-    in_window = [
-        offer for offer in offers
-        if offer.return_date is not None and _return_gap_days(offer) is not None
-        and MIN_RETURN_DAYS <= _return_gap_days(offer) <= MAX_RETURN_DAYS
+        return min(future, key=lambda offer: offer.price)
+    with_return = [
+        offer for offer in future
+        if offer.return_date is not None and (_return_gap_days(offer) or 0) >= MIN_RETURN_DAYS
     ]
-    pool = in_window or offers
+    # Сначала удобное окно MIN..MAX; если в него не попал никто — берём вариант с любым
+    # зазором не меньше минимального (длинная поездка — это выбор человека, а вот
+    # «туда-обратно одним днём» выбором не бывает). Совсем нет подходящих — молчим:
+    # ссылка в никуда хуже отсутствия блока (отчёт 815).
+    in_window = [
+        offer for offer in with_return
+        if (_return_gap_days(offer) or 0) <= MAX_RETURN_DAYS
+    ]
+    pool = in_window or with_return
+    if not pool:
+        return None
     return min(pool, key=lambda offer: offer.price)
+
+
+def _months_ahead(start: date, count: int = 2) -> list[date]:
+    """Первые числа `count` месяцев начиная с месяца даты: текущий + следующие."""
+    months = []
+    year, month = start.year, start.month
+    for _ in range(count):
+        months.append(date(year, month, 1))
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return months
+
+
+def _not_before(value: str, moment: date) -> bool:
+    parsed = _as_date(value)
+    return parsed is not None and parsed >= moment
 
 
 def _is_expired(value: Any) -> bool:
