@@ -309,7 +309,11 @@ def _decide_from_dadata(text: str, suggestions: list, lat: float | None, lon: fl
         return None
 
     ranked = suggestions
-    if lat is not None and lon is not None:
+    # Близость к человеку — сильный сигнал для рабочего заказа («Ленина 40» — та, что
+    # рядом). Но в ДАЛЬНЕЙ поездке она всё ломает: настоящий Иркутск за 4000 км уезжает
+    # в конец списка, обрезается по MAX_CANDIDATES, и остаются одноимённые улицы возле
+    # дома (отчёт 824). Там доверяем порядку релевантности самой DaData.
+    if lat is not None and lon is not None and not long_distance:
         ranked = sorted(suggestions, key=lambda s: _haversine_km(lat, lon, s.lat, s.lon))
     distinct = _distinct_by_point(ranked)
     best = ranked[0]
