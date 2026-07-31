@@ -1811,14 +1811,17 @@ class HomeVisitRepository private constructor(
                 setRequestProperty("Authorization", "Bearer $apiKey")
             }
             connection.outputStream.use { it.write(body) }
-            val stream = if (connection.responseCode in 200..399) {
-                connection.inputStream
-            } else {
-                connection.errorStream
-            }
+            val code = connection.responseCode
+            // Запоминаем ВИД отказа: «сервер ответил ошибкой» и «до сервера не достучались»
+            // — разные беды, и человеку надо говорить разное. Раньше и то и другое
+            // сваливалось в «проверьте интернет», и человек искал проблему у себя, когда
+            // падал сервер (отчёт 857: /api/profile отвечал 500, экран винил связь).
+            lastCallFailedOnServer = code >= 500
+            val stream = if (code in 200..399) connection.inputStream else connection.errorStream
             val text = stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
             JSONObject(text)
         } catch (_: Exception) {
+            lastCallFailedOnServer = false
             null
         } finally {
             connection?.disconnect()
@@ -1843,6 +1846,13 @@ class HomeVisitRepository private constructor(
             null
         }
     }
+
+    /** Последний неуспешный вызов был отказом СЕРВЕРА (5xx), а не потерей сети. */
+    @Volatile
+    private var lastCallFailedOnServer: Boolean = false
+
+    /** Для экранов: показать «ошибка на сервере» вместо ложного «проверьте интернет». */
+    fun lastFailureWasServerError(): Boolean = lastCallFailedOnServer
 
     private fun getJson(url: String, apiKey: String): JSONObject? {
         if (url.isBlank() || apiKey.isBlank()) {

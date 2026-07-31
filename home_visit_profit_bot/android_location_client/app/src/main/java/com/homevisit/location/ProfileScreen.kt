@@ -178,7 +178,7 @@ internal fun ProfileScreen(
     val snapshot = profile.snapshot
     when {
         snapshot == null && profile.loading -> HomeLoading()
-        snapshot == null -> HomeError(onRetry = onRefresh)
+        snapshot == null -> HomeError(onRetry = onRefresh, serverError = profile.serverError)
         else -> Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),

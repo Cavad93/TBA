@@ -223,12 +223,22 @@ internal fun HomeLoading() {
 }
 
 @Composable
-internal fun HomeError(onRetry: () -> Unit) {
+internal fun HomeError(onRetry: () -> Unit, serverError: Boolean = false) {
     Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Нет связи с сервером", style = MaterialTheme.typography.titleMedium)
+            // Сервер ответил ошибкой — говорим это прямо. Раньше любая беда называлась
+            // «проверь интернет», и человек искал проблему у себя в телефоне, когда падал
+            // сервер (отчёт 857: /api/profile отвечал 500, а экран винил связь).
             Text(
-                "Не удалось загрузить сводку. Проверь интернет и попробуй ещё раз.",
+                if (serverError) "Ошибка на сервере" else "Нет связи с сервером",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                if (serverError) {
+                    "Сводка не собралась — это наша ошибка, не твоя. Интернет ни при чём, попробуй позже."
+                } else {
+                    "Не удалось загрузить сводку. Проверь интернет и попробуй ещё раз."
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

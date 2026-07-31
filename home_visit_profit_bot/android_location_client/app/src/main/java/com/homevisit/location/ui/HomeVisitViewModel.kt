@@ -313,7 +313,12 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             }
             profileStateFlow.update { it.copy(loading = true, error = false) }
             val snapshot = repository.fetchProfile(serverUrl, apiKey)
-            profileStateFlow.value = ProfileUiState(loading = false, snapshot = snapshot, error = snapshot == null)
+            profileStateFlow.value = ProfileUiState(
+                loading = false,
+                snapshot = snapshot,
+                error = snapshot == null,
+                serverError = snapshot == null && repository.lastFailureWasServerError(),
+            )
         }
     }
 
@@ -1923,6 +1928,8 @@ data class ProfileUiState(
     val loading: Boolean = false,
     val snapshot: ProfileSnapshot? = null,
     val error: Boolean = false,
+    /** Отказал СЕРВЕР (5xx), а не сеть — человеку надо сказать правду (отчёт 857). */
+    val serverError: Boolean = false,
 )
 
 /**
