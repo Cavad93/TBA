@@ -34,8 +34,10 @@ TRANSPORT_TYPES: dict[str, dict[str, object]] = {
     # из Москвы в Нижний Новгород никому не нужен: курьер пешком по городу и ходит.
     # Пока профили не собраны, маршрут для них считается по прямой — и об этом надо
     # честно сказать, а не молча выдать заниженные километры.
-    "bicycle": {"title": "Велосипед", "osrm": "cycling", "wear": 0.15, "fuel": False, "limited": True},
-    "foot": {"title": "Пешком", "osrm": "foot", "wear": 0.0, "fuel": False, "limited": True},
+    "bicycle": {"title": "Велосипед", "osrm": "cycling", "wear": 0.15, "fuel": False, "limited": True,
+                "fallback_speed": 15.0},
+    "foot": {"title": "Пешком", "osrm": "foot", "wear": 0.0, "fuel": False, "limited": True,
+             "fallback_speed": 5.0},
 }
 
 # Города, где пеший и велосипедный маршрут будут считаться по-настоящему. В остальных —
@@ -52,6 +54,23 @@ LIMITED_TRANSPORT_WARNING = (
 def is_limited(transport: str) -> bool:
     """Собран ли для этого транспорта настоящий маршрут, или пока считаем по прямой."""
     return bool(TRANSPORT_TYPES.get(transport, {}).get("limited"))
+
+
+def fallback_speed_kmh(settings) -> float:
+    """Скорость для запасного расчёта по прямой — ПО ТИПУ ТРАНСПОРТА.
+
+    Вне покрытия карт дорога считается по прямой, и до сих пор бралась одна и та же
+    «средняя скорость смены» — то есть автомобильные 30 км/ч. Пешеход получал время в
+    шесть раз меньше реального (5 км пешком «за 13 минут» вместо полутора часов), а с
+    ним и завышенный в шесть раз ₽/час: заказ, который физически не обслужить, выглядел
+    выгодным. Ходьба 5 км/ч и велосипед 15 км/ч — это не продуктовая настройка, а
+    физика; личная «средняя скорость» остаётся для тех, кто за рулём (отчёт 864).
+    """
+    transport = str(settings.get("transport_type", DEFAULT_TRANSPORT) or DEFAULT_TRANSPORT)
+    own = TRANSPORT_TYPES.get(transport, {}).get("fallback_speed")
+    if own:
+        return float(own)
+    return settings.get_float("default_avg_speed_kmh", 30.0)
 
 DEFAULT_TRANSPORT = "car"
 

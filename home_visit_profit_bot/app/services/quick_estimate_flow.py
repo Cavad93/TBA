@@ -48,7 +48,7 @@ from app.services.server_settings import (
     travelpayouts_token,
 )
 from app.services.tickets_service import tickets_block
-from app.services.vehicle_service import osrm_profile
+from app.services.vehicle_service import fallback_speed_kmh, osrm_profile
 from app.services.visit_parking import zone_at
 
 
@@ -224,13 +224,13 @@ class QuickEstimateService:
             # Вне покрытия карт — честная оценка по прямой, с пометкой.
             matrix = get_estimated_distance_matrix(
                 [origin, dest],
-                avg_speed_kmh=self.settings.get_float("avg_speed_kmh", 32),
+                avg_speed_kmh=fallback_speed_kmh(self.settings),
             )
             return matrix.distances_km[0][1], matrix.durations_minutes[0][1], True
         except RoutingError:
             matrix = get_estimated_distance_matrix(
                 [origin, dest],
-                avg_speed_kmh=self.settings.get_float("avg_speed_kmh", 32),
+                avg_speed_kmh=fallback_speed_kmh(self.settings),
             )
             return matrix.distances_km[0][1], matrix.durations_minutes[0][1], True
 

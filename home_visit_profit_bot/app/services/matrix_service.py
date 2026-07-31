@@ -16,6 +16,7 @@ from app.models import Point
 from app.repositories import DailyStatsRepository, SettingsRepository
 from app.services.overwork_pricing_service import build_pricing
 from app.services.profitability_service import vehicle_km_cost
+from app.services.vehicle_service import fallback_speed_kmh
 from app.services.routing_service import (
     OutsideCoverageError,
     RoutingError,
@@ -86,7 +87,10 @@ def build_matrix_response(
     min_hourly = pricing.effective_min_hourly
     min_marginal_hourly = pricing.effective_min_marginal_hourly
     outside_min_hourly = pricing.effective_outside_min_hourly
-    avg_speed = settings_repo.get_float("avg_speed_kmh", 30)
+    # Ключ «avg_speed_kmh» не существует в каталоге настроек (там default_avg_speed_kmh),
+    # поэтому здесь ВСЕГДА брался дефолт, что бы человек ни выставил. И одно число для
+    # всех типов транспорта: пешеход получал автомобильную скорость (отчёт 864).
+    avg_speed = fallback_speed_kmh(settings_repo)
     straight_line_factor = settings_repo.get_float("straight_line_factor", 1.35)
     # Режим порядка объезда обязан ехать в снимок: при выключенной оптимизации
     # сервер считает день по порядку Ленты (Этап 20), и телефон офлайн обязан

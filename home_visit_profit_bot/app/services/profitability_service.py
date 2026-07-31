@@ -14,7 +14,7 @@ from app.services.workload_service import calculate_candidate_workload
 from app.services.optimization_service import optimize_route, optimize_route_estimated, optimize_route_manual
 from app.services.overwork_pricing_service import build_pricing
 from app.services.vehicle_facts_service import measure
-from app.services.vehicle_service import KmCost, km_cost, osrm_profile
+from app.services.vehicle_service import KmCost, fallback_speed_kmh, km_cost, osrm_profile
 from app.services.routing_service import RoutingError, with_route_time_margin
 from app.services.server_settings import osrm_url as server_osrm_url, request_timeout_seconds as server_timeout
 
@@ -233,7 +233,9 @@ def calculate_remaining_route_summary(
                         current_point,
                         future_routable,
                         finish_point,
-                        avg_speed_kmh=day.planned_avg_speed_kmh,
+                        # Пешему и велосипедному — их скорость, а не «средняя за смену»:
+                        # иначе прямая считается автомобильной и время занижено в разы.
+                        avg_speed_kmh=fallback_speed_kmh(settings_repo),
                         straight_line_factor=settings_repo.get_float("straight_line_factor", 1.35),
                         respect_feed_order=respect_feed_order,
                     ),

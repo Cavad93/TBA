@@ -153,3 +153,23 @@ def test_a_bicycle_has_no_fuel_cost() -> None:
 def test_every_transport_type_has_a_routing_profile() -> None:
     for key, spec in TRANSPORT_TYPES.items():
         assert spec["osrm"] in {"driving", "cycling", "foot"}, key
+
+
+def test_fallback_speed_follows_transport_type() -> None:
+    """Вне покрытия карт скорость по прямой берётся ПО ТИПУ транспорта (отчёт 864).
+
+    Пешеход получал автомобильные 30 км/ч: 5 км «за 13 минут» вместо полутора часов,
+    и ₽/час завышался в шесть раз — заказ, который физически не обслужить, выглядел
+    выгодным. Плюс читался несуществующий ключ настройки («avg_speed_kmh» вместо
+    «default_avg_speed_kmh»), поэтому выставленное человеком значение не влияло вообще.
+    """
+    from app.services.vehicle_service import fallback_speed_kmh
+
+    # За рулём — личная средняя скорость смены.
+    assert fallback_speed_kmh(FakeSettings({"transport_type": "car", "default_avg_speed_kmh": 42})) == 42.0
+    assert fallback_speed_kmh(FakeSettings({"transport_type": "truck", "default_avg_speed_kmh": 42})) == 42.0
+    # Пешком и на велосипеде — физика, а не настройка смены.
+    assert fallback_speed_kmh(FakeSettings({"transport_type": "foot", "default_avg_speed_kmh": 42})) == 5.0
+    assert fallback_speed_kmh(FakeSettings({"transport_type": "bicycle", "default_avg_speed_kmh": 42})) == 15.0
+    # Настройка не задана — прежний дефолт для машины.
+    assert fallback_speed_kmh(FakeSettings({"transport_type": "car"})) == 30.0
