@@ -790,9 +790,14 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
                 refreshRouteInternal(serverUrl, apiKey)
                 startAutoOpenIfEnabled()
             } else {
+                // Обновляем ленту и на отказе (отчёт 806): заказ мог быть уже закрыт на
+                // сервере — ответ на прошлое «Готово» просто не доехал. Без обновления
+                // карточка-призрак висела бы вечно, и каждое нажатие било бы в ту же
+                // ошибку. Синк с сервером её уберёт, если закрытие уже случилось.
                 gpsHintState.value = GpsHintUiState(
                     message = "Не удалось завершить заказ — проверьте связь и повторите",
                 )
+                refreshRouteInternal(serverUrl, apiKey)
             }
         }
     }

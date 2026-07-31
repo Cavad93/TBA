@@ -377,12 +377,25 @@ class MobileVisitService:
         return self._route_response(day.id, "rejected", visit_id)
 
     def complete_visit(self, visit_id: int) -> dict[str, Any]:
+        """Завершить заказ. ИДЕМПОТЕНТНО: повтор на уже закрытом — успех, а не ошибка.
+
+        Почему так (отчёт 806 из TG). Телефон нажал «Готово», сервер заказ закрыл, а ОТВЕТ
+        не доехал (сеть моргнула). Приложение осталось с открытой карточкой и на каждое
+        следующее нажатие получало 400 «заказ не в статусе accepted» — кнопка навсегда
+        «переставала работать», причём молча. Человек видел заказ, которого на сервере
+        уже нет, и сделать с ним ничего не мог.
+
+        Повторный запрос просит то состояние, которое УЖЕ достигнуто, — это не ошибка.
+        Отвечаем как на обычное завершение: приложение обновит ленту и карточка уйдёт.
+        Ошибкой остаётся только настоящая рассинхронизация — чужой день или заказ,
+        который вообще не принимали (кандидат/отменённый).
+        """
         day = self._require_active_day()
         visit = self.visits.get(visit_id)
         if visit.work_day_id != day.id:
             raise ValueError("visit belongs to another day")
         completed = self.visits.complete_visit(visit_id)
-        if completed is None:
+        if completed is None and visit.status != "completed":
             raise ValueError("visit is not accepted")
         return self._route_response(day.id, "completed", visit_id)
 

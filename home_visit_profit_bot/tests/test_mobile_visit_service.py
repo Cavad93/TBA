@@ -620,3 +620,42 @@ def test_mobile_update_finish_requires_active_day(config) -> None:
     assert message != ""
 
 
+
+
+def test_complete_visit_is_idempotent(config) -> None:
+    """Отчёт 806: повтор «Готово» на уже закрытом заказе — успех, а не 400.
+
+    Телефон нажал «Готово», сервер закрыл заказ, ответ не доехал. Приложение осталось
+    с открытой карточкой и на каждое нажатие получало «заказ не в статусе accepted» —
+    кнопка навсегда переставала работать, причём молча. Повторный запрос просит уже
+    достигнутое состояние; это не ошибка.
+    """
+    with connect(config) as connection:
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        service = MobileVisitService(connection)
+        created = service.create_candidate(
+            {"address": "Невский 1", "income": 1000, "lat": 59.936, "lon": 30.315,
+             "route_km": 5, "route_minutes": 20}
+        )
+        service.accept_candidate(created.candidate.id)
+        first = service.complete_visit(created.candidate.id)
+        # Повтор не должен бросать — отвечаем как на обычное завершение.
+        second = service.complete_visit(created.candidate.id)
+
+    assert first["reason"] == "completed"
+    assert second["reason"] == "completed"  # повтор отвечает так же, а не падает
+
+
+def test_complete_visit_still_rejects_never_accepted(config) -> None:
+    """Настоящая рассинхронизация остаётся ошибкой: кандидат, который не принимали."""
+    import pytest
+
+    with connect(config) as connection:
+        WorkDayRepository(connection).create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31, finish_lat=59.93, finish_lon=30.31)
+        service = MobileVisitService(connection)
+        created = service.create_candidate(
+            {"address": "Невский 2", "income": 1000, "lat": 59.937, "lon": 30.316,
+             "route_km": 5, "route_minutes": 20}
+        )
+        with pytest.raises(ValueError):
+            service.complete_visit(created.candidate.id)  # ещё не принят
