@@ -84,6 +84,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -206,6 +207,8 @@ internal fun MoneyField(
     onValueChange: (String) -> Unit,
     label: String,
     modifier: Modifier = Modifier,
+    /** Крупное табличное моно для «приборных» полей (доход на Оценке). По умолчанию — как везде. */
+    textStyle: androidx.compose.ui.text.TextStyle = LocalTextStyle.current,
 ) {
     OutlinedTextField(
         modifier = modifier.fillMaxWidth(),
@@ -214,6 +217,7 @@ internal fun MoneyField(
         label = { Text(label) },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         singleLine = true,
+        textStyle = textStyle,
     )
 }
 

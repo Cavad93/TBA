@@ -93,6 +93,7 @@ import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.filled.Work
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -500,6 +501,7 @@ internal fun WorkScreen(uiState: HomeVisitUiState, workActions: WorkActions) {
             // «Частый тариф» из настроек; если не задан — доход последнего заказа смены.
             frequentIncome = uiState.appSettings.settingNumber("frequent_income")
                 ?: uiState.routeVisits.lastOrNull()?.income,
+            recentIncomes = uiState.routeVisits.map { it.income },
             templates = uiState.appSettings.addressTemplates(),
             recentAddresses = uiState.recentAddresses,
             personalTrip = uiState.personalTrip,
@@ -631,12 +633,22 @@ internal fun RecentAddressChips(addresses: List<String>, onPick: (String) -> Uni
     }
 }
 
-/** Форма «Оценить заказ»: только адрес, доход (с частым тарифом) и опциональная компания. */
+/**
+ * Форма «Оценить заказ»: адрес, доход и опциональная компания.
+ *
+ * Раскладка «приборная панель» (владелец выбрал её из пяти прототипов, 31.07.2026):
+ * доход — крупным табличным моно с пресетами в один тап, адрес компактной строкой,
+ * вспомогательные действия — рядом небольших кнопок. До этого экран был столбцом из
+ * шести блоков одинакового веса: главного на нём не читалось, а чисел — того, ради чего
+ * приложение существует, — не было вовсе.
+ */
 @Composable
 internal fun EvaluateForm(
     candidate: CandidateUiState,
     clinics: List<String>,
     frequentIncome: Double?,
+    /** Доходы уже принятых заказов смены — из них собираются пресеты (реальные суммы). */
+    recentIncomes: List<Double> = emptyList(),
     templates: List<AddressTemplate>,
     recentAddresses: List<String> = emptyList(),
     personalTrip: PersonalTripUi = PersonalTripUi(),
@@ -787,24 +799,29 @@ internal fun EvaluateForm(
         // Добавить фото со списком заказов (скриншот приложения-агрегатора) → OCR
         // распознаёт адреса. В личном режиме списка заказов нет — кнопки тоже.
         if (!personalMode) {
-            OutlinedButton(
-                onClick = {
-                    orderPhotoPicker.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Filled.AddAPhoto, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Добавить фото со списком заказов")
-            }
-            // Быстро задать старт/финиш смены прямо здесь: от старта считается дорога
-            // до заказа. Без него оценка честно предупреждает, что расчёт неполный.
-            OutlinedButton(onClick = onEditRoute, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Задать старт и финиш смены")
+            // «Приборная панель» (выбор владельца по прототипам): вспомогательные действия
+            // — компактным рядом, а не двумя кнопками во всю ширину. Раньше они весили
+            // столько же, сколько адрес и доход, и экран читался как список одинаковых
+            // блоков без главного.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                CompactAction(
+                    icon = Icons.Filled.AddAPhoto,
+                    label = "Фото списка",
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        orderPhotoPicker.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                        )
+                    },
+                )
+                // Быстро задать старт/финиш смены: от старта считается дорога до заказа.
+                // Без него оценка честно предупреждает, что расчёт неполный.
+                CompactAction(
+                    icon = Icons.Filled.PlayArrow,
+                    label = "Старт и финиш",
+                    modifier = Modifier.weight(1f),
+                    onClick = onEditRoute,
+                )
             }
         }
         // Набрали название шаблона — показываем, какой адрес за ним стоит.
@@ -817,12 +834,14 @@ internal fun EvaluateForm(
             )
         }
         if (!personalMode) {
-            MoneyField(value = incomeText, onValueChange = { incomeText = it }, label = "Доход, ₽")
-            if (frequentIncome != null && frequentIncome > 0 && incomeText.isBlank()) {
-                OutlinedButton(onClick = { incomeText = frequentIncome.toLong().toString() }) {
-                    Text("Частый тариф: ${money(frequentIncome)}")
-                }
-            }
+            IncomeDial(
+                value = incomeText,
+                onValue = { incomeText = it },
+                // Пресеты — РЕАЛЬНЫЕ суммы: частый тариф из настроек и доходы уже принятых
+                // сегодня заказов. Круглые числа «на глаз» выглядели бы приборно, но
+                // предлагали бы человеку то, чего у него не бывает.
+                presets = incomePresets(frequentIncome, recentIncomes),
+            )
             CompanyPicker(clinics = clinics, value = clinic, onValue = { clinic = it })
             // Поля «Источник заказа» и «Цена отклика» (Ф11.2) временно убраны из формы по
             // просьбе — проводка на бэкенде (order_source/response_cost) сохранена, вернуть
@@ -1443,4 +1462,74 @@ private fun RaisedTariffRow(estimate: CandidateEstimate) {
             )
         }
     }
+}
+
+/**
+ * Компактное вспомогательное действие «иконка + подпись» (раскладка «приборная панель»).
+ *
+ * Раньше «Добавить фото со списком заказов» и «Задать старт и финиш смены» были двумя
+ * кнопками во всю ширину и весили столько же, сколько адрес и доход. Экран читался как
+ * список одинаковых блоков, в котором не за что зацепиться (жалоба владельца, 31.07.2026).
+ */
+@Composable
+private fun CompactAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedButton(onClick = onClick, modifier = modifier, contentPadding = PaddingValues(vertical = 10.dp, horizontal = 8.dp)) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * Доход как приборная шкала: крупное табличное моно и пресеты в один тап.
+ *
+ * Числа в этом продукте ведут раскладку (дизайн-система: «numbers are loud, tabular mono»),
+ * а доход — самое частое поле на экране. Ввод остаётся обычным: пресет только подставляет
+ * сумму, стереть и вписать своё можно всегда.
+ */
+@Composable
+private fun IncomeDial(value: String, onValue: (String) -> Unit, presets: List<Double>) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        MoneyField(
+            value = value,
+            onValueChange = onValue,
+            label = "Доход, ₽",
+            textStyle = MaterialTheme.typography.headlineMedium.copy(fontFamily = JetBrainsMono),
+        )
+        if (presets.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                presets.forEach { preset ->
+                    val text = preset.toLong().toString()
+                    FilterChip(
+                        selected = value.trim() == text,
+                        onClick = { onValue(text) },
+                        label = { Text(money(preset), fontFamily = JetBrainsMono) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Пресеты дохода — ТОЛЬКО реальные суммы человека: частый тариф из настроек и доходы
+ * заказов текущей смены, по убыванию частоты. Круглые числа «на глаз» (700/1000/1500)
+ * выглядели бы приборно, но предлагали бы то, чего у него не бывает.
+ */
+private fun incomePresets(frequentIncome: Double?, recentIncomes: List<Double>): List<Double> {
+    val byFrequency = recentIncomes
+        .filter { it > 0 }
+        .groupingBy { it }
+        .eachCount()
+        .entries
+        .sortedWith(compareByDescending<Map.Entry<Double, Int>> { it.value }.thenByDescending { it.key })
+        .map { it.key }
+    return (listOfNotNull(frequentIncome?.takeIf { it > 0 }) + byFrequency)
+        .distinct()
+        .take(3)
 }
