@@ -44,13 +44,21 @@ def evaluate(inputs: dict) -> dict:
     Обязательные поля входа: income, extra_km, extra_drive_minutes, service_minutes,
     fuel_per_km, maintenance_per_km, before_hourly, after_hourly, min_hourly,
     min_marginal_hourly, is_base_district, existing_base_count. Необязательные:
-    outside_min_hourly (=min_hourly), outside_min_extra (=0), blocks_outside_zone (=False).
+    outside_min_hourly (=min_hourly), outside_min_extra (=0), blocks_outside_zone (=False),
+    extra_per_km (=0).
     """
     income = float(inputs["income"])
     extra_km = _zero_tiny(float(inputs["extra_km"]), epsilon=0.05)
     extra_drive_minutes = _zero_tiny(float(inputs["extra_drive_minutes"]), epsilon=0.5)
     service_minutes = float(inputs["service_minutes"])
-    cost_per_km = float(inputs["fuel_per_km"]) + float(inputs["maintenance_per_km"])
+    # Иные расходы ₽/км («Платон», платные дороги, мойка) — часть стоимости километра.
+    # Раньше вердикт их не видел, хотя экран «Километр стоит» и оценка поездки видели:
+    # одно число считалось двумя способами (отчёт 864).
+    cost_per_km = (
+        float(inputs["fuel_per_km"])
+        + float(inputs["maintenance_per_km"])
+        + float(inputs.get("extra_per_km", 0.0))
+    )
     before_hourly = float(inputs["before_hourly"])
     after_hourly = float(inputs["after_hourly"])
     min_hourly = float(inputs["min_hourly"])

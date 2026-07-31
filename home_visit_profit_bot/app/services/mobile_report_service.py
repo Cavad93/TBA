@@ -58,7 +58,11 @@ class MobileReportService:
         # арифметика («заправка дня или км×настройка» + топливо×0.8) — активный отчёт
         # расходился с оценками, а полный бак считался расходом одной смены.
         cost = vehicle_km_cost(self.settings, self.stats, route_time_factor=day.planned_route_time_factor)
-        fuel_expenses, amortization_expenses, _ = calculate_car_expenses(route_km, cost)
+        # Третьим элементом идёт ПОЛНАЯ стоимость дороги, включая иные расходы ₽/км
+        # («Платон», платные дороги). Раньше он выбрасывался в «_», и расходы дня в
+        # отчёте были занижены — при том что дневной расчёт и закрытие смены считали
+        # их правильно: три разных числа за один день (отчёт 864).
+        fuel_expenses, amortization_expenses, road_expenses = calculate_car_expenses(route_km, cost)
         # Лиды (цена отклика) — расход дня, как в live-экономике и истории
         # (Этапы 4/7/12 аудита): оплачены и у отменённых.
         lead_costs = sum(
@@ -66,7 +70,7 @@ class MobileReportService:
             for visit in day_visits
             if visit.status in {"accepted", "completed", "candidate", "cancelled"}
         )
-        total_expenses = _active_expenses(day, fuel_expenses, amortization_expenses) + lead_costs
+        total_expenses = _active_expenses(day, road_expenses) + lead_costs
         visit_income = sum(visit.income for visit in active_visits)
         gross_income = (
             visit_income
@@ -232,10 +236,12 @@ def _parse_month(value: str | None, today: date) -> tuple[int, int]:
     return int(parts[0]), int(parts[1])
 
 
-def _active_expenses(day: WorkDay, fuel_expenses: float, amortization_expenses: float) -> float:
+def _active_expenses(day: WorkDay, road_expenses: float) -> float:
+    """Расходы активного дня. `road_expenses` — ПОЛНАЯ стоимость дороги: топливо,
+    износ И иные расходы ₽/км. Раньше сюда шли только два первых слагаемых, и отчёт
+    занижал расходы там, где дневной расчёт считал их правильно (отчёт 864)."""
     return (
-        fuel_expenses
-        + amortization_expenses
+        road_expenses
         # Расходы на машину и аренда: с Этапа 6 аудита они реально записываются
         # в день — активный отчёт обязан их видеть, как видит их закрытие смены.
         + day.vehicle_expenses

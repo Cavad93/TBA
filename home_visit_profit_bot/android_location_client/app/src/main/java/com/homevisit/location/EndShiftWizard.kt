@@ -59,6 +59,9 @@ internal fun EndShiftWizard(
     endShift: EndShiftUiState,
     onFinish: (EndDayDetails) -> Unit,
     onDismiss: () -> Unit,
+    /** Пешком или на велосипеде: вопросы про заправку, одометр и часы за рулём не
+     *  задаём — их не существует у этого человека (отчёт 864, п.9). */
+    fuelless: Boolean = false,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -76,6 +79,7 @@ internal fun EndShiftWizard(
                 LoadingStep()
             } else {
                 WizardContent(
+                    steps = questionSteps(fuelless),
                     preview = endShift.preview,
                     message = endShift.message,
                     onFinish = onFinish,
@@ -122,8 +126,16 @@ private val QUESTION_STEPS = listOf(
     WizardStep.WorkloadRating,
 )
 
+/** Шаги под транспорт: у пешехода и велосипедиста нет ни заправки, ни одометра,
+ *  ни часов за рулём — спрашивать о них значит требовать выдумать число. */
+private val CAR_ONLY_STEPS = setOf(WizardStep.Fuel, WizardStep.Odometer, WizardStep.Driving)
+
+private fun questionSteps(fuelless: Boolean): List<WizardStep> =
+    if (fuelless) QUESTION_STEPS.filterNot { it in CAR_ONLY_STEPS } else QUESTION_STEPS
+
 @Composable
 private fun WizardContent(
+    steps: List<WizardStep>,
     preview: EndDayPreview?,
     message: String,
     onFinish: (EndDayDetails) -> Unit,
@@ -187,11 +199,11 @@ private fun WizardContent(
     }
 
     fun next() {
-        val index = QUESTION_STEPS.indexOf(step)
-        if (step == WizardStep.WorkloadRating || index == QUESTION_STEPS.lastIndex) {
+        val index = steps.indexOf(step)
+        if (step == WizardStep.WorkloadRating || index < 0 || index == steps.lastIndex) {
             finish()
         } else {
-            step = QUESTION_STEPS[index + 1]
+            step = steps[index + 1]
         }
     }
 

@@ -24,6 +24,8 @@ object ProfitabilityCalculator {
         val serviceMinutes: Double,
         val fuelPerKm: Double,
         val maintenancePerKm: Double,
+        /** Иные расходы ₽/км («Платон», платные дороги, мойка) — часть стоимости километра. */
+        val extraPerKm: Double = 0.0,
         val beforeHourly: Double,
         val afterHourly: Double,
         val minHourly: Double,
@@ -55,7 +57,7 @@ object ProfitabilityCalculator {
     fun evaluate(input: Input): Result {
         val extraKm = zeroTiny(input.extraKm, 0.05)
         val extraDrive = zeroTiny(input.extraDriveMinutes, 0.5)
-        val costPerKm = input.fuelPerKm + input.maintenancePerKm
+        val costPerKm = input.fuelPerKm + input.maintenancePerKm + input.extraPerKm
         val outsideMinHourly = input.outsideMinHourly ?: input.minHourly
 
         val paidExtraKm = maxOf(0.0, extraKm)

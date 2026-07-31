@@ -45,7 +45,9 @@ def snapshot_version(
     """
     order = "1" if auto_optimize else "0"
     return (
-        f"km{cost.fuel_per_km:.2f}_{cost.maintenance_per_km:.2f}"
+        # Иные расходы входят в версию: иначе снимок «не менялся», а числа менялись —
+        # и старый кеш на телефоне молча считал бы дешевле сервера (отчёт 864).
+        f"km{cost.fuel_per_km:.2f}_{cost.maintenance_per_km:.2f}_{cost.extra_per_km:.2f}"
         f"|mh{min_hourly:.0f}|sm{service_minutes:.0f}|f{straight_line_factor:.2f}|o{order}"
     )
 
@@ -131,7 +133,10 @@ def build_matrix_response(
         "coefficients": {
             "fuel_per_km": round(cost.fuel_per_km, 4),
             "maintenance_per_km": round(cost.maintenance_per_km, 4),
-            "cost_per_km": round(cost.fuel_per_km + cost.maintenance_per_km, 4),
+            # Иные расходы ₽/км обязаны доехать до телефона: офлайн-вердикт считает
+            # ту же стоимость километра, что и сервер (отчёт 864).
+            "extra_per_km": round(cost.extra_per_km, 4),
+            "cost_per_km": round(cost.total, 4),
             "min_hourly_income": min_hourly,
             "min_marginal_hourly_income": min_marginal_hourly,
             "outside_zone_min_hourly_income": outside_min_hourly,

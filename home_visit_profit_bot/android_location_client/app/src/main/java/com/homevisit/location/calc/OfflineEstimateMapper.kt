@@ -54,6 +54,7 @@ object OfflineEstimateMapper {
             serviceMinutes = c.optDouble("service_minutes", 20.0),
             fuelPerKm = c.optDouble("fuel_per_km", 0.0),
             maintenancePerKm = c.optDouble("maintenance_per_km", 0.0),
+            extraPerKm = c.optDouble("extra_per_km", 0.0),
             minHourly = c.optDouble("min_hourly_income", 600.0),
             minMarginalHourly = c.optDouble("min_marginal_hourly_income", 600.0),
             outsideMinHourly = c.optDouble("outside_zone_min_hourly_income", 600.0),
@@ -75,7 +76,7 @@ object OfflineEstimateMapper {
             cancelledLeadCosts = cancelledLeadCosts,
         )
 
-        val costPerKm = coeff.fuelPerKm + coeff.maintenancePerKm
+        val costPerKm = coeff.fuelPerKm + coeff.maintenancePerKm + coeff.extraPerKm
         val extraKm = if (costPerKm > 0) result.extraCarCost / costPerKm else 0.0
         val extraDrive = (result.extraTotalMinutes - coeff.serviceMinutes).coerceAtLeast(0.0)
 

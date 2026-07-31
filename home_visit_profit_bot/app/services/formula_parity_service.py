@@ -62,7 +62,9 @@ def check_visit_parity(
         return None  # старый клиент без расчёта на телефоне — сверять нечего
 
     cost = vehicle_km_cost(settings_repo, stats_repo)
-    cost_per_km = cost.fuel_per_km + cost.maintenance_per_km
+    # Иные расходы ₽/км — часть километра (отчёт 864). Без них СТОРОЖ паритета сам
+    # считал бы по старой формуле и писал ложные расхождения на каждый заказ.
+    cost_per_km = cost.total
     server_marginal = _server_marginal_profit(float(income), float(extra_km), cost_per_km)
     delta = abs(float(client_marginal_profit) - server_marginal)
 

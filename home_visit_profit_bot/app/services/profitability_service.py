@@ -26,14 +26,23 @@ def _safe_hourly(net_profit: float, total_minutes: float) -> float:
 
 
 def calculate_car_expenses(car_km: float, cost: KmCost) -> tuple[float, float, float]:
-    """Расходы на машину за пробег: топливо, обслуживание и износ, всё вместе.
+    """Расходы на дорогу за пробег: топливо, обслуживание и износ, ИНЫЕ расходы.
 
     Стоимость километра считает vehicle_service — там же решается, что берётся из
     таблицы, что измерено по заправкам и расходам, и что оплачивает компания, а не вы.
+
+    «Иные расходы ₽/км» (для грузовика это «Платон», у других — платные дороги, мойка,
+    лизинг) до сих пор в ЭТУ сумму не входили. Получалось, что одно и то же число
+    считалось двумя способами: экран «Километр стоит» и оценка личной поездки брали их,
+    а вердикт по заказу и дневной расчёт — нет. Для дальнобойщика это самая крупная
+    статья, и без неё заказ выглядел выгоднее, чем есть (отчёт 864).
+
+    Третьим элементом возвращается ПОЛНАЯ сумма — её и берут вызывающие.
     """
     fuel_expenses = car_km * cost.fuel_per_km
     maintenance_expenses = car_km * cost.maintenance_per_km
-    return fuel_expenses, maintenance_expenses, fuel_expenses + maintenance_expenses
+    extra_expenses = car_km * cost.extra_per_km
+    return fuel_expenses, maintenance_expenses, fuel_expenses + maintenance_expenses + extra_expenses
 
 
 def vehicle_km_cost(

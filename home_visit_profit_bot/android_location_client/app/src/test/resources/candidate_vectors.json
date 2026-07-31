@@ -195,6 +195,34 @@
     }
   },
   {
+    "name": "extra_cost_per_km_counts",
+    "inputs": {
+      "income": 3000,
+      "extra_km": 40,
+      "extra_drive_minutes": 50,
+      "service_minutes": 20,
+      "fuel_per_km": 7.0,
+      "maintenance_per_km": 3.0,
+      "extra_per_km": 4.0,
+      "before_hourly": 700,
+      "after_hourly": 750,
+      "min_hourly": 600,
+      "min_marginal_hourly": 600,
+      "is_base_district": true,
+      "existing_base_count": 6
+    },
+    "expected": {
+      "marginal_profit": 2440.0,
+      "marginal_hourly": 2091.43,
+      "marginal_per_km": 61.0,
+      "extra_car_cost": 560.0,
+      "extra_total_minutes": 70.0,
+      "decision": "ОДНОЗНАЧНО ДА",
+      "verdict": "go",
+      "score": 96
+    }
+  },
+  {
     "name": "next_door_zero_km",
     "inputs": {
       "income": 1000,

@@ -32,6 +32,8 @@ object OfflineVerdict {
         val serviceMinutes: Double,
         val fuelPerKm: Double,
         val maintenancePerKm: Double,
+        /** Иные расходы ₽/км — часть стоимости километра, как на сервере (отчёт 864). */
+        val extraPerKm: Double = 0.0,
         val minHourly: Double,
         val minMarginalHourly: Double,
         val outsideMinHourly: Double? = null,
@@ -55,7 +57,7 @@ object OfflineVerdict {
             input.distances, input.durations, input.existingCount, input.anchors,
             respectFeedOrder = !input.autoOptimize,
         )
-        val costPerKm = input.fuelPerKm + input.maintenancePerKm
+        val costPerKm = input.fuelPerKm + input.maintenancePerKm + input.extraPerKm
         val incomeSum = input.existingIncomes.sum()
 
         val beforeNet = incomeSum - extra.beforeKm * costPerKm - input.cancelledLeadCosts
@@ -74,6 +76,7 @@ object OfflineVerdict {
                 serviceMinutes = input.serviceMinutes,
                 fuelPerKm = input.fuelPerKm,
                 maintenancePerKm = input.maintenancePerKm,
+                extraPerKm = input.extraPerKm,
                 beforeHourly = beforeHourly,
                 afterHourly = afterHourly,
                 minHourly = input.minHourly,

@@ -1146,6 +1146,9 @@ class HomeVisitRepository private constructor(
             costPerKm = c.optDouble("cost_per_km", 0.0),
             fuelPerKm = c.optDouble("fuel_per_km", 0.0),
             maintenancePerKm = c.optDouble("maintenance_per_km", 0.0),
+            // Иные расходы ₽/км из снимка: офлайн обязан считать ту же стоимость
+            // километра, что и сервер (отчёт 864).
+            extraPerKm = c.optDouble("extra_per_km", 0.0),
             minHourlyIncome = c.optDouble("min_hourly_income", 600.0),
             minMarginalHourlyIncome = c.optDouble("min_marginal_hourly_income", 600.0),
             outsideZoneMinHourlyIncome = c.optDouble("outside_zone_min_hourly_income", 600.0),

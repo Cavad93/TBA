@@ -377,6 +377,10 @@ internal fun RouteScreen(uiState: HomeVisitUiState, workActions: WorkActions, se
         }
         EndShiftWizard(
             endShift = uiState.endShift,
+            // Пешком и на велосипеде вопросы про заправку, одометр и часы за рулём
+            // не задаём: таких данных у человека просто нет (отчёт 864, п.9).
+            fuelless = uiState.appSettings.settingText("transport_type")
+                .let { it == "foot" || it == "bicycle" },
             onFinish = { details ->
                 wizardOpen = false
                 workActions.onEndDayWithDetails(details)

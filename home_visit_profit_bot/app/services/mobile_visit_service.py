@@ -50,7 +50,7 @@ from app.services.visit_navigation import attach_navigation, navigation_settings
 from app.services.workload_service import day_overwork_debt
 from app.services.visit_parking import hint_from_hit, zone_at
 from app.services.parking_cost_service import parking_money
-from app.services.vehicle_service import osrm_profile, transport_type
+from app.services.vehicle_service import is_limited, osrm_profile, transport_type
 from app.services.server_settings import nominatim_url as server_nominatim_url, request_timeout_seconds as server_timeout
 
 
@@ -339,10 +339,22 @@ class MobileVisitService:
         # Дорога считалась по прямой (карты молчали или адрес вне покрытия) — цифры
         # приблизительные. Молчать нельзя: раньше это выглядело как точный расчёт.
         if calculation.after_route.estimated:
-            estimate_warnings = estimate_warnings + [
-                "Дорога посчитана по прямой (сервис карт недоступен или адрес вне "
-                "покрытия) — километры и время приблизительные."
-            ]
+            # Пешему и велосипедному покрытие собрано только по Москве и Петербургу,
+            # поэтому за их пределами прямая — не редкость, а норма. Говорим об этом
+            # ПЕРСОНАЛЬНО: общий текст «сервис карт недоступен» звучит как временный
+            # сбой, хотя для этого человека так будет всегда (отчёт 864, п.8). Проверка
+            # is_limited() существовала, но не вызывалась ниоткуда — мёртвый код.
+            if is_limited(transport_type(self.settings)):
+                estimate_warnings = estimate_warnings + [
+                    "Точный пеший и велосипедный маршрут собран только по Москве и "
+                    "Петербургу. Здесь дорога считается по прямой — километры и время "
+                    "приблизительные, и вердикт вместе с ними."
+                ]
+            else:
+                estimate_warnings = estimate_warnings + [
+                    "Дорога посчитана по прямой (сервис карт недоступен или адрес вне "
+                    "покрытия) — километры и время приблизительные."
+                ]
         # Сохраняем вердикт заказа ('go'|'edge'|'skip'), чтобы экраны «Смена» и
         # история могли показывать его без повторного пересчёта профитабельности.
         verdict = decision_to_verdict(calculation.decision)

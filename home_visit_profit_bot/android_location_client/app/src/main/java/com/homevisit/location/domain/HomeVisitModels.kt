@@ -920,6 +920,9 @@ data class MatrixSnapshot(
     val costPerKm: Double,
     val fuelPerKm: Double,
     val maintenancePerKm: Double,
+    /** Иные расходы ₽/км («Платон», платные дороги): офлайн считает ту же стоимость
+     *  километра, что и сервер (отчёт 864). */
+    val extraPerKm: Double = 0.0,
     val minHourlyIncome: Double,
     val minMarginalHourlyIncome: Double,
     val outsideZoneMinHourlyIncome: Double,

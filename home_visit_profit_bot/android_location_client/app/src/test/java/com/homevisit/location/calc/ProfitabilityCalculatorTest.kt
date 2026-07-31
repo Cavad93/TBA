@@ -27,6 +27,8 @@ class ProfitabilityCalculatorTest {
         serviceMinutes = j.getDouble("service_minutes"),
         fuelPerKm = j.getDouble("fuel_per_km"),
         maintenancePerKm = j.getDouble("maintenance_per_km"),
+        // Иные расходы ₽/км («Платон») — часть стоимости километра (отчёт 864).
+        extraPerKm = j.optDouble("extra_per_km", 0.0),
         beforeHourly = j.getDouble("before_hourly"),
         afterHourly = j.getDouble("after_hourly"),
         minHourly = j.getDouble("min_hourly"),

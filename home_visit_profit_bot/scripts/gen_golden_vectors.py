@@ -76,6 +76,15 @@ CASES: list[dict] = [
         "is_base_district": False, "existing_base_count": 6, "blocks_outside_zone": True,
     },
     {
+        # Отчёт 864: «иные расходы ₽/км» (для грузовика — «Платон») входят в стоимость
+        # километра и обязаны считаться одинаково на сервере и на телефоне.
+        "name": "extra_cost_per_km_counts",
+        "income": 3000, "extra_km": 40, "extra_drive_minutes": 50, "service_minutes": 20,
+        "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "extra_per_km": 4.0,
+        "before_hourly": 700, "after_hourly": 750, "min_hourly": 600,
+        "min_marginal_hourly": 600, "is_base_district": True, "existing_base_count": 6,
+    },
+    {
         "name": "next_door_zero_km",
         "income": 1000, "extra_km": 0.02, "extra_drive_minutes": 0.3, "service_minutes": 20,
         "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "before_hourly": 700,

@@ -162,6 +162,9 @@ class KmCost:
     maintenance_measured: bool
     fuel_paid_by_me: bool
     maintenance_paid_by_me: bool
+    # Транспорт без топлива (пешком, велосипед): объяснение не должно говорить о
+    # топливе вообще — ни «оплачиваете вы», ни «оплачивает компания» (отчёт 864, п.7).
+    fuelless: bool = False
 
     @property
     def total(self) -> float:
@@ -183,24 +186,33 @@ class KmCost:
 
     def explanation(self) -> str:
         if self.mode == "exact":
-            text = f"Стоимость километра задана вручную: {self.fuel_per_km:.1f} ₽/км."
+            # Берём обе графы: у безтопливного транспорта точная сумма лежит в
+            # обслуживании, и печатать «0.0 ₽/км» было прямой неправдой (п.4).
+            exact_shown = self.fuel_per_km + self.maintenance_per_km
+            text = f"Стоимость километра задана вручную: {exact_shown:.1f} ₽/км."
             if self.extra_per_km > 0:
                 text += f" Плюс иные расходы {self.extra_per_km:.1f} ₽/км — итого {self.total:.1f} ₽/км."
             return text
         parts = []
-        if self.fuel_paid_by_me:
+        if self.fuelless:
+            # Пешком и на велосипеде топлива нет вовсе — молчим о нём, вместо того
+            # чтобы сообщать, что его «оплачивает компания» (п.7).
+            pass
+        elif self.fuel_paid_by_me:
             source = "по вашим заправкам" if self.fuel_measured else "по цене и расходу из настроек"
             parts.append(f"топливо {self.fuel_per_km:.1f} ₽/км ({source})")
         else:
             parts.append("топливо оплачивает компания")
-        if self.maintenance_paid_by_me:
+        if self.fuelless and self.maintenance_per_km <= 0:
+            parts.append("расходов на транспорт нет")
+        elif self.maintenance_paid_by_me:
             source = (
                 "по вашим расходам на машину"
                 if self.maintenance_measured
                 else f"коэффициент {self.wear_coefficient:.2f}"
             )
             parts.append(f"обслуживание и износ {self.maintenance_per_km:.1f} ₽/км ({source})")
-        else:
+        elif not self.fuelless:
             parts.append("обслуживание оплачивает компания")
         if self.extra_per_km > 0:
             parts.append(f"иные расходы {self.extra_per_km:.1f} ₽/км (внесли вы)")
@@ -286,9 +298,15 @@ def km_cost(
 
     if mode == "exact":
         exact = max(0.0, settings.get_float("exact_cost_per_km", 0.0))
+        # Точная стоимость километра — это ЦЕЛИКОМ стоимость километра, а не «топливо».
+        # Раньше она клалась в графу топлива и обнулялась всем, у кого топлива нет:
+        # велосипедист, знающий свой рубль за километр, получал ноль, а объяснение
+        # писало «задана вручную: 0.0 ₽/км» (отчёт 864, п.4). Теперь у безтопливного
+        # транспорта та же сумма живёт в графе обслуживания — цифра доезжает до денег.
+        fuels = uses_fuel(settings)
         return KmCost(
-            fuel_per_km=exact if fuel_mine else 0.0,
-            maintenance_per_km=0.0,
+            fuel_per_km=exact if (fuels and fuel_mine) else 0.0,
+            maintenance_per_km=0.0 if fuels else (exact if maintenance_mine else 0.0),
             extra_per_km=extra,
             mode=mode,
             wear_coefficient=0.0,
@@ -297,6 +315,7 @@ def km_cost(
             maintenance_measured=False,
             fuel_paid_by_me=fuel_mine,
             maintenance_paid_by_me=maintenance_mine,
+            fuelless=not fuels,
         )
 
     fuel_measured = measured_fuel_per_km is not None and measured_fuel_per_km > 0
@@ -316,7 +335,10 @@ def km_cost(
     )
 
     maintenance_measured = measured_maintenance_per_km is not None and measured_maintenance_per_km > 0
-    if maintenance_measured:
+    # Измеренное обслуживание считается по расходам на МАШИНУ и одометру. Пересел на
+    # велосипед или пошёл пешком — эти рубли больше не тратятся, но раньше продолжали
+    # начисляться на каждый пройденный километр (отчёт 864, п.5).
+    if maintenance_measured and uses_fuel(settings):
         maintenance_per_km = float(measured_maintenance_per_km)
     else:
         # Приблизительная модель: обслуживание как доля от топлива. У велосипеда и
@@ -340,6 +362,7 @@ def km_cost(
         maintenance_measured=bool(maintenance_measured),
         fuel_paid_by_me=fuel_mine,
         maintenance_paid_by_me=maintenance_mine,
+        fuelless=not uses_fuel(settings),
     )
 
 

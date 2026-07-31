@@ -730,6 +730,13 @@ private fun FuelCostPerKmHint(textEdits: Map<String, String>, fields: List<Setti
         return parseNumber(textEdits[key] ?: field.textValue)
     }
 
+    // Пешеходу и велосипедисту топливо не считается вовсе — сервер отдаёт 0 ₽/км.
+    // Раньше карточка всё равно рисовала «Топливо: 7 ₽ за километр», и два экрана
+    // противоречили друг другу в деньгах (отчёт 864, п.6).
+    val transport = fields.firstOrNull { it.key == "transport_type" }
+        ?.let { textEdits[it.key] ?: it.textValue }
+    if (transport == "foot" || transport == "bicycle") return
+
     val price = value("fuel_price_per_liter") ?: return
     val consumption = value("fuel_consumption_l_per_100km") ?: return
     if (price <= 0 || consumption <= 0) return
@@ -742,8 +749,9 @@ private fun FuelCostPerKmHint(textEdits: Map<String, String>, fields: List<Setti
             // Честно: это только топливная часть. Вердикт считается по полной цене
             // километра (топливо + износ), а измеренное по заправкам вытесняет модель.
             "Топливо: ${money(price * consumption / 100)} за километр. В оценке заказа " +
-                "к этому добавляется износ, а при накопленных заправках и расходах " +
-                "приложение считает по ним, а не по этой формуле.",
+                "к этому добавляется износ и «иные расходы за км», если вы их задали, " +
+                "а при накопленных заправках и расходах приложение считает по ним, " +
+                "а не по этой формуле.",
             modifier = Modifier.padding(12.dp),
             style = MaterialTheme.typography.bodySmall,
             color = VerdictColors.onGoContainer,
