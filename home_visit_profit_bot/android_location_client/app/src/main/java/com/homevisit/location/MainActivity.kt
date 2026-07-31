@@ -585,7 +585,7 @@ internal data class WorkActions(
     val onClearEndShift: () -> Unit,
     val onCalculateVisit: (String, Double, String, Double?, Double?, String?, Double?) -> Unit,
     /** Личная поездка (Ф11.5): «во сколько обойдётся» по адресу, без дохода и вердикта. */
-    val onPersonalEstimate: (String) -> Unit,
+    val onPersonalEstimate: (String, Boolean) -> Unit,
     val onClearPersonalEstimate: () -> Unit,
     /** Голос через наш ASR (Ф14.4): байты записи → текст колбэком (для телефонов без Google). */
     val onServerVoiceTranscribe: (ByteArray, (String?) -> Unit) -> Unit,
@@ -675,7 +675,7 @@ internal fun HomeVisitApp(
     onPrepareEndShift: (String, String) -> Unit,
     onClearEndShift: () -> Unit,
     onCalculateVisit: (String, String, String, Double, String, Double?, Double?, String?, Double?) -> Unit,
-    onPersonalEstimate: (String, String, String) -> Unit,
+    onPersonalEstimate: (String, String, String, Boolean) -> Unit,
     onClearPersonalEstimate: () -> Unit,
     onServerVoiceTranscribe: (String, String, ByteArray, (String?) -> Unit) -> Unit,
     onParseOrderPhoto: (String, String, ByteArray) -> Unit,
@@ -773,7 +773,7 @@ internal fun HomeVisitApp(
         onCalculateVisit = { address, income, clinic, routeKm, routeMinutes, source, responseCost ->
             onCalculateVisit(serverUrl, apiKey, address, income, clinic, routeKm, routeMinutes, source, responseCost)
         },
-        onPersonalEstimate = { address -> onPersonalEstimate(serverUrl, apiKey, address) },
+        onPersonalEstimate = { address, oneWay -> onPersonalEstimate(serverUrl, apiKey, address, oneWay) },
         onClearPersonalEstimate = onClearPersonalEstimate,
         onServerVoiceTranscribe = { audio, cb -> onServerVoiceTranscribe(serverUrl, apiKey, audio, cb) },
         onParseOrderPhoto = { bytes -> onParseOrderPhoto(serverUrl, apiKey, bytes) },

@@ -797,8 +797,11 @@ class HomeVisitRepository private constructor(
         query: String,
         lat: Double? = null,
         lon: Double? = null,
+        /** Личная поездка: искать по всей стране, а не вокруг человека (отчёт 824). */
+        longDistance: Boolean = false,
     ): AddressSuggestResult = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("query", query.trim())
+        if (longDistance) payload.put("long_distance", true)
         // Текущая точка GPS, если есть: по ней сервер понимает город и разрешает
         // неоднозначные адреса по близости, не спрашивая город руками.
         if (lat != null && lon != null) {
@@ -903,8 +906,11 @@ class HomeVisitRepository private constructor(
         mode: String? = null,
         lat: Double? = null,
         lon: Double? = null,
+        /** «Только туда»: сервер посчитает односторонний билет, а не туда-обратно. */
+        oneWay: Boolean = false,
     ): QuickEstimateResult = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("address", address.trim())
+        if (oneWay) payload.put("one_way", true)
         if (fromLat != null && fromLon != null) {
             payload.put("from_lat", fromLat)
             payload.put("from_lon", fromLon)

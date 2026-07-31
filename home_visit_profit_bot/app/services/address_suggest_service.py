@@ -76,11 +76,18 @@ def too_far_to_trust(ref_lat: float | None, ref_lon: float | None,
 
 
 def suggest(query: str, connection, settings: SettingsRepository, user_id: int,
-            lat: float | None = None, lon: float | None = None) -> dict:
+            lat: float | None = None, lon: float | None = None,
+            long_distance: bool = False) -> dict:
     """Разобрать адрес слоями. Возвращает {"resolved": ...} или {"candidates": [...]}.
 
     lat/lon — текущее местоположение пользователя (по GPS), если клиент его прислал.
     Оно разрешает неоднозначные названия улиц по близости, не заставляя указывать город.
+
+    long_distance — поездка ЗАВЕДОМО дальняя (личная поездка в другой город). Тогда
+    защиты, придуманные для рабочих заказов, выключаются: работа на дому не выезжает
+    за пределы города, а «Иркутск» из Петербурга — это норма, а не опечатка. Без этого
+    флага «Иркутск» превращался в «Санкт-Петербург, ул Иркутская»: подсказки смещены к
+    своему городу, а дальний результат отсекал порог расстояния (отчёты 13–14, 824).
     """
     text = (query or "").strip()
     if not text:
@@ -109,15 +116,18 @@ def suggest(query: str, connection, settings: SettingsRepository, user_id: int,
     region = settings.get("default_region", "Ленинградская область") or "Ленинградская область"
 
     # 1. DaData — сильнейший слой на грязном вводе (опечатки, раскладка, сокращения).
-    suggestions = _fetch_dadata(text, connection, city, user_id, lat, lon)
-    decision = _decide_from_dadata(text, suggestions, lat, lon, city)
+    suggestions = _fetch_dadata(text, connection, city, user_id, lat, lon,
+                                prefer_any_city=long_distance)
+    decision = _decide_from_dadata(text, suggestions, lat, lon, city,
+                                   long_distance=long_distance)
     if decision is not None:
         return decision
 
     # 2. Nominatim: уверенное совпадение — resolved; слабое или далёкое — в кандидаты.
     nominatim_hit = _try_nominatim(text, connection, settings, city, region)
     if (nominatim_hit and _is_confident(text, nominatim_hit)
-            and not too_far_to_trust(lat, lon, nominatim_hit.lat, nominatim_hit.lon)):
+            and (long_distance
+                 or not too_far_to_trust(lat, lon, nominatim_hit.lat, nominatim_hit.lon))):
         # Тот же порог, что и в DaData-ветке: если DaData промолчал (нет ключа/лимит/пусто),
         # уверенный, но далёкий хит Nominatim по опечатке («туристическая» → одноимённая
         # улица в другом регионе) молча НЕ резолвим — падаем в кандидаты ниже, где виден
@@ -209,7 +219,8 @@ def reverse_city(lat: float, lon: float, connection, user_id: int) -> str | None
 
 
 def _fetch_dadata(text: str, connection, city: str, user_id: int,
-                  lat: float | None = None, lon: float | None = None) -> list:
+                  lat: float | None = None, lon: float | None = None,
+                  prefer_any_city: bool = False) -> list:
     """Подсказки DaData с учётом лимита и приоритетом города по GPS.
 
     Порядок: сначала город из настроек; пусто — город по ТЕКУЩЕМУ GPS (человек стоит
@@ -230,7 +241,14 @@ def _fetch_dadata(text: str, connection, city: str, user_id: int,
         )
 
     try:
-        found = _query(city)
+        # Дальняя поездка: сперва ищем ПО ВСЕЙ СТРАНЕ. Иначе подсказка, смещённая к
+        # своему городу, на «Иркутск» отвечает «СПб, ул Иркутская» — формально совпало,
+        # по смыслу мимо (отчёт 824). Для рабочих заказов порядок обратный: там свой
+        # город и есть самый вероятный ответ.
+        if prefer_any_city:
+            found = _query(None) or _query(city)
+        else:
+            found = _query(city)
         if not found and lat is not None and lon is not None:
             gps_city = reverse_city(lat, lon, connection, user_id)
             if gps_city and gps_city != city:
@@ -280,7 +298,7 @@ def _house_matches(text: str, house: str) -> bool:
 
 
 def _decide_from_dadata(text: str, suggestions: list, lat: float | None, lon: float | None,
-                        city: str) -> dict | None:
+                        city: str, long_distance: bool = False) -> dict | None:
     """По подсказкам DaData решить: resolved, кандидаты — или пас (None) следующим слоям.
 
     Точный дом (есть house И он совпал с введённым) — resolved. Иначе кандидаты на
@@ -302,13 +320,14 @@ def _decide_from_dadata(text: str, suggestions: list, lat: float | None, lon: fl
     # человек увидит подмену и введёт точнее (отчёт 13 из TG). Прежде «GPS есть → резолвим»
     # игнорировало расстояние, и близость лишь сортировала уже пришедшие подсказки.
     if best.house and _house_matches(text, best.house):
-        if lat is not None and lon is not None:
+        if lat is not None and lon is not None and not long_distance:
             if _haversine_km(lat, lon, best.lat, best.lon) <= MAX_GPS_RESOLVE_KM:
                 return {"resolved": _resolved(best.value, best.lat, best.lon, source="dadata",
                                               city=best.city or city)}
             # Далёкий дом — не резолвим молча, падаем в кандидаты ниже.
         elif len(distinct) == 1:
-            # Без GPS судить о расстоянии нечем — единственному точному дому доверяем.
+            # Без GPS (или в дальней поездке) судить о расстоянии нечем/незачем —
+            # единственному точному дому доверяем.
             return {"resolved": _resolved(best.value, best.lat, best.lon, source="dadata",
                                           city=best.city or city)}
     # Улица без дома или несколько разных мест — отдаём на выбор.

@@ -641,7 +641,7 @@ internal fun EvaluateForm(
     recentAddresses: List<String> = emptyList(),
     personalTrip: PersonalTripUi = PersonalTripUi(),
     onCalculate: (String, Double, String, Double?, Double?, String?, Double?) -> Unit,
-    onPersonalEstimate: (String) -> Unit = {},
+    onPersonalEstimate: (String, Boolean) -> Unit = { _, _ -> },
     onClearPersonal: () -> Unit = {},
     onServerVoiceTranscribe: (ByteArray, (String?) -> Unit) -> Unit = { _, cb -> cb(null) },
     onPickCandidate: (AddressCandidate) -> Unit,
@@ -873,7 +873,7 @@ internal fun EvaluateForm(
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = address.isNotBlank() && !personalTrip.isLoading,
-                onClick = { onPersonalEstimate(resolveAddressTemplate(address, templates)) },
+                onClick = { onPersonalEstimate(resolveAddressTemplate(address, templates), false) },
             ) {
                 Text(if (personalTrip.isLoading) "Считаю…" else "Сколько обойдётся?")
             }
@@ -915,7 +915,14 @@ internal fun EvaluateForm(
     }
     // Результат личной поездки — отдельной карточкой под формой (Ф11.5).
     if (personalMode && (personalTrip.isLoading || personalTrip.result != null || personalTrip.message.isNotBlank())) {
-        PersonalTripCard(personalTrip)
+        PersonalTripCard(
+            personalTrip,
+            // Переключение «туда-обратно / только туда» пересчитывает оценку на сервере:
+            // иначе билет остался бы круговым, а машина — половинной (отчёт 824).
+            onModeChange = { oneWay ->
+                onPersonalEstimate(resolveAddressTemplate(address, templates), oneWay)
+            },
+        )
     }
 }
 

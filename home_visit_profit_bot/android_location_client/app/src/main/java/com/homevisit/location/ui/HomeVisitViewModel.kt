@@ -483,7 +483,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
      * без вердикта. Текущую точку GPS шлём, если есть; иначе сервер считает от старта
      * смены (дома). Сеть/адрес не сложились — показываем человеку словами, не нулём.
      */
-    fun runPersonalEstimate(serverUrl: String, apiKey: String, address: String) {
+    fun runPersonalEstimate(serverUrl: String, apiKey: String, address: String, oneWay: Boolean = false) {
         if (address.isBlank()) return
         viewModelScope.launch {
             personalState.value = PersonalTripUi(isLoading = true)
@@ -492,7 +492,10 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             // («Коменданский 17к1» похож и на Комендантский, и на Коломяжский) отдаём
             // человеку на выбор — как в рабочем режиме, а не тупик «не распознан».
             val suggestion = repository.suggestAddress(
+                // longDistance: личная поездка бывает в другой город — иначе «Иркутск»
+                // из Петербурга превращался в «СПб, ул Иркутская» (отчёт 824).
                 serverUrl, apiKey, address, lat = gps?.first, lon = gps?.second,
+                longDistance = true,
             )
             if (suggestion.resolved == null && suggestion.candidates.isNotEmpty()) {
                 // Один взведённый выбор за раз (см. pickAddressCandidate).
@@ -508,7 +511,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
             }
             runPersonalQuick(
                 serverUrl, apiKey, address, gps,
-                suggestion.resolved?.lat, suggestion.resolved?.lon,
+                suggestion.resolved?.lat, suggestion.resolved?.lon, oneWay,
             )
         }
     }
@@ -521,11 +524,12 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         gps: Pair<Double, Double>?,
         destLat: Double?,
         destLon: Double?,
+        oneWay: Boolean = false,
     ) {
         // mode=personal — по нему сервер решает, уместно ли сравнение с билетами (Ф11.6).
         val result = repository.quickEstimate(
             serverUrl, apiKey, address, gps?.first, gps?.second,
-            mode = "personal", lat = destLat, lon = destLon,
+            mode = "personal", lat = destLat, lon = destLon, oneWay = oneWay,
         )
         personalState.value = if (result.check != null) {
             PersonalTripUi(result = result.check)

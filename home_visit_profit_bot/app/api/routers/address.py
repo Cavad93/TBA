@@ -44,8 +44,13 @@ def suggest_address(body: bytes = Depends(raw_body), auth: Authed = Depends(auth
     # адреса по близости — «понять, где человек», не спрашивая город.
     lat = _optional_float(payload.get("lat"))
     lon = _optional_float(payload.get("lon"))
+    # Личная поездка ищет по всей стране: защиты «далеко = подозрительно» и приоритет
+    # своего города придуманы для рабочих заказов и запрещали Иркутск с Владивостоком
+    # (отчёт 824). Клиент помечает такой запрос флагом.
+    long_distance = bool(payload.get("long_distance"))
     try:
-        return suggest(query, auth.db, SettingsRepository(auth.db), auth.user_id, lat=lat, lon=lon)
+        return suggest(query, auth.db, SettingsRepository(auth.db), auth.user_id,
+                       lat=lat, lon=lon, long_distance=long_distance)
     except (ValueError, TypeError) as error:
         raise ApiError(400, {"error": "bad_request", "detail": str(error)})
 

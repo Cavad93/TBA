@@ -26,10 +26,11 @@ import com.homevisit.location.ui.PersonalTripUi
 /**
  * Результат «личной поездки» (Ф11.5). Ни дохода, ни вердикта «стоит ли ехать» — человек
  * не зарабатывает, а хочет знать, во сколько ему обойдётся съездить туда и обратно.
- * Крупно — итог, ниже — разложение (дорога, время в пути, парковка) и +час на месте.
+ * Крупно — итог, ниже — разложение (дорога, парковка). Время в пути и «+час на месте»
+ * сюда НЕ входят: своё время человек себе не оплачивает (отчёты 821, 824).
  */
 @Composable
-internal fun PersonalTripCard(state: PersonalTripUi) {
+internal fun PersonalTripCard(state: PersonalTripUi, onModeChange: (Boolean) -> Unit = {}) {
     when {
         state.isLoading -> InputCard("Личная поездка") {
             Row(
@@ -48,12 +49,15 @@ internal fun PersonalTripCard(state: PersonalTripUi) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        state.result != null -> PersonalTripResult(state.result)
+        state.result != null -> PersonalTripResult(state.result, onModeChange)
     }
 }
 
 @Composable
-private fun PersonalTripResult(check: com.homevisit.location.domain.MinimumCheck) {
+private fun PersonalTripResult(
+    check: com.homevisit.location.domain.MinimumCheck,
+    onModeChange: (Boolean) -> Unit,
+) {
     // «Только туда» — тот же движок, без второй формулы: дорога и время ровно вдвое
     // меньше (round_trip = 2× one-way), парковка — разовый расход за визит, не делится.
     var oneWay by rememberSaveable { mutableStateOf(false) }
@@ -71,12 +75,12 @@ private fun PersonalTripResult(check: com.homevisit.location.domain.MinimumCheck
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
                 selected = !oneWay,
-                onClick = { oneWay = false },
+                onClick = { oneWay = false; onModeChange(false) },
                 label = { Text("Туда-обратно") },
             )
             FilterChip(
                 selected = oneWay,
-                onClick = { oneWay = true },
+                onClick = { oneWay = true; onModeChange(true) },
                 label = { Text("Только туда") },
             )
         }
@@ -94,14 +98,10 @@ private fun PersonalTripResult(check: com.homevisit.location.domain.MinimumCheck
             TripCostRow("Дорога (топливо, износ)", carCost)
             if (check.parkingCost > 0) TripCostRow("Парковка", check.parkingCost)
         }
-        if (check.hourlyOnSite > 0) {
-            Text(
-                "+ ${money(check.hourlyOnSite)} за каждый час на месте",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        TicketsChip(check.tickets, oneWay)
+        // «+N ₽ за час на месте» в личной поездке не показываем: это опять оплата
+        // своего времени, а личная поездка — не работа (отчёты 821, 824). В рабочем
+        // режиме строка остаётся — там она и нужна.
+        TicketsChip(check.tickets)
         if (check.fallback) {
             Text(
                 "Адрес вне покрытия карт — оценка по прямой, грубо.",
@@ -120,14 +120,15 @@ private fun PersonalTripResult(check: com.homevisit.location.domain.MinimumCheck
  * Цифры берём готовой фразой сервера, а не пересобираем: иначе однажды разойдёмся с тем,
  * по чему он принимал решение.
  *
- * `oneWay` гасит кнопку, и это не мелочь. Сервер сравнивал КРУГОВУЮ машину с КРУГОВЫМ
- * билетом (`price` у Travelpayouts — перелёт туда И обратно). В режиме «только туда»
- * цена машины делится пополам, а билет — нет: рядом с половинной суммой «самолёт дешевле»
- * стало бы прямой неправдой. Молчим, а не показываем сомнительное.
+ * Кнопка работает в ОБОИХ направлениях (отчёт 824). Раньше в режиме «только туда» её
+ * гасили, и не зря: сервер считал круговой билет, а стоимость машины делилась пополам —
+ * «самолёт дешевле» рядом с половинной суммой было бы неправдой. Теперь переключатель
+ * уходит на сервер (`one_way`), и тот считает ОДНОСТОРОННИЙ билет против односторонней
+ * машины — сравнение сопоставимо, гасить нечего.
  */
 @Composable
-private fun TicketsChip(tickets: com.homevisit.location.domain.TicketsOffer?, oneWay: Boolean) {
-    if (tickets == null || oneWay) return
+private fun TicketsChip(tickets: com.homevisit.location.domain.TicketsOffer?) {
+    if (tickets == null) return
     val context = LocalContext.current
     AssistChip(
         onClick = {
