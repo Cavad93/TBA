@@ -33,7 +33,9 @@ def test_service_computes_loss_from_driven_gps(config) -> None:
         day = days.create("Дом", "Дом", 30, 20, start_lat=59.93, start_lon=30.31)
         cand = visits.create_candidate(day.id, "Заказ", 1500, 0, 0, None, True, lat=59.95, lon=30.36)
         visits.accept(cand.id)
-        cost = vehicle_km_cost(settings, None, route_time_factor=day.planned_route_time_factor)
+        # route_time_factor у vehicle_km_cost больше нет: надбавку за пробки решает
+        # ИЗМЕРЕННЫЙ коэффициент по закрытым сменам, а не плановый (отчёт 874).
+        cost = vehicle_km_cost(settings, None)
         min_hourly = settings.get_float("min_hourly_income", 600)
         response = MobileVisitService(conn).cancel_in_route(cand.id, {"driven_km": 10.0, "driven_minutes": 30.0})
 
