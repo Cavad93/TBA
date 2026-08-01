@@ -56,6 +56,12 @@ object OfflineVerdict {
         val existingServiceMinutes: Double? = null,
         // Ожидаемая ставка часа с сервера (вариант В). null — судим по настройкам.
         val expectedHourly: Double? = null,
+        // ГОТОВОЕ «до» дня с сервера: чистая прибыль и минуты всего дня, включая
+        // завершённые визиты, телемедицину, офис, расходы и компенсации. Телефон такого
+        // не соберёт — в кеше только принятые заказы. null — старый кеш, собираем сами
+        // (отчёт 913).
+        val dayBeforeNet: Double? = null,
+        val dayBeforeMinutes: Double? = null,
         // Сколько заказов у дня по счёту СЕРВЕРА (принятые + завершённые). Отличается
         // от existingCount: тот считает точки матрицы, а завершённые заказы в неё не
         // попадают — они схлопнуты в точку старта. Для геометрии маршрута нужен
@@ -73,12 +79,29 @@ object OfflineVerdict {
         val costPerKm = input.fuelPerKm + input.maintenancePerKm + input.extraPerKm
         val incomeSum = input.existingIncomes.sum()
 
-        val beforeNet = incomeSum - extra.beforeKm * costPerKm - input.cancelledLeadCosts
-        val afterNet = incomeSum + input.candidateIncome - input.candidateResponseCost -
-            extra.afterKm * costPerKm - input.cancelledLeadCosts
+        val fallbackBeforeNet = incomeSum - extra.beforeKm * costPerKm - input.cancelledLeadCosts
         val existingService = input.existingServiceMinutes ?: (input.existingCount * input.serviceMinutes)
-        val beforeMinutes = extra.beforeMinutes + existingService
-        val afterMinutes = extra.afterMinutes + existingService + input.serviceMinutes
+
+        // «До» дня берём ГОТОВЫМ с сервера, если оно приехало: сервер считает весь день —
+        // завершённые визиты, телемедицину, работу в офисе, расходы и компенсации, — а
+        // телефон видит в кеше только принятые заказы и собирал день неполным. Офлайн
+        // выходил систематически оптимистичнее сервера (отчёт 913). Нет поля — старый
+        // кеш, собираем как раньше; расхождение самозакрывается при первой же связи.
+        // Оба поля или ни одного: смешать серверные деньги с самосборными минутами
+        // значит получить ₽/час, которого нет ни у сервера, ни у телефона.
+        val serverKnowsTheDay = input.dayBeforeNet != null && input.dayBeforeMinutes != null
+        val beforeNet = if (serverKnowsTheDay) input.dayBeforeNet!! else fallbackBeforeNet
+        val beforeMinutes =
+            if (serverKnowsTheDay) input.dayBeforeMinutes!! else extra.beforeMinutes + existingService
+
+        // «После» = «до» плюс вклад кандидата. Одна формула на оба случая: в запасном
+        // пути она даёт ровно те же числа, что старая (проверено алгеброй — лишние км и
+        // минуты здесь берутся СЫРОЙ разницей, без отсечки дребезга; отсечка живёт в
+        // маржинальных числах заказа, где она и нужна).
+        val kmDelta = extra.afterKm - extra.beforeKm
+        val driveDelta = extra.afterMinutes - extra.beforeMinutes
+        val afterNet = beforeNet + input.candidateIncome - input.candidateResponseCost - kmDelta * costPerKm
+        val afterMinutes = beforeMinutes + driveDelta + input.serviceMinutes
         val beforeHourly = safeHourly(beforeNet, beforeMinutes)
         val afterHourly = safeHourly(afterNet, afterMinutes)
 

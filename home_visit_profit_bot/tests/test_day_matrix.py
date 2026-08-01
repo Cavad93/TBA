@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from app.db import connect
 from app.services.matrix_service import build_matrix_response
+from app.repositories import DailyStatsRepository, SettingsRepository
 from app.services.mobile_visit_service import MobileVisitService
+from app.services.profitability_service import calculate_day_profitability
 from app.repositories import SettingsRepository, VisitRepository, WorkDayRepository
 
 
@@ -146,4 +148,86 @@ def test_day_matrix_sends_the_real_order_count(config) -> None:
     # А заказов у дня — два, и именно это число судит порог.
     assert response["existing_count"] == 2, (
         "офлайн снова посчитает завершённые заказы несуществующими и обнулит порог"
+    )
+
+
+def test_day_matrix_carries_the_authoritative_day_before(config) -> None:
+    """Снимок несёт готовое «до» дня — то самое, по которому судит серверный вердикт.
+
+    Телефон видит в кеше только принятые заказы: завершённые визиты схлопнуты в точку
+    старта, телемедицина, работа в офисе, расходы дня и компенсации не едут вовсе.
+    Собирая «до» сам, офлайн систематически завышал его — и говорил «бери» там, где
+    сервер говорил «невыгодно». Теперь считать нечего: число приходит готовым.
+    """
+    with connect(config) as connection:
+        days = WorkDayRepository(connection)
+        visits = VisitRepository(connection)
+        day = days.create("Дом", "Финиш", 30, 20,
+                          start_lat=59.930, start_lon=30.310,
+                          finish_lat=59.960, finish_lon=30.400)
+        # Завершённый заказ — телефон о нём из точек матрицы не узнает.
+        done = visits.create_candidate(day.id, "Завершённый", 3000, 0, 0, None, True,
+                                       lat=59.935, lon=30.320)
+        visits.accept(done.id)
+        visits.complete_visit(done.id)
+        active = visits.create_candidate(day.id, "Принятый", 1500, 0, 0, None, True,
+                                         lat=59.940, lon=30.330)
+        visits.accept(active.id)
+        # Телемедицина и расходы дня — тоже мимо кеша.
+        days.update_money(day.id, "telemed_income", 800)
+        days.update_money(day.id, "telemed_minutes", 45)
+        days.update_money(day.id, "food_expenses", 350)
+
+        response = MobileVisitService(connection).day_matrix()
+        fresh = days.active()
+        expected_net, expected_minutes, _, _, _ = calculate_day_profitability(
+            fresh,
+            visits.list_for_day(day.id, ("accepted", "completed")),
+            SettingsRepository(connection),
+            DailyStatsRepository(connection),
+        )
+
+    assert response["day_before_net"] == expected_net
+    assert response["day_before_minutes"] == expected_minutes
+    # Доход завершённого заказа и телемедицина обязаны быть внутри — иначе телефон
+    # снова окажется оптимистичнее сервера.
+    assert response["day_before_net"] > 0
+    assert response["day_before_minutes"] >= 45, "минуты телемедицины потерялись"
+
+
+def test_day_before_subtracts_burned_leads_like_the_verdict(config) -> None:
+    """Сгоревшие лиды вычтены из готового «до» — как это делает серверный вердикт.
+
+    calculate_day_profitability считает лиды по ПЕРЕДАННОМУ списку, а отменённых заказов
+    в нём нет: вердикт вычитает их отдельной строкой. Отдай телефону «до» без этого
+    вычета — и офлайн окажется завышен ровно на сумму сгоревших лидов, всегда в сторону
+    оптимизма. Сверка паритета поймала это до выкатки.
+    """
+    with connect(config) as connection:
+        days = WorkDayRepository(connection)
+        visits = VisitRepository(connection)
+        day = days.create("Дом", "Дом", 30, 20, start_lat=59.930, start_lon=30.310)
+        active = visits.create_candidate(day.id, "Принятый", 2000, 0, 0, None, True,
+                                         lat=59.940, lon=30.330)
+        visits.accept(active.id)
+        burned = visits.create_candidate(day.id, "Отменённый", 1500, 0, 0, None, True,
+                                         lat=59.950, lon=30.350, response_cost=400)
+        visits.accept(burned.id)
+        visits.cancel_visit(burned.id)
+
+        with_burned = MobileVisitService(connection).day_matrix()["day_before_net"]
+
+        # Тот же день, но лид ничего не стоил.
+        day2 = days.create("Дом", "Дом", 30, 20, start_lat=59.930, start_lon=30.310)
+        active2 = visits.create_candidate(day2.id, "Принятый", 2000, 0, 0, None, True,
+                                          lat=59.940, lon=30.330)
+        visits.accept(active2.id)
+        free = visits.create_candidate(day2.id, "Отменённый", 1500, 0, 0, None, True,
+                                       lat=59.950, lon=30.350, response_cost=0)
+        visits.accept(free.id)
+        visits.cancel_visit(free.id)
+        without_burned = MobileVisitService(connection).day_matrix()["day_before_net"]
+
+    assert round(without_burned - with_burned, 2) == 400.0, (
+        "сгоревший лид не вычтен из готового «до» — офлайн будет оптимистичнее сервера"
     )

@@ -63,6 +63,8 @@ object OfflineCandidateEstimator {
         existingServiceMinutes: Double? = null,
         expectedHourly: Double? = null,
         dayOrdersCount: Int? = null,
+        dayBeforeNet: Double? = null,
+        dayBeforeMinutes: Double? = null,
     ): ProfitabilityCalculator.Result {
         val n = cachedPoints.size
         require(n >= 2) { "кеш-матрица должна содержать хотя бы старт и финиш" }
@@ -129,6 +131,8 @@ object OfflineCandidateEstimator {
                 existingServiceMinutes = existingServiceMinutes,
                 expectedHourly = expectedHourly,
                 dayOrdersCount = dayOrdersCount,
+                dayBeforeNet = dayBeforeNet,
+                dayBeforeMinutes = dayBeforeMinutes,
             ),
         )
     }

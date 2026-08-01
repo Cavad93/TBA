@@ -50,7 +50,10 @@ from app.services.visit_navigation import attach_navigation, navigation_settings
 from app.services.workload_service import day_overwork_debt
 from app.services.visit_parking import hint_from_hit, zone_at
 from app.services.parking_cost_service import parking_money
-from app.services.profitability_service import day_live_utilization
+from app.services.profitability_service import (
+    calculate_day_profitability,
+    day_live_utilization,
+)
 from app.services.visit_time_service import visit_service_minutes
 from app.services.vehicle_service import is_limited, osrm_profile, transport_type
 from app.services.server_settings import nominatim_url as server_nominatim_url, request_timeout_seconds as server_timeout
@@ -543,6 +546,29 @@ class MobileVisitService:
         # кеша (точек минус старт и финиш), а завершённые заказы в точки не
         # попадают — и день с тремя завершёнными выглядел офлайн пустой лентой,
         # где порог обнуляется. Офлайн систематически завышал вердикт.
+        # АВТОРИТЕТНОЕ «до» дня — то самое, по которому судит серверный вердикт.
+        # Раньше телефон собирал «до» сам из кусочков кеша, и собирал неполно:
+        # завершённые визиты в точки матрицы не попадают (схлопнуты в старт), телемед,
+        # работа в офисе, расходы дня и компенсации в кеш не ехали вовсе. Офлайн выходил
+        # систематически ОПТИМИСТИЧНЕЕ сервера — человек поехал бы на заказ, который
+        # сервер отклонил. Собирать день на телефоне заново незачем: сервер уже посчитал
+        # его целиком, телефону остаётся прибавить вклад кандидата (отчёт 913).
+        before_net, before_minutes, _, _, _ = calculate_day_profitability(
+            day, completed + accepted, self.settings, self.stats
+        )
+        # Лиды ОТМЕНЁННЫХ заказов calculate_day_profitability не видит: она считает их по
+        # переданному списку, а отменённых в нём нет. Серверный вердикт вычитает их
+        # отдельной строкой (profitability_service, before/after_net_profit). Не сделать
+        # того же здесь значит отдать телефону «до», завышенное ровно на сумму сгоревших
+        # лидов — и офлайн снова стал бы оптимистичнее сервера.
+        cancelled_leads = sum(
+            visit.response_cost for visit in self.visits.list_for_day(day.id, ("cancelled",))
+        )
+        before_net -= cancelled_leads
+        # БЕЗ округления: телефон делит эти числа друг на друга, и округление до копеек
+        # ДО деления заметно врёт на коротком дне (на пятиминутном — около 12 ₽/час).
+        response["day_before_net"] = before_net
+        response["day_before_minutes"] = before_minutes
         response["existing_count"] = len(accepted) + len(completed)
         response["service_minutes_list"] = [
             visit_service_minutes(visit, day.planned_service_minutes) for visit in ordered

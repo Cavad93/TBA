@@ -59,7 +59,12 @@ object OfflineEstimateMapper {
         val expectedHourlyRate = if (c.isNull("expected_hourly")) null else c.optDouble("expected_hourly")
         // Число заказов дня по счёту сервера: принятые + ЗАВЕРШЁННЫЕ. Из геометрии
         // кеша его не вывести — завершённые в точки не попадают (отчёт 878).
-        val dayOrders = if (cache.has("existing_count")) cache.optInt("existing_count") else null
+        val dayOrders = if (cache.isNull("existing_count")) null else cache.optInt("existing_count")
+        // Готовое «до» дня с сервера. Старый кеш этих полей не содержит — тогда
+        // офлайн собирает день сам, как раньше (отчёт 913).
+        val beforeNet = if (cache.isNull("day_before_net")) null else cache.optDouble("day_before_net")
+        val beforeMinutes =
+            if (cache.isNull("day_before_minutes")) null else cache.optDouble("day_before_minutes")
         val coeff = OfflineCandidateEstimator.Coefficients(
             straightLineFactor = c.optDouble("straight_line_factor", 1.35),
             avgSpeedKmh = c.optDouble("avg_speed_kmh", 30.0),
@@ -89,6 +94,8 @@ object OfflineEstimateMapper {
             existingServiceMinutes = existingServiceMinutes,
             expectedHourly = expectedHourlyRate,
             dayOrdersCount = dayOrders,
+            dayBeforeNet = beforeNet,
+            dayBeforeMinutes = beforeMinutes,
         )
 
         val costPerKm = coeff.fuelPerKm + coeff.maintenancePerKm + coeff.extraPerKm

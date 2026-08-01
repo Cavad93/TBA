@@ -210,4 +210,78 @@ class OfflineVerdictTest {
         assertEquals(explicit.decision, fallback.decision)
         assertEquals(explicit.score, fallback.score)
     }
+
+    /**
+     * Готовое «до» с сервера вытесняет самосборку (отчёт 913).
+     *
+     * В кеше телефона только принятые заказы. Завершённый визит, телемедицина, работа в
+     * офисе, расходы дня и компенсации туда не попадают, и собранное на телефоне «до»
+     * выходило завышенным — офлайн говорил «бери» там, где сервер говорил «невыгодно».
+     */
+    @Test
+    fun authoritativeDayBeforeWins() {
+        val homemade = OfflineVerdict.evaluate(baseInput(candidateIncome = 800.0))
+        // Тот же день, но сервер сказал: чистыми пока МИНУС 2000 ₽ за 300 минут.
+        val fromServer = OfflineVerdict.evaluate(
+            baseInput(candidateIncome = 800.0).copy(
+                dayBeforeNet = -2000.0,
+                dayBeforeMinutes = 300.0,
+            ),
+        )
+        // Маржа самого заказа от этого не меняется — она про заказ, а не про день.
+        assertEquals(homemade.marginalProfit, fromServer.marginalProfit, 1e-9)
+        assertEquals(homemade.marginalHourly, fromServer.marginalHourly, 1e-9)
+        // А вот оттенок вердикта обязан отличаться: день-то другой.
+        assertTrue(
+            "готовое «до» не доехало до расчёта: вердикты совпали при разных днях",
+            homemade.decision != fromServer.decision || homemade.score != fromServer.score,
+        )
+    }
+
+    /** Старый кеш без готового «до» считается ровно как раньше — до последней копейки. */
+    @Test
+    fun oldCacheKeepsTheOldNumbers() {
+        val input = baseInput(candidateIncome = 800.0)
+        val result = OfflineVerdict.evaluate(input)
+
+        // Дословно старая формула: «после» через ПОЛНЫЕ км и минуты маршрута.
+        val extra = RouteOptimizer.candidateExtra(
+            input.distances, input.durations, input.existingCount, input.anchors,
+        )
+        val costPerKm = input.fuelPerKm + input.maintenancePerKm + input.extraPerKm
+        val incomeSum = input.existingIncomes.sum()
+        val beforeNet = incomeSum - extra.beforeKm * costPerKm - input.cancelledLeadCosts
+        val afterNet = incomeSum + input.candidateIncome - input.candidateResponseCost -
+            extra.afterKm * costPerKm - input.cancelledLeadCosts
+        val existingService = input.existingCount * input.serviceMinutes
+        val beforeMinutes = extra.beforeMinutes + existingService
+        val afterMinutes = extra.afterMinutes + existingService + input.serviceMinutes
+        fun hourly(net: Double, min: Double) = if (min <= 0) 0.0 else net / min * 60
+
+        val expected = ProfitabilityCalculator.evaluate(
+            ProfitabilityCalculator.Input(
+                income = input.candidateIncome,
+                extraKm = extra.extraKm,
+                extraDriveMinutes = extra.extraDriveMinutes,
+                serviceMinutes = input.serviceMinutes,
+                fuelPerKm = input.fuelPerKm,
+                maintenancePerKm = input.maintenancePerKm,
+                extraPerKm = input.extraPerKm,
+                beforeHourly = hourly(beforeNet, beforeMinutes),
+                afterHourly = hourly(afterNet, afterMinutes),
+                minHourly = input.minHourly,
+                minMarginalHourly = input.minMarginalHourly,
+                isBaseDistrict = input.isBaseDistrict,
+                existingBaseCount = input.existingBaseCount,
+                outsideMinHourly = input.outsideMinHourly,
+                outsideMinExtra = input.outsideMinExtra,
+                blocksOutsideZone = input.blocksOutsideZone,
+                responseCost = input.candidateResponseCost,
+                existingCount = input.existingCount,
+            ),
+        )
+        assertEquals(expected.decision, result.decision)
+        assertEquals(expected.score, result.score)
+        assertEquals(expected.marginalProfit, result.marginalProfit, 1e-9)
+    }
 }
