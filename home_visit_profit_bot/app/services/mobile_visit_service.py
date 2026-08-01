@@ -50,6 +50,7 @@ from app.services.visit_navigation import attach_navigation, navigation_settings
 from app.services.workload_service import day_overwork_debt
 from app.services.visit_parking import hint_from_hit, zone_at
 from app.services.parking_cost_service import parking_money
+from app.services.profitability_service import day_live_utilization
 from app.services.visit_time_service import visit_service_minutes
 from app.services.vehicle_service import is_limited, osrm_profile, transport_type
 from app.services.server_settings import nominatim_url as server_nominatim_url, request_timeout_seconds as server_timeout
@@ -516,6 +517,12 @@ class MobileVisitService:
             route_time_factor=day.planned_route_time_factor,
             service_minutes=day.planned_service_minutes,
             debt=debt,
+            # Загруженность СЕГОДНЯШНЕЙ смены — тем же числом, что и живой вердикт.
+            # Иначе телефон офлайн судил бы по среднему за месяц, а сервер по тому,
+            # что происходит прямо сейчас, и они разошлись бы (отчёты 902/905).
+            live_utilization=day_live_utilization(
+                day, completed + accepted, _day_route_for_load(day, completed + accepted, self.settings)
+            ),
         )
         response["points"] = [
             {"lat": p.lat, "lon": p.lon, "label": p.label, "visit_id": p.visit_id}
@@ -818,6 +825,17 @@ class MobileVisitService:
         if day is None:
             raise ValueError("no active day")
         return day
+
+
+
+def _day_route_for_load(day, visits, settings_repo):
+    """Маршрут дня для подсчёта уже проеханного. Не построился — считаем без дороги."""
+    try:
+        from app.services.profitability_service import calculate_route_summary
+
+        return calculate_route_summary(day, visits, settings_repo)
+    except Exception:  # noqa: BLE001 — снимок важнее точности загруженности
+        return None
 
 
 def candidate_result_payload(result: CandidateApiResult) -> dict[str, Any]:

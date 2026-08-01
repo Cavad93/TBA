@@ -37,6 +37,7 @@ from app.services.profitability_service import (
     calculate_day_profitability,
     decision_target_hourly,
     decision_to_verdict,
+    day_live_utilization,
     expected_hourly_rate,
     profitability_score,
     vehicle_km_cost,
@@ -180,7 +181,11 @@ def calculate_basket_impact(
 
     # Ожидаемая ставка часа (вариант В) — ТА ЖЕ, что у одиночного заказа. Забыть её здесь
     # значило бы показывать разные цвета на соседних экранах для одного и того же заказа.
-    expected_rate = expected_hourly_rate(visit_repo, None)
+    expected_rate = expected_hourly_rate(
+        visit_repo,
+        None,
+        live_utilization=day_live_utilization(day, existing, before_route),
+    )
     target_hourly = decision_target_hourly(
         is_base_district=is_base,
         existing_count=len(existing),

@@ -10,7 +10,12 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from app.db import connect
-from app.services.opportunity_service import MIN_SAMPLES, expected_hourly
+from app.services.opportunity_service import (
+    MAX_UTILIZATION,
+    MIN_SAMPLES,
+    MIN_UTILIZATION,
+    expected_hourly,
+)
 from app.services.profitability_service import decision_target_hourly
 
 
@@ -175,3 +180,38 @@ def test_matrix_snapshot_says_none_without_history(config) -> None:
         )
 
     assert response["coefficients"]["expected_hourly"] is None
+
+
+def test_live_load_beats_the_monthly_average(config) -> None:
+    """Загруженность СЕГОДНЯ важнее среднего за месяц (отчёты 902/905).
+
+    История говорит «обычно ты загружен на 60 %», но сегодня лента пустая. Планка обязана
+    реагировать на сегодняшнюю пустоту, иначе весь смысл теряется: человек отказывается от
+    заказов в пользу ожидания, которого сегодня и так в избытке.
+    """
+    with connect(config) as connection:
+        _history(connection, hourly=2000, utilization=0.6)
+        by_history = expected_hourly(connection, district=None)
+        by_today = expected_hourly(connection, district=None, live_utilization=0.2)
+
+    assert by_history is not None and by_today is not None
+    assert by_history.hourly == 1200, "история: 2000 × 0,6"
+    assert by_today.hourly == 400, "сегодня: 2000 × 0,2 — планка ниже"
+    assert by_today.hourly < by_history.hourly
+
+
+def test_live_load_is_clamped_like_the_historical_one(config) -> None:
+    """Живая загруженность зажата теми же границами, что историческая.
+
+    Ноль загруженности не должен обнулять цену часа: даже в мёртвый день смена не
+    бесконечна. Граница одна и та же для обеих мер — иначе одно и то же число считалось
+    бы двумя способами.
+    """
+    with connect(config) as connection:
+        _history(connection, hourly=2000, utilization=0.6)
+        floor = expected_hourly(connection, district=None, live_utilization=0.0)
+        ceiling = expected_hourly(connection, district=None, live_utilization=5.0)
+
+    assert floor is not None and ceiling is not None
+    assert floor.utilization == MIN_UTILIZATION
+    assert ceiling.utilization == MAX_UTILIZATION

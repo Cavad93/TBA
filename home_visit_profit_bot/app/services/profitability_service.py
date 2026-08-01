@@ -397,7 +397,13 @@ def calculate_candidate_impact(
     # коэффициентов (matrix_service), а район офлайн неизвестен. Считали бы здесь
     # по району кандидата — сервер и телефон давали бы разные вердикты на одном
     # заказе, а это худший из возможных багов в этом продукте.
-    expected_rate = expected_hourly_rate(visit_repo, None)
+    expected_rate = expected_hourly_rate(
+        visit_repo,
+        None,
+        # Загруженность СЕГОДНЯШНЕЙ смены важнее среднего за месяц: планка должна
+        # реагировать на то, что лента пуста именно сейчас (отчёты 902/905).
+        live_utilization=day_live_utilization(day, existing_visits, before_route),
+    )
     decision, reason = make_decision(
         before_hourly=before_hourly,
         after_hourly=after_hourly,
@@ -537,8 +543,13 @@ def profitability_score(
 
 
 
-def expected_hourly_rate(visit_repo: VisitRepository, district: str | None):
-    """Ожидаемая ставка часа по истории — или None, если данных не хватает.
+def expected_hourly_rate(
+    visit_repo: VisitRepository,
+    district: str | None,
+    *,
+    live_utilization: float | None = None,
+):
+    """Ожидаемая ставка часа — или None, если данных не хватает.
 
     Обёртка отдельно, чтобы расчёт вердикта не знал ни про SQL, ни про окна истории:
     его дело — арифметика заказа. Ошибку истории глотаем намеренно: не смогли посчитать
@@ -547,8 +558,20 @@ def expected_hourly_rate(visit_repo: VisitRepository, district: str | None):
     try:
         from app.services.opportunity_service import expected_hourly
 
-        return expected_hourly(visit_repo.connection, district=district)
+        return expected_hourly(
+            visit_repo.connection, district=district, live_utilization=live_utilization
+        )
     except Exception:  # noqa: BLE001 — история не должна ронять вердикт
+        return None
+
+
+def day_live_utilization(day, visits, route) -> float | None:
+    """Загруженность текущей смены. Не посчиталась — работаем по истории."""
+    try:
+        from app.services.live_load_service import live_utilization
+
+        return live_utilization(day, visits, route)
+    except Exception:  # noqa: BLE001 — загруженность не должна ронять вердикт
         return None
 
 

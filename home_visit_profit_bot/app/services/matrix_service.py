@@ -65,6 +65,7 @@ def build_matrix_response(
     route_time_factor: float = 1.0,
     service_minutes: float = 20.0,
     debt: float = 0.0,
+    live_utilization: float | None = None,
 ) -> dict:
     """Собрать ответ /api/route/matrix: матрица + коэффициенты + флаг fallback.
 
@@ -131,7 +132,9 @@ def build_matrix_response(
     try:
         from app.services.opportunity_service import expected_hourly as _expected_hourly
 
-        rate = _expected_hourly(settings_repo.connection, district=None)
+        rate = _expected_hourly(
+            settings_repo.connection, district=None, live_utilization=live_utilization
+        )
         expected_hourly_value = rate.hourly if rate else None
     except Exception:  # noqa: BLE001 — снимок важнее ожидаемой ставки
         expected_hourly_value = None

@@ -62,8 +62,15 @@ def expected_hourly(
     *,
     district: str | None,
     today: date | None = None,
+    live_utilization: float | None = None,
 ) -> ExpectedRate | None:
-    """Ожидаемая ставка часа по своей истории. None — данных не хватает."""
+    """Ожидаемая ставка часа. None — данных не хватает.
+
+    `live_utilization` — загруженность ТЕКУЩЕЙ смены, посчитанная по уже прошедшему
+    времени (`live_load_service`). Если она есть, берём её: сегодняшняя пустота важнее
+    среднего за месяц — именно ради этого всё и затевалось (отчёты 902/905). Нет —
+    работает историческая, как раньше.
+    """
     today = today or date.today()
     since = (today - timedelta(days=HISTORY_DAYS)).isoformat()
 
@@ -71,7 +78,10 @@ def expected_hourly(
     if realized is None:
         return None
 
-    utilization = _utilization(connection, since=since)
+    if live_utilization is not None:
+        utilization = max(MIN_UTILIZATION, min(MAX_UTILIZATION, live_utilization))
+    else:
+        utilization = _utilization(connection, since=since)
     if utilization is None:
         return None
 
