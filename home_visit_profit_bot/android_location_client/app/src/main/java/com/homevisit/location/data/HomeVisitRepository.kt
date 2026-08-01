@@ -856,7 +856,7 @@ class HomeVisitRepository private constructor(
             val point = order.resolved ?: return@forEach
             array.put(
                 JSONObject()
-                    .put("address", point.address.ifBlank { order.address })
+                    .put("address", point.label.ifBlank { order.address })
                     .put("lat", point.lat)
                     .put("lon", point.lon)
                     .put("income", order.income ?: 0.0)
