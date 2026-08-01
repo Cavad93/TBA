@@ -377,6 +377,14 @@ def calculate_candidate_impact(
         min_hourly=min_hourly,
         outside_min_hourly=outside_min_hourly,
     )
+    # Вариант В: сколько час реально приносит по СВОЕЙ истории, с поправкой на простой.
+    # Планку это может только опустить (см. decision_target_hourly). Нет истории — None,
+    # и работает порог из настроек, как в варианте А.
+    # district=None НАМЕРЕННО: ровно то же число уезжает на телефон в снимке
+    # коэффициентов (matrix_service), а район офлайн неизвестен. Считали бы здесь
+    # по району кандидата — сервер и телефон давали бы разные вердикты на одном
+    # заказе, а это худший из возможных багов в этом продукте.
+    expected_rate = expected_hourly_rate(visit_repo, None)
     decision, reason = make_decision(
         before_hourly=before_hourly,
         after_hourly=after_hourly,
@@ -390,6 +398,7 @@ def calculate_candidate_impact(
         marginal_hourly=marginal_hourly,
         min_marginal_hourly=min_marginal_hourly,
         existing_count=len(existing_visits),
+        expected_hourly=expected_rate.hourly if expected_rate else None,
     )
     tariff = calculate_required_tariff(
         day=day,
@@ -406,6 +415,7 @@ def calculate_candidate_impact(
         outside_min_hourly=outside_min_hourly,
         outside_min_extra=outside_min_extra,
         marginal_profit=marginal_profit,
+        expected_hourly=expected_rate.hourly if expected_rate else None,
     )
     visit_repo.update_estimates(candidate.id, marginal_profit, marginal_hourly, before_hourly, after_hourly)
     visit_repo.update_route_estimate(candidate.id, max(0.0, extra_km), max(0.0, extra_drive_minutes))
@@ -513,12 +523,29 @@ def profitability_score(
     return int(round(low + position * (high - low)))
 
 
+
+def expected_hourly_rate(visit_repo: VisitRepository, district: str | None):
+    """Ожидаемая ставка часа по истории — или None, если данных не хватает.
+
+    Обёртка отдельно, чтобы расчёт вердикта не знал ни про SQL, ни про окна истории:
+    его дело — арифметика заказа. Ошибку истории глотаем намеренно: не смогли посчитать
+    ожидание — работаем по порогу из настроек, а не роняем оценку заказа.
+    """
+    try:
+        from app.services.opportunity_service import expected_hourly
+
+        return expected_hourly(visit_repo.connection, district=district)
+    except Exception:  # noqa: BLE001 — история не должна ронять вердикт
+        return None
+
+
 def decision_target_hourly(
     *,
     is_base_district: bool,
     existing_count: int,
     min_marginal_hourly: float,
     outside_min_hourly: float,
+    expected_hourly: float | None = None,
 ) -> float:
     """С какой ставкой сравнивается заказ. ОДНО место, чтобы вердикт и подсказка тарифа
     не разошлись: подсказка обязана просить ровно столько, сколько требует вердикт.
@@ -526,12 +553,25 @@ def decision_target_hourly(
     Ноль при пустой ленте — это не поблажка, а арифметика: сравнивать заказ можно
     только с тем, что получишь ВМЕСТО него. Нет ни одного принятого заказа — вместо
     него ты получаешь ноль, и любой заказ, покрывающий бензин и износ, выгоднее отказа.
+
+    `expected_hourly` (вариант В) — сколько час РЕАЛЬНО приносит по своей же истории, с
+    поправкой на простой. Он умеет только опускать планку и никогда не поднимает её выше
+    настройки: молча ужесточать чужую настройку нельзя, а жалоба была ровно про то, что
+    «почти всё невыгодно». Поднять порог — решение человека, не наше.
     """
     if existing_count <= 0:
         return 0.0
-    if is_base_district:
-        return min_marginal_hourly
-    return max(min_marginal_hourly, outside_min_hourly)
+    settings_target = (
+        min_marginal_hourly if is_base_district else max(min_marginal_hourly, outside_min_hourly)
+    )
+    # NaN отсекаем явно: `NaN < 0` — ложь, то есть без этой проверки NaN прошёл бы
+    # дальше. В Python min(600, NaN) вернёт 600, а в Kotlin minOf(600, NaN) вернёт
+    # NaN, после чего любое сравнение с ним ложно и ВСЁ становится «невыгодно».
+    # Сегодня сервер шлёт только число или null, но молчаливое расхождение в
+    # разные стороны — это ровно то, что тут уже ловили.
+    if expected_hourly is None or not math.isfinite(expected_hourly) or expected_hourly < 0:
+        return settings_target
+    return min(settings_target, expected_hourly)
 
 
 def make_decision(
@@ -548,6 +588,7 @@ def make_decision(
     marginal_hourly: float,
     min_marginal_hourly: float,
     existing_count: int,
+    expected_hourly: float | None = None,
 ) -> tuple[str, str]:
     """Вердикт по заказу: судит СОБСТВЕННАЯ ставка заказа, а не средняя дня (вариант А).
 
@@ -579,6 +620,7 @@ def make_decision(
         existing_count=existing_count,
         min_marginal_hourly=min_marginal_hourly,
         outside_min_hourly=outside_min_hourly,
+        expected_hourly=expected_hourly,
     )
     # При НУЛЕВОМ пороге (пустая лента) «ставка не ниже ноля» ещё не значит «в плюсе»:
     # заказ обязан хотя бы окупить дорогу до себя. При положительном пороге эта проверка
@@ -670,6 +712,7 @@ def calculate_required_tariff(
     outside_min_hourly: float | None = None,
     outside_min_extra: float = 0.0,
     marginal_profit: float = 0.0,
+    expected_hourly: float | None = None,
 ) -> dict[str, float]:
     income_without_candidate = calculate_day_income(day, existing_visits)
     known_expenses = calculate_known_expenses(day, after_km, cost)
@@ -693,8 +736,14 @@ def calculate_required_tariff(
         existing_count=len(existing_visits),
         min_marginal_hourly=min_marginal_hourly,
         outside_min_hourly=outside_min_hourly,
+        expected_hourly=expected_hourly,
     )
     marginal_income = max(0.0, target_hourly * (extra_total_minutes / 60) + extra_car_cost)
+    if target_hourly <= 0:
+        # Пустая лента: планка нулевая, и подсказка «доплатите ровно на бензин» назвала бы
+        # сумму, на которой маржа выходит РОВНО ноль — а вердикт требует строго больше нуля.
+        # Красный при выполненной подсказке — это подсказка, которая врёт.
+        marginal_income += 1.0
     outside_extra = outside_min_extra if not candidate.is_base_district else 0.0
 
     required_extra_for_min_hourly = max(0.0, min_hourly_income - candidate.income)

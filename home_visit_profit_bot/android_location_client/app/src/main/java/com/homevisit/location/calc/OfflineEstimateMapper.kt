@@ -54,6 +54,12 @@ object OfflineEstimateMapper {
         val existingServiceMinutes = if (serviceMinutesList.isEmpty()) null else serviceMinutesList.sum()
         val c = cache.optJSONObject("coefficients") ?: JSONObject()
 
+        // Ожидаемая ставка часа (вариант В): опускает планку, когда время реально
+        // приносит меньше настройки. Нет поля — судим по настройкам, как раньше.
+        val expectedHourlyRate = if (c.isNull("expected_hourly")) null else c.optDouble("expected_hourly")
+        // Число заказов дня по счёту сервера: принятые + ЗАВЕРШЁННЫЕ. Из геометрии
+        // кеша его не вывести — завершённые в точки не попадают (отчёт 878).
+        val dayOrders = if (cache.has("existing_count")) cache.optInt("existing_count") else null
         val coeff = OfflineCandidateEstimator.Coefficients(
             straightLineFactor = c.optDouble("straight_line_factor", 1.35),
             avgSpeedKmh = c.optDouble("avg_speed_kmh", 30.0),
@@ -81,6 +87,8 @@ object OfflineEstimateMapper {
             candidateResponseCost = responseCost,
             cancelledLeadCosts = cancelledLeadCosts,
             existingServiceMinutes = existingServiceMinutes,
+            expectedHourly = expectedHourlyRate,
+            dayOrdersCount = dayOrders,
         )
 
         val costPerKm = coeff.fuelPerKm + coeff.maintenancePerKm + coeff.extraPerKm

@@ -45,6 +45,9 @@ object ProfitabilityCalculator {
         // альтернативы: сравнивать заказ не с чем, и порог обнуляется (отчёт 878).
         // По умолчанию 1 — «альтернатива есть», чтобы старые входы не стали мягче.
         val existingCount: Int = 1,
+        // Вариант В: сколько час реально приносит по истории, с поправкой на простой.
+        // null — истории не хватило, судим по порогу из настроек.
+        val expectedHourly: Double? = null,
     )
 
     data class Result(
@@ -85,6 +88,7 @@ object ProfitabilityCalculator {
             marginalHourly = marginalHourly,
             minMarginalHourly = input.minMarginalHourly,
             existingCount = input.existingCount,
+            expectedHourly = input.expectedHourly,
         )
         val verdict = decisionToVerdict(decision)
         val score = profitabilityScore(decision, marginalHourly, input.minMarginalHourly)
@@ -132,10 +136,20 @@ object ProfitabilityCalculator {
         existingCount: Int,
         minMarginalHourly: Double,
         outsideMinHourly: Double,
+        expectedHourly: Double?,
     ): Double {
         if (existingCount <= 0) return 0.0
-        if (isBaseDistrict) return minMarginalHourly
-        return maxOf(minMarginalHourly, outsideMinHourly)
+        val settingsTarget =
+            if (isBaseDistrict) minMarginalHourly else maxOf(minMarginalHourly, outsideMinHourly)
+        // Ожидаемая ставка часа (вариант В) умеет только ОПУСКАТЬ планку и никогда не
+        // поднимает её выше настройки человека. Точный перенос decision_target_hourly.
+        // NaN отсекаем явно: `NaN < 0` — ложь, а minOf(600, NaN) даёт NaN, после чего
+        // любое сравнение с порогом ложно и ВСЁ становится «невыгодно». Точный
+        // перенос серверной проверки isfinite.
+        if (expectedHourly == null || expectedHourly.isNaN() || expectedHourly < 0) {
+            return settingsTarget
+        }
+        return minOf(settingsTarget, expectedHourly)
     }
 
     /**
@@ -159,12 +173,14 @@ object ProfitabilityCalculator {
         marginalHourly: Double,
         minMarginalHourly: Double,
         existingCount: Int,
+        expectedHourly: Double?,
     ): String {
         val target = decisionTargetHourly(
             isBaseDistrict = isBaseDistrict,
             existingCount = existingCount,
             minMarginalHourly = minMarginalHourly,
             outsideMinHourly = outsideMinHourly,
+            expectedHourly = expectedHourly,
         )
         // При НУЛЕВОМ пороге (пустая лента) «ставка не ниже ноля» ещё не значит «в плюсе»:
         // заказ обязан хотя бы окупить дорогу до себя. При положительном пороге проверка

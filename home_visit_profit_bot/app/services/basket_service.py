@@ -27,8 +27,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.models import Visit, WorkDay
+from app.models import RouteSummary, Visit, WorkDay
 from app.repositories import DailyStatsRepository, SettingsRepository, VisitRepository
+from app.services.overwork_pricing_service import build_pricing
 from app.services.profitability_service import (
     _safe_hourly,
     _zero_tiny,
@@ -36,9 +37,11 @@ from app.services.profitability_service import (
     calculate_day_profitability,
     decision_target_hourly,
     decision_to_verdict,
+    expected_hourly_rate,
     profitability_score,
     vehicle_km_cost,
 )
+from app.services.workload_service import calculate_candidate_workload
 from app.services.visit_time_service import total_service_minutes
 
 
@@ -80,10 +83,12 @@ def _route_cost(
     visits: list[Visit],
     settings_repo: SettingsRepository,
     stats_repo: DailyStatsRepository | None,
-) -> tuple[float, float, float]:
-    """Чистая прибыль, минуты и километры дня для ПРОИЗВОЛЬНОГО набора визитов."""
-    net, minutes, km, _, _ = calculate_day_profitability(day, visits, settings_repo, stats_repo)
-    return net, minutes, km
+) -> tuple[float, float, float, RouteSummary]:
+    """Чистая прибыль, минуты, километры и маршрут дня для ПРОИЗВОЛЬНОГО набора визитов."""
+    net, minutes, km, _, route = calculate_day_profitability(
+        day, visits, settings_repo, stats_repo
+    )
+    return net, minutes, km, route
 
 
 def calculate_basket_impact(
@@ -107,8 +112,10 @@ def calculate_basket_impact(
     outside_min_extra = settings_repo.get_float("outside_zone_min_extra_payment", 0)
     cost = vehicle_km_cost(settings_repo, stats_repo, route_time_factor=day.planned_route_time_factor)
 
-    before_net, before_minutes, before_km = _route_cost(day, existing, settings_repo, stats_repo)
-    after_net, after_minutes, after_km = _route_cost(
+    before_net, before_minutes, before_km, before_route = _route_cost(
+        day, existing, settings_repo, stats_repo
+    )
+    after_net, after_minutes, after_km, after_route = _route_cost(
         day, existing + candidates, settings_repo, stats_repo
     )
 
@@ -126,7 +133,7 @@ def calculate_basket_impact(
     items: list[BasketItem] = []
     for candidate in candidates:
         rest = [other for other in candidates if other.id != candidate.id]
-        without_net, without_minutes, without_km = _route_cost(
+        without_net, without_minutes, without_km, _ = _route_cost(
             day, existing + rest, settings_repo, stats_repo
         )
         item_km = _zero_tiny(after_km - without_km, epsilon=0.05)
@@ -155,11 +162,31 @@ def calculate_basket_impact(
     # считается по большинству: пачка целиком «своя», если своих адресов в ней больше.
     base_count = sum(1 for candidate in candidates if candidate.is_base_district)
     is_base = base_count * 2 >= len(candidates) if candidates else True
+
+    # Надбавка за переработку и блокировка дальних заказов при высоком долге
+    # восстановления действуют и на пачку. Без этого пачка вне зоны проходила там, где
+    # одиночный заказ честно останавливали: «сколько ни доплати, сегодня не стоит».
+    debt = _overwork_debt(
+        day, existing, candidates, before_route, after_route, settings_repo, stats_repo
+    )
+    pricing = build_pricing(
+        debt=debt,
+        min_hourly=min_hourly,
+        outside_min_hourly=outside_min_hourly,
+        min_marginal_hourly=min_marginal_hourly,
+    )
+    min_marginal_hourly = pricing.effective_min_marginal_hourly
+    outside_min_hourly = pricing.effective_outside_min_hourly
+
+    # Ожидаемая ставка часа (вариант В) — ТА ЖЕ, что у одиночного заказа. Забыть её здесь
+    # значило бы показывать разные цвета на соседних экранах для одного и того же заказа.
+    expected_rate = expected_hourly_rate(visit_repo, None)
     target_hourly = decision_target_hourly(
         is_base_district=is_base,
         existing_count=len(existing),
         min_marginal_hourly=min_marginal_hourly,
         outside_min_hourly=outside_min_hourly,
+        expected_hourly=expected_rate.hourly if expected_rate else None,
     )
     decision, reason = _basket_decision(
         basket_hourly=basket_hourly,
@@ -169,6 +196,8 @@ def calculate_basket_impact(
         outside_min_extra=outside_min_extra * (0 if is_base else len(candidates)),
         empty_feed=len(existing) <= 0,
         count=len(candidates),
+        blocks_outside_zone=pricing.blocks_outside_zone,
+        day_hourly_drops=basket_hourly < _safe_hourly(before_net, before_minutes),
     )
     return BasketCalculation(
         count=len(candidates),
@@ -188,6 +217,34 @@ def calculate_basket_impact(
     )
 
 
+def _overwork_debt(
+    day, existing, candidates, before_route, after_route, settings_repo, stats_repo
+) -> float:
+    """Долг восстановления ПОСЛЕ взятия всей пачки.
+
+    Тот же `calculate_candidate_workload`, что и у одиночного заказа, — иначе усталость
+    считалась бы двумя способами, и пачка проходила бы там, где заказ останавливают.
+    Кандидатом отдаём последний адрес пачки: маршрут «после» уже содержит их все, а
+    от кандидата расчёту нужно время прибытия на последнюю точку.
+
+    Не посчиталось — считаем долг нулевым, а не роняем оценку пачки.
+    """
+    if not candidates:
+        return 0.0
+    try:
+        workload = calculate_candidate_workload(
+            day=day,
+            existing_visits=existing,
+            candidate=candidates[-1],
+            before_route=before_route,
+            after_route=after_route,
+            settings_repo=settings_repo,
+            stats_repo=stats_repo,
+        )
+        return float(workload.overwork_index_after)
+    except Exception:  # noqa: BLE001 — усталость не должна ронять оценку пачки
+        return 0.0
+
 def _basket_decision(
     *,
     basket_hourly: float,
@@ -197,10 +254,21 @@ def _basket_decision(
     outside_min_extra: float,
     empty_feed: bool,
     count: int,
+    blocks_outside_zone: bool = False,
+    day_hourly_drops: bool = False,
 ) -> tuple[str, str]:
-    """Вердикт на пачку. Те же слова, что у одиночного заказа — экран один и тот же."""
+    """Вердикт на пачку. Те же слова и те же правила, что у одиночного заказа.
+
+    Расходиться тут нельзя: человек видит вердикт на пачку и вердикт на заказ на соседних
+    экранах, и разные ответы на один и тот же заказ читаются как поломка, а не как нюанс.
+    """
     if count <= 0:
         return "НЕВЫГОДНО / ТОЛЬКО СО СПЕЦТАРИФОМ", "В пачке нет заказов."
+    if not is_base and blocks_outside_zone:
+        return (
+            "ТОЛЬКО СО СПЕЦТАРИФОМ",
+            "Высокий долг восстановления. Заказы вне базовой зоны сегодня брать не стоит.",
+        )
     passes = basket_hourly >= target_hourly and (target_hourly > 0 or basket_profit > 0)
     if not passes:
         if basket_profit <= 0:
@@ -221,6 +289,13 @@ def _basket_decision(
         return (
             "ОДНОЗНАЧНО ДА",
             "Принятых заказов сегодня ещё нет — эта пачка приносит деньги, отказ не приносит ничего.",
+        )
+    # Тот же оттенок, что у одиночного заказа: пачка выше порога, но тянущая средний
+    # ₽/час дня вниз, остаётся выгодной — просто не «однозначно».
+    if day_hourly_drops:
+        return (
+            "МОЖНО БРАТЬ",
+            "Пачка окупает своё время, хотя средний ₽/час дня немного просядет — в сумме за смену это плюс.",
         )
     return "ОДНОЗНАЧНО ДА", "Пачка целиком окупает время, которое на неё уйдёт."
 

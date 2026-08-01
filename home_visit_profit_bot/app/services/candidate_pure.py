@@ -72,6 +72,10 @@ def evaluate(inputs: dict) -> dict:
     # альтернативы: сравнивать заказ не с чем, и порог обнуляется (вариант А, отчёт 878).
     # По умолчанию 1 — «альтернатива есть», чтобы старые входы не стали вдруг мягче.
     existing_count = int(inputs.get("existing_count", 1))
+    # Вариант В: сколько час реально приносит по истории, с поправкой на простой.
+    # Умеет только опускать планку. Нет ключа — судим по порогу из настроек.
+    raw_expected = inputs.get("expected_hourly")
+    expected_hourly = None if raw_expected is None else float(raw_expected)
     # Парковка у точки заказа (Фаза 9.4): нижняя граница вычитается из маржи — так же,
     # как в серверном calculate_candidate_impact. По умолчанию 0 (нет платной зоны).
     parking_cost = float(inputs.get("parking_cost", 0.0))
@@ -100,6 +104,7 @@ def evaluate(inputs: dict) -> dict:
         marginal_hourly=marginal_hourly,
         min_marginal_hourly=min_marginal_hourly,
         existing_count=existing_count,
+        expected_hourly=expected_hourly,
     )
     verdict = decision_to_verdict(decision)
     score = profitability_score(decision, marginal_hourly, min_marginal_hourly)

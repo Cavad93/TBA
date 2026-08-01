@@ -154,3 +154,45 @@ def test_preview_endpoint_skips_orders_without_coordinates(config) -> None:
     assert result["ok"] is True
     assert result["basket"]["count"] == 1
     assert result["skipped"] == [{"address": "Непонятый", "reason": "needs_coordinates"}]
+
+
+def test_basket_uses_the_same_bar_as_a_single_order(config) -> None:
+    """Планка у пачки — та же, что у одиночного заказа, включая ожидаемую ставку часа.
+
+    Иначе один и тот же заказ показывал бы разные цвета на соседних экранах: экран
+    оценки — зелёный (планка опущена по истории), экран пачки — красный (планка из
+    настроек). Это читается как поломка, а не как нюанс.
+    """
+    from app.services.basket_service import calculate_basket_impact
+    from app.services.profitability_service import decision_target_hourly
+
+    with connect(config) as connection:
+        day = _day(connection)
+        visits = VisitRepository(connection)
+        settings = SettingsRepository(connection)
+        basket = calculate_basket_impact(
+            day, _candidates(connection, day, FAR_CLUSTER[:1], income=1500), visits, settings
+        )
+
+    # Лента пуста — планка нулевая по обоим правилам.
+    assert basket.target_hourly == decision_target_hourly(
+        is_base_district=False,
+        existing_count=0,
+        min_marginal_hourly=600.0,
+        outside_min_hourly=600.0,
+    )
+
+
+def test_basket_reads_the_expected_rate_like_a_single_order(config) -> None:
+    """Ожидаемая ставка часа доходит до корзины — раньше аргумент просто забыли."""
+    import inspect
+
+    from app.services import basket_service
+
+    source = inspect.getsource(basket_service.calculate_basket_impact)
+    assert "expected_hourly=" in source, (
+        "корзина снова судит по настроечному порогу, игнорируя вариант В"
+    )
+    assert "blocks_outside_zone=" in source or "pricing.blocks_outside_zone" in source, (
+        "корзина снова не знает про блокировку дальних заказов при переработке"
+    )

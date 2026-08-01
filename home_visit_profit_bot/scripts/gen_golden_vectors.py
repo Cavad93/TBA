@@ -57,6 +57,26 @@ CASES: list[dict] = [
         "is_base_district": True, "existing_base_count": 0, "existing_count": 0,
     },
     {
+        # Вариант В: час в этом районе реально приносит 250 ₽ (2000 ₽ × 12,5 % загрузки),
+        # и заказ на 366 ₽/час выгоднее отказа, хотя настроечный порог — 600.
+        "name": "expected_rate_lowers_the_bar",
+        "income": 300, "extra_km": 8, "extra_drive_minutes": 16, "service_minutes": 20,
+        "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "before_hourly": 700,
+        "after_hourly": 650, "min_hourly": 600, "min_marginal_hourly": 600,
+        "is_base_district": True, "existing_base_count": 3, "existing_count": 3,
+        "expected_hourly": 250,
+    },
+    {
+        # Обратная сторона: ожидание ВЫШЕ настройки планку не поднимает. Молча ужесточать
+        # чужую настройку нельзя — жалоба была ровно про «почти всё невыгодно».
+        "name": "expected_rate_never_raises_the_bar",
+        "income": 300, "extra_km": 8, "extra_drive_minutes": 16, "service_minutes": 20,
+        "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "before_hourly": 700,
+        "after_hourly": 650, "min_hourly": 600, "min_marginal_hourly": 600,
+        "is_base_district": True, "existing_base_count": 3, "existing_count": 3,
+        "expected_hourly": 1800,
+    },
+    {
         "name": "base_clear_go",
         "income": 1500, "extra_km": 8, "extra_drive_minutes": 16, "service_minutes": 20,
         "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "before_hourly": 700,

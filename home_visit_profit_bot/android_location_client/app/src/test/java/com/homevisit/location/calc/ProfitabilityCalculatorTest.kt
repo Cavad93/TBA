@@ -40,6 +40,13 @@ class ProfitabilityCalculatorTest {
         blocksOutsideZone = j.optBoolean("blocks_outside_zone", false),
         parkingCost = j.optDouble("parking_cost", 0.0),
         responseCost = j.optDouble("response_cost", 0.0),
+        // Сколько заказов уже принято: пустая лента обнуляет порог, потому что
+        // сравнивать заказ не с чем (вариант А, отчёты 878/881).
+        existingCount = j.optInt("existing_count", 1),
+        // Ожидаемая ставка часа по истории — умеет только опускать планку (вариант В).
+        // isNull, а не has: has() истинно и для JSON-null, а getDouble на null кинет
+        // исключение — тест упал бы ошибкой разбора вместо расхождения.
+        expectedHourly = if (j.isNull("expected_hourly")) null else j.getDouble("expected_hourly"),
     )
 
     @Test

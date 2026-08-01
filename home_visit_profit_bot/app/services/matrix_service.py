@@ -126,6 +126,16 @@ def build_matrix_response(
             durations = estimate.durations_minutes
             fallback = True
 
+    # История не должна ронять построение матрицы: не посчиталась — работаем по настройкам.
+    expected_hourly_value = None
+    try:
+        from app.services.opportunity_service import expected_hourly as _expected_hourly
+
+        rate = _expected_hourly(settings_repo.connection, district=None)
+        expected_hourly_value = rate.hourly if rate else None
+    except Exception:  # noqa: BLE001 — снимок важнее ожидаемой ставки
+        expected_hourly_value = None
+
     return {
         "distances_km": distances,
         "durations_minutes": durations,
@@ -145,6 +155,11 @@ def build_matrix_response(
             "avg_speed_kmh": avg_speed,
             "straight_line_factor": straight_line_factor,
             "auto_optimize": auto_optimize,
+            # Вариант В (отчёты 878/881): сколько час РЕАЛЬНО приносит по своей истории,
+            # с поправкой на простой. Офлайн обязан судить той же планкой, что и сервер,
+            # иначе телефон и сервер разойдутся вердиктами на одном и том же заказе.
+            # null — истории не хватило, работает порог из настроек.
+            "expected_hourly": expected_hourly_value,
         },
         "snapshot_version": snapshot_version(
             cost, min_hourly, service_minutes, straight_line_factor, auto_optimize=auto_optimize

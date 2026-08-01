@@ -61,6 +61,8 @@ object OfflineCandidateEstimator {
         candidateResponseCost: Double = 0.0,
         cancelledLeadCosts: Double = 0.0,
         existingServiceMinutes: Double? = null,
+        expectedHourly: Double? = null,
+        dayOrdersCount: Int? = null,
     ): ProfitabilityCalculator.Result {
         val n = cachedPoints.size
         require(n >= 2) { "кеш-матрица должна содержать хотя бы старт и финиш" }
@@ -125,6 +127,8 @@ object OfflineCandidateEstimator {
                 cancelledLeadCosts = cancelledLeadCosts,
                 autoOptimize = coeff.autoOptimize,
                 existingServiceMinutes = existingServiceMinutes,
+                expectedHourly = expectedHourly,
+                dayOrdersCount = dayOrdersCount,
             ),
         )
     }

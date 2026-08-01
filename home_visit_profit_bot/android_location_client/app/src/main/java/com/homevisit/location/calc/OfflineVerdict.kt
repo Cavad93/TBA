@@ -54,6 +54,14 @@ object OfflineVerdict {
         // минуты дня занижены → средний ₽/час раздут → почти всё «невыгодно» (отчёт 878).
         // null — сервер такой суммы не прислал, падаем на старое «K × средняя».
         val existingServiceMinutes: Double? = null,
+        // Ожидаемая ставка часа с сервера (вариант В). null — судим по настройкам.
+        val expectedHourly: Double? = null,
+        // Сколько заказов у дня по счёту СЕРВЕРА (принятые + завершённые). Отличается
+        // от existingCount: тот считает точки матрицы, а завершённые заказы в неё не
+        // попадают — они схлопнуты в точку старта. Для геометрии маршрута нужен
+        // первый, для порога вердикта — этот. null — старый кеш, падаем на
+        // existingCount, как было.
+        val dayOrdersCount: Int? = null,
     )
 
     /** Мгновенный офлайн-вердикт заказа. Возвращает тот же Result, что ProfitabilityCalculator. */
@@ -94,7 +102,9 @@ object OfflineVerdict {
                 blocksOutsideZone = input.blocksOutsideZone,
                 responseCost = input.candidateResponseCost,
                 // Пустая лента — отсутствие альтернативы: порог обнуляется (отчёт 878).
-                existingCount = input.existingCount,
+                // Порогу вердикта нужно число заказов ДНЯ, а не число точек матрицы.
+                existingCount = input.dayOrdersCount ?: input.existingCount,
+                expectedHourly = input.expectedHourly,
             )
         )
     }

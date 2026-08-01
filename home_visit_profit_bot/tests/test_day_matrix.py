@@ -113,3 +113,37 @@ def test_day_matrix_sends_service_minutes_of_every_visit(config) -> None:
     assert ids == [ordinary.id, appointment.id]
     assert minutes[0] == day.planned_service_minutes, "у обычного визита — плановая средняя"
     assert minutes[1] == 240, "у приёма — его собственные четыре часа"
+
+
+def test_day_matrix_sends_the_real_order_count(config) -> None:
+    """Число заказов дня едет явно — из геометрии кеша его не вывести.
+
+    Телефон раньше считал «сколько заказов уже есть» как «точек минус старт и финиш».
+    Завершённые заказы в точки не попадают (они схлопнуты в точку старта), поэтому день
+    с тремя завершёнными и нулём принятых выглядел офлайн ПУСТОЙ ЛЕНТОЙ. А пустая лента
+    обнуляет порог: телефон говорил «однозначно да» там, где сервер говорил «невыгодно».
+    Расхождение систематическое и всегда в сторону оптимизма.
+    """
+    with connect(config) as connection:
+        days = WorkDayRepository(connection)
+        visits = VisitRepository(connection)
+        day = days.create("Дом", "Финиш", 30, 20,
+                          start_lat=59.930, start_lon=30.310,
+                          finish_lat=59.960, finish_lon=30.400)
+        done = visits.create_candidate(day.id, "Завершённый", 2000, 0, 0, None, True,
+                                       lat=59.935, lon=30.320)
+        visits.accept(done.id)
+        visits.complete_visit(done.id)
+        active = visits.create_candidate(day.id, "Принятый", 1500, 0, 0, None, True,
+                                         lat=59.940, lon=30.330)
+        visits.accept(active.id)
+
+        response = MobileVisitService(connection).day_matrix()
+
+    # Точек-заказов в матрице — только одна (завершённый схлопнут в старт).
+    order_points = [p for p in response["points"] if p["visit_id"] is not None]
+    assert len(order_points) == 1
+    # А заказов у дня — два, и именно это число судит порог.
+    assert response["existing_count"] == 2, (
+        "офлайн снова посчитает завершённые заказы несуществующими и обнулит порог"
+    )
