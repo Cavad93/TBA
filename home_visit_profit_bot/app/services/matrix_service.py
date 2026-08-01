@@ -72,7 +72,7 @@ def build_matrix_response(
     вызов OSRM тут не держит event loop (решение Фазы 1). Поэтому и матрицу берём
     синхронным cached_distance_matrix, а не async-вариантом.
     """
-    cost = vehicle_km_cost(settings_repo, stats_repo, route_time_factor=route_time_factor)
+    cost = vehicle_km_cost(settings_repo, stats_repo)
     min_hourly = settings_repo.get_float("min_hourly_income", 600)
     min_marginal_hourly = settings_repo.get_float("min_marginal_hourly_income", min_hourly)
     outside_min_hourly = settings_repo.get_float("outside_zone_min_hourly_income", min_hourly)

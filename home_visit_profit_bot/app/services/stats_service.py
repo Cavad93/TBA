@@ -39,25 +39,35 @@ _ROUTE_FACTOR_EMA_ALPHA = 2.0 / (ROUTE_FACTOR_EMA_PERIOD_DAYS + 1)
 _ROUTE_FACTOR_EMA_WINDOW = 30
 
 
-def route_time_factor_is_measured(stats_repo: DailyStatsRepository) -> bool:
-    """Есть ли ХОТЬ ОДНА закрытая смена, по которой коэффициент пробок измерен.
+MIN_TRAFFIC_SAMPLES = 3
+"""Одна закрытая смена — это совпадение, а не пробки. Три — уже привычка дорог."""
+
+
+def measured_route_time_factor(stats_repo: DailyStatsRepository) -> float | None:
+    """ИЗМЕРЕННЫЙ коэффициент пробок: среднее по закрытым сменам. None — данных мало.
 
     Нужно вот зачем (отчёт 874). Надбавка за пробки к стоимости километра включается,
-    когда коэффициент выше 1,30. Но по умолчанию коэффициент 2,0 — то есть надбавку
-    получал каждый, включая человека, который ещё ни одной смены не закрыл и про чьи
-    пробки мы не знаем НИЧЕГО. Дефолт — это наше предположение, а не его факт, и брать
-    за предположение +10 % к каждому километру нельзя.
+    когда коэффициент выше 1,30. Но в план дня уходит `learned_route_time_factor` — EMA,
+    ЗАСЕЯННАЯ дефолтом 2,0. То есть надбавку получал каждый, включая человека, который
+    ещё ни одной смены не закрыл: дефолт 2,0 сам по себе выше порога 1,30. Наше
+    предположение выдавалось за его измеренный факт, и за это предположение брались
+    деньги с каждого километра.
 
-    Условие ровно то же, что фильтрует смены в learned_route_time_factor: коэффициент
-    посчитан и плановые минуты маршрута были ненулевыми.
+    Поэтому здесь берётся ЧИСТОЕ среднее фактических коэффициентов, без дефолтного
+    посева: если человек реально стоит в пробках — это видно по его сменам, а не по
+    нашей заготовке. Условие отбора смен то же, что в `learned_route_time_factor`.
     """
     rows = stats_repo.last(_ROUTE_FACTOR_EMA_WINDOW)
-    return any(
-        row["actual_route_time_factor"]
+    factors = [
+        float(row["actual_route_time_factor"])
+        for row in rows
+        if row["actual_route_time_factor"]
         and row["planned_route_minutes"]
         and float(row["planned_route_minutes"]) > 0
-        for row in rows
-    )
+    ]
+    if len(factors) < MIN_TRAFFIC_SAMPLES:
+        return None
+    return sum(factors) / len(factors)
 
 
 def learned_route_time_factor(
@@ -182,7 +192,7 @@ def finalize_day(
     # Стоимость километра: измеренная по заправкам и расходам, если данных хватает,
     # иначе — по таблице коэффициентов. Плюс учитывается, кто именно платит: при
     # служебной машине с топливной картой расхода у человека нет вовсе.
-    cost = vehicle_km_cost(settings_repo, stats_repo, route_time_factor=route_time_factor)
+    cost = vehicle_km_cost(settings_repo, stats_repo)
     fuel_expenses, amortization_expenses, car_expenses = calculate_car_expenses(data.actual_km, cost)
     fuel_cost_per_km = cost.total
     food_expenses_total = data.food_expenses + data.food_meal_expenses + data.coffee_expenses + data.drinks_expenses

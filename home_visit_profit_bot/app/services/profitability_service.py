@@ -49,8 +49,6 @@ def calculate_car_expenses(car_km: float, cost: KmCost) -> tuple[float, float, f
 def vehicle_km_cost(
     settings_repo: SettingsRepository,
     stats_repo: DailyStatsRepository | None = None,
-    *,
-    route_time_factor: float = 1.0,
 ) -> KmCost:
     """Сколько стоит километр именно у этого человека.
 
@@ -60,27 +58,28 @@ def vehicle_km_cost(
     """
     facts = measure(stats_repo) if stats_repo is not None else None
     driving = _aggressive_score(stats_repo)
+    # В надбавку за пробки идёт ИЗМЕРЕННЫЙ коэффициент, а не плановый (отчёт 874).
+    # Плановый — это EMA, засеянная дефолтом 2,0, и он сам по себе выше порога 1,30:
+    # надбавку платил бы и человек, про чьи пробки мы не знаем ничего. Аргумент
+    # route_time_factor этой функции сюда намеренно НЕ передаётся.
+    measured = _measured_traffic_factor(stats_repo)
     return km_cost(
         settings_repo,
         measured_fuel_per_km=facts.fuel_per_km if facts else None,
         measured_maintenance_per_km=facts.maintenance_per_km if facts else None,
         aggressive_score=driving,
-        route_time_factor=route_time_factor,
-        # Надбавку за пробки берём только с того, у кого коэффициент ИЗМЕРЕН по его
-        # закрытым сменам. По умолчанию коэффициент 2,0 при пороге надбавки 1,30 —
-        # то есть без этой проверки +10 % к каждому километру платил и человек, про
-        # чьи пробки мы не знаем ничего (отчёт 874).
-        traffic_measured=_traffic_measured(stats_repo),
+        route_time_factor=measured if measured is not None else 1.0,
+        traffic_measured=measured is not None,
     )
 
 
-def _traffic_measured(stats_repo: DailyStatsRepository | None) -> bool:
-    """Есть ли у человека закрытые смены, по которым коэффициент пробок измерен."""
+def _measured_traffic_factor(stats_repo: DailyStatsRepository | None) -> float | None:
+    """Измеренный коэффициент пробок этого человека. None — смен ещё мало."""
     if stats_repo is None:
-        return False
-    from app.services.stats_service import route_time_factor_is_measured
+        return None
+    from app.services.stats_service import measured_route_time_factor
 
-    return route_time_factor_is_measured(stats_repo)
+    return measured_route_time_factor(stats_repo)
 
 
 def _aggressive_score(stats_repo: DailyStatsRepository | None) -> float:
@@ -148,7 +147,7 @@ def calculate_day_profitability(
     *,
     strict_routing: bool = False,
 ) -> tuple[float, float, float, float, RouteSummary]:
-    cost = vehicle_km_cost(settings_repo, stats_repo, route_time_factor=day.planned_route_time_factor)
+    cost = vehicle_km_cost(settings_repo, stats_repo)
     service_minutes = day.planned_service_minutes
     route = calculate_route_summary(day, visits, settings_repo, strict_routing=strict_routing)
     total_income = calculate_day_income(day, visits)
@@ -312,7 +311,7 @@ def calculate_candidate_impact(
     parking_cost_low: float = 0.0,
     parking_cost_high: float = 0.0,
 ) -> CandidateCalculation:
-    cost = vehicle_km_cost(settings_repo, stats_repo, route_time_factor=day.planned_route_time_factor)
+    cost = vehicle_km_cost(settings_repo, stats_repo)
     min_hourly = settings_repo.get_float("min_hourly_income", 600)
     min_marginal_hourly = settings_repo.get_float("min_marginal_hourly_income", min_hourly)
     outside_min_hourly = settings_repo.get_float("outside_zone_min_hourly_income", min_hourly)

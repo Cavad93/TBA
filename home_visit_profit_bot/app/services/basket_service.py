@@ -110,7 +110,7 @@ def calculate_basket_impact(
     min_marginal_hourly = settings_repo.get_float("min_marginal_hourly_income", min_hourly)
     outside_min_hourly = settings_repo.get_float("outside_zone_min_hourly_income", min_hourly)
     outside_min_extra = settings_repo.get_float("outside_zone_min_extra_payment", 0)
-    cost = vehicle_km_cost(settings_repo, stats_repo, route_time_factor=day.planned_route_time_factor)
+    cost = vehicle_km_cost(settings_repo, stats_repo)
 
     before_net, before_minutes, before_km, before_route = _route_cost(
         day, existing, settings_repo, stats_repo

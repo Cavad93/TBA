@@ -140,7 +140,7 @@ def fix_time_price(
 
     # Наценка (4.4): окупить мёртвое время по личной норме ₽/час + лишнее топливо/износ.
     min_hourly = settings_repo.get_float("min_hourly_income", 600)
-    cost = vehicle_km_cost(settings_repo, stats_repo, route_time_factor=day.planned_route_time_factor)
+    cost = vehicle_km_cost(settings_repo, stats_repo)
     surcharge = idle_from_anchor / 60 * min_hourly + extra_km * cost.total
 
     idle_minutes = int(round(idle_from_anchor))

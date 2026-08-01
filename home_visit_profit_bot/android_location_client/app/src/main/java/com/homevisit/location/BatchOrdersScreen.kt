@@ -82,10 +82,20 @@ internal fun BatchOrdersScreen(
                 // клавиатура не закрывала поле дохода нижних строк.
                 .safeDrawingPadding()
                 .imePadding()
-                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // Прокручивается СПИСОК, а кнопки закреплены снизу. Пока список был
+            // коротким, прокрутка всего экрана сходила с рук; с карточкой «Пачка
+            // целиком» кнопка «Добавить» уехала за нижний край — главное действие
+            // экрана перестало быть видно, и это поймали инструментальные тесты.
+            // Действие обязано быть под рукой независимо от длины списка.
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
             Text(
                 "Список заказов",
                 style = MaterialTheme.typography.headlineSmall,
@@ -119,6 +129,7 @@ internal fun BatchOrdersScreen(
                     count = prepared.size,
                     onCount = { onCountBasket(prepared) },
                 )
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(

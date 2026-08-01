@@ -450,7 +450,7 @@ class MobileVisitService:
         if visit.work_day_id != day.id:
             raise ValueError("visit belongs to another day")
 
-        cost = vehicle_km_cost(self.settings, self.stats, route_time_factor=day.planned_route_time_factor)
+        cost = vehicle_km_cost(self.settings, self.stats)
         min_hourly = self.settings.get_float("min_hourly_income", 600)
         driven_km = _optional_non_negative_float(payload.get("driven_km"))
         driven_minutes = _optional_non_negative_float(payload.get("driven_minutes"))
