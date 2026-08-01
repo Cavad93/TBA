@@ -43,6 +43,8 @@ object OfflineCandidateEstimator {
      * @param candidate  координаты нового адреса
      * @param existingIncomes  доходы K уже принятых заказов
      * @param anchors  индексы onsite-якорей в ПОЛНОЙ (augmented) индексации
+     * @param existingServiceMinutes  сумма минут на адресах у K принятых заказов; null —
+     *        считать «K × средняя» (у работы на точке своя длительность, отчёт 878)
      */
     fun estimate(
         cachedPoints: List<LatLon>,
@@ -58,6 +60,7 @@ object OfflineCandidateEstimator {
         blocksOutsideZone: Boolean = false,
         candidateResponseCost: Double = 0.0,
         cancelledLeadCosts: Double = 0.0,
+        existingServiceMinutes: Double? = null,
     ): ProfitabilityCalculator.Result {
         val n = cachedPoints.size
         require(n >= 2) { "кеш-матрица должна содержать хотя бы старт и финиш" }
@@ -121,6 +124,7 @@ object OfflineCandidateEstimator {
                 candidateResponseCost = candidateResponseCost,
                 cancelledLeadCosts = cancelledLeadCosts,
                 autoOptimize = coeff.autoOptimize,
+                existingServiceMinutes = existingServiceMinutes,
             ),
         )
     }

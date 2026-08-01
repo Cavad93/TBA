@@ -14,6 +14,7 @@ from app.services.workload_service import calculate_candidate_workload
 from app.services.optimization_service import optimize_route, optimize_route_estimated, optimize_route_manual
 from app.services.overwork_pricing_service import build_pricing
 from app.services.vehicle_facts_service import measure
+from app.services.visit_time_service import total_service_minutes, visit_service_minutes
 from app.services.vehicle_service import KmCost, fallback_speed_kmh, km_cost, osrm_profile
 from app.services.routing_service import RoutingError, with_route_time_margin
 from app.services.server_settings import osrm_url as server_osrm_url, request_timeout_seconds as server_timeout
@@ -149,7 +150,20 @@ def calculate_day_profitability(
         if visit.status in {"accepted", "completed", "candidate", "cancelled"}
     )
     net_profit = total_income - total_expenses - lead_costs
-    total_minutes = route.total_minutes + route.visits_count * service_minutes + day.telemed_minutes + day.office_minutes
+    # Минуты на адресах: у работы на точке СВОЯ длительность (приём с 9 до 13 — это не
+    # 20 минут обычного визита). Раньше вердикт считал всем поровну по planned_service_minutes,
+    # хотя отчёт смены давно считает честно. Последствие было тяжёлым: минуты дня занижены →
+    # средний ₽/час РАЗДУТ → новый заказ обязан побить завышенную планку, а для внезонных
+    # она ещё и берётся как max(средний, порог). Отсюда «почти всё невыгодно» у того, у кого
+    # в дне есть долгий приём (отчёт 878).
+    routed_ids = set(route.order or [])
+    visit_minutes = total_service_minutes(
+        [visit for visit in visits if visit.id in routed_ids], service_minutes
+    )
+    # Визиты без маршрута (ручные км/мин) в route.order не попадают — им считаем среднее,
+    # чтобы минуты не пропали совсем.
+    visit_minutes += service_minutes * max(0, route.visits_count - len(routed_ids))
+    total_minutes = route.total_minutes + visit_minutes + day.telemed_minutes + day.office_minutes
     return net_profit, total_minutes, route.total_km, route.total_minutes, route
 
 
@@ -319,7 +333,12 @@ def calculate_candidate_impact(
     extra_drive_minutes = _zero_tiny(after_route.total_minutes - before_route.total_minutes, epsilon=0.5)
     paid_extra_km = max(0.0, extra_km)
     paid_extra_drive_minutes = max(0.0, extra_drive_minutes)
-    extra_total_minutes = paid_extra_drive_minutes + service_minutes
+    # Длительность САМОГО кандидата — той же функцией, что и «после». Сегодня это одно
+    # и то же число (кандидатом бывает только обычный заказ, у него своей длительности
+    # нет), но если кандидатом когда-нибудь станет работа на точке, «после» посчитает
+    # её четыре часа, а маржинальная ставка — плановые 20 минут, и заказ будет выглядеть
+    # в двенадцать раз выгоднее, чем он есть. Ловушка закрывается здесь, а не потом.
+    extra_total_minutes = paid_extra_drive_minutes + visit_service_minutes(candidate, service_minutes)
     _, _, extra_car_cost = calculate_car_expenses(paid_extra_km, cost)
     # Марж. прибыль заказа = доход − стоимость лишних км − парковка − цена отклика.
     marginal_profit = candidate.income - extra_car_cost - parking_cost_low - candidate.response_cost

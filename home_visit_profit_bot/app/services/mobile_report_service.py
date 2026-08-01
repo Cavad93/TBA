@@ -20,6 +20,7 @@ from app.repositories import (
 from app.services.cancel_stats_service import cancel_lead_stats
 from app.services.clinic_report_service import ClinicBreakdown, build_active_clinic_breakdown, build_period_clinic_breakdown
 from app.services.profitability_service import calculate_car_expenses, vehicle_km_cost
+from app.services.visit_time_service import total_service_minutes
 from app.services.workload_service import estimate_active_day_workload
 
 
@@ -83,10 +84,7 @@ class MobileReportService:
         )
         # У работы на точке своя продолжительность (приём с 9 до 13 — это не 20 минут
         # обычного визита), поэтому считаем по заказам, а не по среднему на визит.
-        service_minutes = sum(
-            visit.service_minutes if visit.kind == "onsite" else day.planned_service_minutes
-            for visit in active_visits
-        )
+        service_minutes = total_service_minutes(active_visits, day.planned_service_minutes)
         total_work_minutes = (
             route_minutes
             + service_minutes

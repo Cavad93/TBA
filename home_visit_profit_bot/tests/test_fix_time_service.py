@@ -111,3 +111,41 @@ def test_fix_time_price_none_without_anchor(config) -> None:
         all_visits = visits.list_for_day(day.id, ("accepted",))
         # У обычного заказа нет фиксированного времени — цены фикс-времени нет.
         assert fix_time_price(day, all_visits, settings, free.id, now=datetime.now()) is None
+
+
+def test_long_appointment_does_not_invent_a_price_for_fix_time(config) -> None:
+    """Длинный приём БЕЗ простоя не должен выглядеть дорогим только из-за длины.
+
+    Контрфактический «свободный» день снимает с приёма kind и жёсткий старт
+    (`replace(v, kind="field", planned_start_at=None)`), но четыре часа приёма при этом
+    никуда не деваются. Пока правило «сколько длится визит» смотрело на ВИД, а не на
+    длительность, свободный приём считался за плановые 20 минут: минуты дня падали
+    втрое, ₽/час «свободного» дня взлетал, и карточка объявляла, что фикс-время съедает
+    тысячи рублей в час на ровном месте. Здесь приезд ровно ко времени — простоя нет,
+    значит и цене фикс-времени взяться неоткуда.
+    """
+    with connect(config) as connection:
+        days = WorkDayRepository(connection)
+        visits = VisitRepository(connection)
+        settings = SettingsRepository(connection)
+        day = days.create("Дом", "Дом", 30, 30, start_lat=59.930, start_lon=30.310)
+        free = visits.create_candidate(day.id, "Рядом", 2000, 0, 0, None, True, lat=59.940, lon=30.330)
+        visits.accept(free.id)
+        start = datetime.fromisoformat(days.active().started_at or "2026-07-13T08:00:00")
+        # Приём на ЧЕТЫРЕ ЧАСА, назначен почти на время приезда — простоя нет.
+        anchor = visits.create_onsite(
+            day.id, "Приём 9:00–13:00", 5000, 240,
+            (start + timedelta(minutes=10)).isoformat(timespec="seconds"), None,
+            lat=59.950, lon=30.350,
+        )
+        all_visits = visits.list_for_day(day.id, ("accepted",))
+        price = fix_time_price(day, all_visits, settings, anchor.id, now=start)
+
+    if price is None:
+        return
+    assert price.idle_minutes < 60, "простоя тут почти нет, взяться ему неоткуда"
+    # До правки этот же случай давал delta_hourly ≈ 2400 ₽/час.
+    assert price.delta_hourly < 500, (
+        f"цена фикс-времени раздута до {price.delta_hourly:.0f} ₽/час — "
+        "снова потеряна длительность приёма в контрфактическом дне"
+    )

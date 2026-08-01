@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from app.models import EndDayData, WorkDay
+from app.services.visit_time_service import total_service_minutes
 from app.services.mileage_service import BIG_GAP, MIN_KM_TO_COMPARE, SMALL_GAP, mileage_policy
 from app.repositories import (
     DailyStatsRepository,
@@ -113,12 +114,7 @@ def build_end_day_preview(
     else:
         # Работа на точке занимает СВОЮ длительность (приём может идти 4 часа) —
         # считать ей среднюю по заказам значило бы недооценить рабочее время дня.
-        planned_service_total = sum(
-            (visit.service_minutes or day.planned_service_minutes)
-            if visit.kind == "onsite"
-            else day.planned_service_minutes
-            for visit in day_visits
-        )
+        planned_service_total = total_service_minutes(day_visits, day.planned_service_minutes)
         total_work_minutes = (
             planned_route_minutes
             + planned_service_total

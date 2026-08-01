@@ -162,4 +162,38 @@ class OfflineVerdictTest {
         assertEquals("МОЖНО БРАТЬ", optimized.decision)
         assertEquals("ОДНОЗНАЧНО ДА", feedOrder.decision)
     }
+
+    /**
+     * Работа на точке считается СВОЕЙ длительностью, а не средней по заказам (отчёт 878).
+     *
+     * Без этого приём с 9 до 13 шёл за 30 плановых минут: минуты дня занижены, средний
+     * ₽/час раздут, и новый заказ обязан побить завышенную планку. Проверяем, что сумма
+     * с сервера действительно вытесняет «K × средняя», а не просто лежит в поле.
+     */
+    @Test
+    fun longAppointmentUsesItsOwnDuration() {
+        val short = OfflineVerdict.evaluate(baseInput(candidateIncome = 800.0))
+        val long = OfflineVerdict.evaluate(
+            baseInput(candidateIncome = 800.0).copy(existingServiceMinutes = 240.0),
+        )
+        // Тот же заказ на дне с четырёхчасовым приёмом обязан выглядеть НЕ ХУЖЕ: средний
+        // ₽/час дня падает, планка опускается, вердикт не может стать строже.
+        val rank = mapOf("skip" to 0, "edge" to 1, "go" to 2)
+        assertTrue(
+            "длинный приём ужесточил вердикт: было ${short.verdict}, стало ${long.verdict}",
+            rank.getValue(long.verdict) >= rank.getValue(short.verdict),
+        )
+    }
+
+    /** Нет поля в кеше (снимок сделан до обновления) — считаем по-старому, без падений. */
+    @Test
+    fun missingServiceMinutesFallsBackToAverage() {
+        val fallback = OfflineVerdict.evaluate(baseInput(candidateIncome = 800.0))
+        val explicit = OfflineVerdict.evaluate(
+            // 1 заказ × 30 плановых минут — ровно то, что считала старая формула.
+            baseInput(candidateIncome = 800.0).copy(existingServiceMinutes = 30.0),
+        )
+        assertEquals(explicit.decision, fallback.decision)
+        assertEquals(explicit.score, fallback.score)
+    }
 }

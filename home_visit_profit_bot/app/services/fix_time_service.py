@@ -25,6 +25,7 @@ from typing import Any
 
 from app.models import RouteSummary, Visit, WorkDay
 from app.repositories import DailyStatsRepository, SettingsRepository
+from app.services.visit_time_service import visit_service_minutes
 from app.services.profitability_service import calculate_day_profitability, vehicle_km_cost
 from app.services.schedule_service import _drive_minutes, _leg_minutes_by_visit, _parse
 
@@ -86,10 +87,9 @@ def _idle_minutes(day: WorkDay, visits: list[Visit], route: RouteSummary, *, now
             if wait > 0:
                 idle_total += wait
             clock = max(clock, planned_start)
-        if visit.kind == "onsite":
-            clock += timedelta(minutes=visit.service_minutes or 0)
-        else:
-            clock += timedelta(minutes=day.planned_service_minutes or 0)
+        # Та же функция, что у вердикта и отчёта: длительность визита — одно число,
+        # один способ. Раньше здесь ноль у работы на точке двигал часы на 0 минут.
+        clock += timedelta(minutes=visit_service_minutes(visit, day.planned_service_minutes or 0))
     return idle_total
 
 

@@ -50,6 +50,7 @@ from app.services.visit_navigation import attach_navigation, navigation_settings
 from app.services.workload_service import day_overwork_debt
 from app.services.visit_parking import hint_from_hit, zone_at
 from app.services.parking_cost_service import parking_money
+from app.services.visit_time_service import visit_service_minutes
 from app.services.vehicle_service import is_limited, osrm_profile, transport_type
 from app.services.server_settings import nominatim_url as server_nominatim_url, request_timeout_seconds as server_timeout
 
@@ -526,6 +527,13 @@ class MobileVisitService:
         # оценка на телефоне строила «до» из одних доходов и на днях с платными лидами
         # была оптимистичнее серверной: сервер лиды вычитает, телефон — нет.
         response["response_costs"] = [visit.response_cost for visit in ordered]
+        # Минуты на адресах, ТЕМ ЖЕ порядком. У работы на точке своя длительность (приём
+        # с 9 до 13 — не 20 минут); без этого списка телефон считал «K × средняя», занижал
+        # минуты дня и раздувал средний ₽/час — а вердикт сравнивает заказ именно с ним
+        # (отчёт 878). Сервер считает так же — visit_time_service, одна функция на обоих.
+        response["service_minutes_list"] = [
+            visit_service_minutes(visit, day.planned_service_minutes) for visit in ordered
+        ]
         # Лиды ОТМЕНЁННЫХ заказов: деньги потрачены, дохода не будет. Сервер вычитает
         # их из «до» и «после» (calculate_candidate_impact), офлайн-оценка без этой
         # суммы завышала бы ₽/час дня ровно на потери смены.

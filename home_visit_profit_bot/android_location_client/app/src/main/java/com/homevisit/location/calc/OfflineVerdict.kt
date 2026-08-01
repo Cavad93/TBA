@@ -49,6 +49,11 @@ object OfflineVerdict {
         val cancelledLeadCosts: Double = 0.0,
         // false → день считается по порядку Ленты (перенос respect_feed_order Этапа 20).
         val autoOptimize: Boolean = true,
+        // Сумма минут на адресах у K уже принятых заказов. У работы на точке своя
+        // длительность (приём с 9 до 13 — не 20 минут), поэтому «K × средняя» врёт:
+        // минуты дня занижены → средний ₽/час раздут → почти всё «невыгодно» (отчёт 878).
+        // null — сервер такой суммы не прислал, падаем на старое «K × средняя».
+        val existingServiceMinutes: Double? = null,
     )
 
     /** Мгновенный офлайн-вердикт заказа. Возвращает тот же Result, что ProfitabilityCalculator. */
@@ -63,8 +68,9 @@ object OfflineVerdict {
         val beforeNet = incomeSum - extra.beforeKm * costPerKm - input.cancelledLeadCosts
         val afterNet = incomeSum + input.candidateIncome - input.candidateResponseCost -
             extra.afterKm * costPerKm - input.cancelledLeadCosts
-        val beforeMinutes = extra.beforeMinutes + input.existingCount * input.serviceMinutes
-        val afterMinutes = extra.afterMinutes + (input.existingCount + 1) * input.serviceMinutes
+        val existingService = input.existingServiceMinutes ?: (input.existingCount * input.serviceMinutes)
+        val beforeMinutes = extra.beforeMinutes + existingService
+        val afterMinutes = extra.afterMinutes + existingService + input.serviceMinutes
         val beforeHourly = safeHourly(beforeNet, beforeMinutes)
         val afterHourly = safeHourly(afterNet, afterMinutes)
 

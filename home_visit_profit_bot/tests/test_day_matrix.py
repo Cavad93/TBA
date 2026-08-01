@@ -79,3 +79,37 @@ def test_day_matrix_folds_finish_to_start_when_absent(config) -> None:
     points = response["points"]
     assert len(points) == 3  # старт + заказ + финиш(=старт)
     assert points[-1]["lat"] == 59.930 and points[-1]["lon"] == 30.310
+
+
+def test_day_matrix_sends_service_minutes_of_every_visit(config) -> None:
+    """Минуты каждого визита едут в кеш тем же порядком, что доходы (отчёт 878).
+
+    Без этого списка телефон считал день как «количество заказов × средняя», и приём
+    с 9 до 13 стоил в офлайн-расчёте 20 минут: минуты дня занижены, средний ₽/час
+    раздут, а вердикт сравнивает новый заказ именно с ним. Порядок и длина обязаны
+    совпадать с incomes — иначе минуты приедут не к тем заказам.
+    """
+    with connect(config) as connection:
+        days = WorkDayRepository(connection)
+        visits = VisitRepository(connection)
+        day = days.create("Дом", "Финиш", 30, 20,
+                          start_lat=59.930, start_lon=30.310,
+                          finish_lat=59.960, finish_lon=30.400)
+        ordinary = visits.create_candidate(day.id, "Обычный визит", 2000, 0, 0, None, True,
+                                           lat=59.940, lon=30.330)
+        visits.accept(ordinary.id)
+        appointment = visits.create_onsite(
+            day.id, "Приём 9:00–13:00", 5000, 240, "2026-07-13T09:00:00", None,
+            lat=59.950, lon=30.360,
+        )
+        visits.accept(appointment.id)
+
+        response = MobileVisitService(connection).day_matrix()
+
+    minutes = response["service_minutes_list"]
+    assert len(minutes) == len(response["incomes"]), "длина обязана совпадать с доходами"
+    # Порядок — тот же, что у точек-заказов: обычный визит, затем приём.
+    ids = [point["visit_id"] for point in response["points"] if point["visit_id"] is not None]
+    assert ids == [ordinary.id, appointment.id]
+    assert minutes[0] == day.planned_service_minutes, "у обычного визита — плановая средняя"
+    assert minutes[1] == 240, "у приёма — его собственные четыре часа"

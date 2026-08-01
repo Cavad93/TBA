@@ -46,6 +46,12 @@ object OfflineEstimateMapper {
         // (calculate_candidate_impact), офлайн без них завышал бы ₽/час на потери
         // смены. Старый кеш без поля даёт 0.0 — как раньше.
         val cancelledLeadCosts = cache.optDouble("cancelled_lead_costs", 0.0)
+        // Минуты на адресах у принятых заказов: у работы на точке своя длительность,
+        // и «K × средняя» занижало минуты дня — средний ₽/час раздувался, и вердикт
+        // сравнивал новый заказ с завышенной планкой (отчёт 878). Старый кеш без поля
+        // даёт пустой список → null → прежнее поведение.
+        val serviceMinutesList = parseDoubles(cache.optJSONArray("service_minutes_list"))
+        val existingServiceMinutes = if (serviceMinutesList.isEmpty()) null else serviceMinutesList.sum()
         val c = cache.optJSONObject("coefficients") ?: JSONObject()
 
         val coeff = OfflineCandidateEstimator.Coefficients(
@@ -74,6 +80,7 @@ object OfflineEstimateMapper {
             // тоже, иначе платный лид офлайн выглядит выгоднее, чем он есть.
             candidateResponseCost = responseCost,
             cancelledLeadCosts = cancelledLeadCosts,
+            existingServiceMinutes = existingServiceMinutes,
         )
 
         val costPerKm = coeff.fuelPerKm + coeff.maintenancePerKm + coeff.extraPerKm

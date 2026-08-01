@@ -78,4 +78,55 @@ class OfflineEstimateMapperTest {
         val est = OfflineEstimateMapper.fromDayMatrix(broken, 59.9, 30.3, 1000.0, "x", "")
         assertEquals(null, est)
     }
+
+    /**
+     * Минуты приёма доезжают из кеша до вердикта (отчёт 878).
+     *
+     * Поле `service_minutes_list` прокладывается через mapper → estimator → verdict.
+     * Тест нужен именно потому, что цепочка длинная: потеряйся поле на любом стыке,
+     * ничего бы не упало — вердикт просто тихо считался бы по «K × средняя», как раньше.
+     */
+    @Test
+    fun serviceMinutesListReachesTheVerdict() {
+        val short = OfflineEstimateMapper.fromDayMatrix(
+            dayCache(), candidateLat = 59.945, candidateLon = 30.340,
+            income = 1500.0, address = "Новый адрес", clinic = "",
+        )
+        // Тот же день, но принятый заказ — приём на четыре часа.
+        val withAppointment = OfflineEstimateMapper.fromDayMatrix(
+            dayCache().put("service_minutes_list", JSONArray().put(240.0)),
+            candidateLat = 59.945, candidateLon = 30.340,
+            income = 1500.0, address = "Новый адрес", clinic = "",
+        )
+        assertNotNull(short)
+        assertNotNull(withAppointment)
+        // Средний ₽/час дня с четырёхчасовым приёмом ниже, планка ниже — вердикт не строже.
+        val rank = mapOf("skip" to 0, "edge" to 1, "go" to 2)
+        val before = rank[verdictOf(short!!.decision)] ?: 1
+        val after = rank[verdictOf(withAppointment!!.decision)] ?: 1
+        assertTrue(
+            "длинный приём ужесточил вердикт: ${short.decision} → ${withAppointment.decision}",
+            after >= before,
+        )
+    }
+
+    /** Старый кеш без поля — прежнее поведение, без падений и без NaN. */
+    @Test
+    fun cacheWithoutServiceMinutesListStillWorks() {
+        val est = OfflineEstimateMapper.fromDayMatrix(
+            dayCache(), candidateLat = 59.945, candidateLon = 30.340,
+            income = 1500.0, address = "Новый адрес", clinic = "",
+        )
+        assertNotNull(est)
+        assertTrue("балл 1..100", est!!.score in 1..100)
+    }
+
+    private fun verdictOf(decision: String): String {
+        val text = decision.uppercase()
+        return when {
+            text.contains("НЕВЫГОДНО") -> "skip"
+            text.contains("СПЕЦТАРИФ") || text.contains("НАДБАВК") -> "edge"
+            else -> "go"
+        }
+    }
 }
