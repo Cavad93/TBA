@@ -66,7 +66,21 @@ def vehicle_km_cost(
         measured_maintenance_per_km=facts.maintenance_per_km if facts else None,
         aggressive_score=driving,
         route_time_factor=route_time_factor,
+        # Надбавку за пробки берём только с того, у кого коэффициент ИЗМЕРЕН по его
+        # закрытым сменам. По умолчанию коэффициент 2,0 при пороге надбавки 1,30 —
+        # то есть без этой проверки +10 % к каждому километру платил и человек, про
+        # чьи пробки мы не знаем ничего (отчёт 874).
+        traffic_measured=_traffic_measured(stats_repo),
     )
+
+
+def _traffic_measured(stats_repo: DailyStatsRepository | None) -> bool:
+    """Есть ли у человека закрытые смены, по которым коэффициент пробок измерен."""
+    if stats_repo is None:
+        return False
+    from app.services.stats_service import route_time_factor_is_measured
+
+    return route_time_factor_is_measured(stats_repo)
 
 
 def _aggressive_score(stats_repo: DailyStatsRepository | None) -> float:

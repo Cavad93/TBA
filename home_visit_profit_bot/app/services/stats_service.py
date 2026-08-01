@@ -39,6 +39,27 @@ _ROUTE_FACTOR_EMA_ALPHA = 2.0 / (ROUTE_FACTOR_EMA_PERIOD_DAYS + 1)
 _ROUTE_FACTOR_EMA_WINDOW = 30
 
 
+def route_time_factor_is_measured(stats_repo: DailyStatsRepository) -> bool:
+    """Есть ли ХОТЬ ОДНА закрытая смена, по которой коэффициент пробок измерен.
+
+    Нужно вот зачем (отчёт 874). Надбавка за пробки к стоимости километра включается,
+    когда коэффициент выше 1,30. Но по умолчанию коэффициент 2,0 — то есть надбавку
+    получал каждый, включая человека, который ещё ни одной смены не закрыл и про чьи
+    пробки мы не знаем НИЧЕГО. Дефолт — это наше предположение, а не его факт, и брать
+    за предположение +10 % к каждому километру нельзя.
+
+    Условие ровно то же, что фильтрует смены в learned_route_time_factor: коэффициент
+    посчитан и плановые минуты маршрута были ненулевыми.
+    """
+    rows = stats_repo.last(_ROUTE_FACTOR_EMA_WINDOW)
+    return any(
+        row["actual_route_time_factor"]
+        and row["planned_route_minutes"]
+        and float(row["planned_route_minutes"]) > 0
+        for row in rows
+    )
+
+
 def learned_route_time_factor(
     stats_repo: DailyStatsRepository,
     settings_repo: SettingsRepository,

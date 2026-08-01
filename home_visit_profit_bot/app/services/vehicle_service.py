@@ -233,7 +233,14 @@ def uses_fuel(settings: SettingsRepository) -> bool:
     return bool(TRANSPORT_TYPES[transport_type(settings)]["fuel"])
 
 
-def wear_coefficient(settings: SettingsRepository, *, aggressive_score: float = 0.0, route_time_factor: float = 1.0, today: date | None = None) -> float:
+def wear_coefficient(
+    settings: SettingsRepository,
+    *,
+    aggressive_score: float = 0.0,
+    route_time_factor: float = 1.0,
+    traffic_measured: bool = False,
+    today: date | None = None,
+) -> float:
     """Коэффициент обслуживания и износа — то, во сколько раз он дороже топлива."""
     mode = _mode(settings)
     if mode == "manual":
@@ -243,10 +250,26 @@ def wear_coefficient(settings: SettingsRepository, *, aggressive_score: float = 
     wear_class = (settings.get("vehicle_wear_class", DEFAULT_WEAR_CLASS) or DEFAULT_WEAR_CLASS).strip()
     base = float(WEAR_CLASSES.get(wear_class, WEAR_CLASSES[DEFAULT_WEAR_CLASS])["wear"])
     base *= float(TRANSPORT_TYPES[transport_type(settings)]["wear"])
-    return base * (1 + risk_markup(settings, aggressive_score=aggressive_score, route_time_factor=route_time_factor, today=today))
+    return base * (
+        1
+        + risk_markup(
+            settings,
+            aggressive_score=aggressive_score,
+            route_time_factor=route_time_factor,
+            traffic_measured=traffic_measured,
+            today=today,
+        )
+    )
 
 
-def risk_markup(settings: SettingsRepository, *, aggressive_score: float = 0.0, route_time_factor: float = 1.0, today: date | None = None) -> float:
+def risk_markup(
+    settings: SettingsRepository,
+    *,
+    aggressive_score: float = 0.0,
+    route_time_factor: float = 1.0,
+    traffic_measured: bool = False,
+    today: date | None = None,
+) -> float:
     """Надбавки за условия. Ничего из этого не спрашиваем — всё вычисляется.
 
     Зима — по календарю. Пробки — по тому, насколько фактическая дорога длиннее
@@ -260,7 +283,12 @@ def risk_markup(settings: SettingsRepository, *, aggressive_score: float = 0.0, 
     if month in WINTER_MONTHS:
         factor *= 1 + WINTER_MARKUP
 
-    if route_time_factor >= TRAFFIC_FACTOR_THRESHOLD:
+    # Надбавка за пробки — ТОЛЬКО от измеренного коэффициента (отчёт 874).
+    # По умолчанию коэффициент 2,0, а порог надбавки 1,30 — то есть надбавку
+    # получал каждый, включая человека, который ещё ни одной смены не закрыл.
+    # Брать +10 % за КАЖДЫЙ километр на основании нашего же предположения нельзя:
+    # это выглядит как измеренный факт, а фактом не является.
+    if traffic_measured and route_time_factor >= TRAFFIC_FACTOR_THRESHOLD:
         factor *= 1 + TRAFFIC_MARKUP
 
     if aggressive_score > 0:
@@ -281,6 +309,7 @@ def km_cost(
     measured_maintenance_per_km: float | None = None,
     aggressive_score: float = 0.0,
     route_time_factor: float = 1.0,
+    traffic_measured: bool = False,
     today: date | None = None,
 ) -> KmCost:
     """Стоимость километра. Измеренное всегда важнее посчитанного.
@@ -331,6 +360,7 @@ def km_cost(
         settings,
         aggressive_score=aggressive_score,
         route_time_factor=route_time_factor,
+        traffic_measured=traffic_measured,
         today=today,
     )
 

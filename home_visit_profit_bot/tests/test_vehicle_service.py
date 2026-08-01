@@ -68,11 +68,18 @@ def test_traffic_is_computed_from_actual_versus_planned_route() -> None:
     """Пробки не спрашиваем: если факт стабильно дольше плана — значит, стоим."""
     settings = FakeSettings({"service_tier": "cheap"})
 
-    free = risk_markup(settings, route_time_factor=1.0, today=SUMMER)
-    jammed = risk_markup(settings, route_time_factor=1.4, today=SUMMER)
+    # traffic_measured=True — надбавка берётся только с ИЗМЕРЕННОГО коэффициента
+    # (отчёт 874): по умолчанию он 2,0 при пороге 1,30, и без этой проверки надбавку
+    # платил бы человек, про чьи пробки мы не знаем ничего.
+    free = risk_markup(settings, route_time_factor=1.0, traffic_measured=True, today=SUMMER)
+    jammed = risk_markup(settings, route_time_factor=1.4, traffic_measured=True, today=SUMMER)
 
     assert free == 0.0
     assert round(jammed, 2) == 0.10
+
+    # Тот же коэффициент, но не измеренный — надбавки нет.
+    assumed = risk_markup(settings, route_time_factor=1.4, traffic_measured=False, today=SUMMER)
+    assert assumed == 0.0
 
 
 def test_manual_mode_ignores_the_markups() -> None:
