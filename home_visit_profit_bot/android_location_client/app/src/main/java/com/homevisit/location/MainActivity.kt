@@ -279,10 +279,17 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 if (batchOrders.isNotEmpty()) {
+                    val basketPreview by viewModel.basketPreview.collectAsStateWithLifecycle()
+                    val basketLoading by viewModel.basketLoading.collectAsStateWithLifecycle()
                     BatchOrdersScreen(
                         orders = batchOrders,
                         onAddGreen = { greens -> viewModel.addBatchGreen(DEFAULT_SERVER_URL, sessionToken, greens) },
                         onClose = { viewModel.clearBatch() },
+                        basket = basketPreview,
+                        basketLoading = basketLoading,
+                        onCountBasket = { prepared ->
+                            viewModel.previewBasket(DEFAULT_SERVER_URL, sessionToken, prepared)
+                        },
                     )
                     return@HomeVisitTheme
                 }

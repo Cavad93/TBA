@@ -68,6 +68,10 @@ def evaluate(inputs: dict) -> dict:
     blocks_outside_zone = bool(inputs.get("blocks_outside_zone", False))
     is_base = bool(inputs["is_base_district"])
     existing_base_count = int(inputs["existing_base_count"])
+    # Сколько заказов УЖЕ принято. Пустая лента — это не «плохой день», а отсутствие
+    # альтернативы: сравнивать заказ не с чем, и порог обнуляется (вариант А, отчёт 878).
+    # По умолчанию 1 — «альтернатива есть», чтобы старые входы не стали вдруг мягче.
+    existing_count = int(inputs.get("existing_count", 1))
     # Парковка у точки заказа (Фаза 9.4): нижняя граница вычитается из маржи — так же,
     # как в серверном calculate_candidate_impact. По умолчанию 0 (нет платной зоны).
     parking_cost = float(inputs.get("parking_cost", 0.0))
@@ -93,6 +97,9 @@ def evaluate(inputs: dict) -> dict:
         outside_min_extra=outside_min_extra,
         marginal_profit=marginal_profit,
         blocks_outside_zone=blocks_outside_zone,
+        marginal_hourly=marginal_hourly,
+        min_marginal_hourly=min_marginal_hourly,
+        existing_count=existing_count,
     )
     verdict = decision_to_verdict(decision)
     score = profitability_score(decision, marginal_hourly, min_marginal_hourly)

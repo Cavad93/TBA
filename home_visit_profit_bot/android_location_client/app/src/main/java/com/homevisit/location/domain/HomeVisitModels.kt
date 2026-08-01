@@ -411,6 +411,41 @@ data class AddressCandidate(
  * результат геокодинга. Зелёный (resolved) — готов; жёлтый (candidates) — выбрать;
  * красный (ничего) — не понято, ручная правка. Молча ничего не добавляем.
  */
+/**
+ * Вердикт на ПАЧКУ заказов целиком (вариант Б, отчёты 878/881).
+ *
+ * Поштучная оценка у связки врёт: общий подъезд достаётся первому заказу, и именно он
+ * помечается невыгодным — хотя он открывает выгодный куст. [sharedKm] — та часть крюка,
+ * которую платишь, пока едешь хоть за одним заказом куста, и которую нельзя честно
+ * приписать ни одному из них.
+ */
+data class BasketPreview(
+    val count: Int,
+    val income: Double,
+    val extraKm: Double,
+    val extraMinutes: Double,
+    val marginalProfit: Double,
+    val marginalHourly: Double,
+    val decision: String,
+    val verdict: String,
+    val score: Int,
+    val reason: String,
+    val sharedKm: Double,
+    val sharedMinutes: Double,
+    val items: List<BasketItem>,
+    /** Адреса, которые в пачку не попали: без координат маршрут не построить. */
+    val skipped: List<String> = emptyList(),
+)
+
+data class BasketItem(
+    val address: String,
+    val income: Double,
+    val extraKm: Double,
+    val extraMinutes: Double,
+    val marginalProfit: Double,
+    val marginalHourly: Double,
+)
+
 data class BatchOrder(
     val address: String,
     val income: Double?,

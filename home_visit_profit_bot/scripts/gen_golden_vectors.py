@@ -21,6 +21,42 @@ from app.services.candidate_pure import evaluate
 # заданы явно — их считает полный день на сервере, а здесь фиксируем контракт ядра.
 CASES: list[dict] = [
     {
+        # Отчёт 878, вариант А: ХРАПОВИК. День идёт по 2100 ₽/час, заказ приносит 2367 ₽/час
+        # чистыми за своё время. Старое правило («после ≥ до») давало красный: заказ тянул
+        # средний вниз. Новое судит собственную ставку заказа — заказ проходит.
+        "name": "good_day_no_longer_blocks_a_profitable_order",
+        "income": 1500, "extra_km": 8, "extra_drive_minutes": 16, "service_minutes": 20,
+        "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "before_hourly": 2100,
+        "after_hourly": 2050, "min_hourly": 600, "min_marginal_hourly": 600,
+        "is_base_district": True, "existing_base_count": 3, "existing_count": 3,
+    },
+    {
+        # Тот же храповик вне базовой зоны: планка была max(средний дня, порог).
+        "name": "good_day_no_longer_blocks_an_outside_zone_order",
+        "income": 1500, "extra_km": 8, "extra_drive_minutes": 16, "service_minutes": 20,
+        "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "before_hourly": 2100,
+        "after_hourly": 2050, "min_hourly": 600, "min_marginal_hourly": 600,
+        "outside_min_hourly": 700, "is_base_district": False, "existing_base_count": 6,
+        "existing_count": 3,
+    },
+    {
+        # Пустая лента: альтернатива — НОЛЬ, а не «заказ получше». Слабый заказ проходит.
+        "name": "empty_feed_accepts_a_weak_order",
+        "income": 300, "extra_km": 8, "extra_drive_minutes": 16, "service_minutes": 20,
+        "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "before_hourly": 0,
+        "after_hourly": 400, "min_hourly": 600, "min_marginal_hourly": 600,
+        "is_base_district": True, "existing_base_count": 0, "existing_count": 0,
+    },
+    {
+        # Пустая лента, но заказ УБЫТОЧЕН: дорога дороже дохода. Ноль порога не значит
+        # «бери что угодно» — заказ обязан окупить хотя бы дорогу до себя.
+        "name": "empty_feed_still_rejects_a_losing_order",
+        "income": 50, "extra_km": 8, "extra_drive_minutes": 16, "service_minutes": 20,
+        "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "before_hourly": 0,
+        "after_hourly": -30, "min_hourly": 600, "min_marginal_hourly": 600,
+        "is_base_district": True, "existing_base_count": 0, "existing_count": 0,
+    },
+    {
         "name": "base_clear_go",
         "income": 1500, "extra_km": 8, "extra_drive_minutes": 16, "service_minutes": 20,
         "fuel_per_km": 7.0, "maintenance_per_km": 3.0, "before_hourly": 700,

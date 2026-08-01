@@ -251,6 +251,29 @@ object VerdictColors {
     val onRouteContainer = Color(0xFF18449B)
 }
 
+/**
+ * Качество распознавания адреса — это НЕ вердикт (отчёты 878/881).
+ *
+ * На экране пачки заказов зелёный/жёлтый/красный означали «адрес понят / нужно уточнить /
+ * не разобрали», но брались из [VerdictColors] — то есть выглядели ровно как «стоит ехать /
+ * на грани / невыгодно». Человек читал «система одобрила пачку», хотя система про деньги
+ * там вообще ничего не говорила. Тот же принцип, что и у синего цвета дороги: зелёный в
+ * приложении значит «стоит ехать», и занимать его под другой смысл нельзя.
+ */
+object AddressQualityColors {
+    /** Адрес найден однозначно. */
+    val resolved = Color(0xFF4A5568)
+    val resolvedContainer = Color(0xFFEDF0F4)
+
+    /** Есть варианты — нужно выбрать. */
+    val ambiguous = Color(0xFF7A5CB8)
+    val ambiguousContainer = Color(0xFFF1ECFA)
+
+    /** Строку не разобрали. */
+    val unknown = Color(0xFF8A8F98)
+    val unknownContainer = Color(0xFFF2F3F5)
+}
+
 @Composable
 internal fun HomeVisitTheme(content: @Composable () -> Unit) {
     MaterialTheme(

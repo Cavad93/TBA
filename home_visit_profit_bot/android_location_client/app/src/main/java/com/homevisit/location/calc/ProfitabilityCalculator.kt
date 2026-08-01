@@ -41,6 +41,10 @@ object ProfitabilityCalculator {
         // Цена отклика (Фаза 11.2): платный лид (Профи/Авито) — прямой расход заказа,
         // вычитается из маржи так же, как парковка. 0 — сарафан/бесплатный источник.
         val responseCost: Double = 0.0,
+        // Сколько заказов УЖЕ принято. Пустая лента — не «плохой день», а отсутствие
+        // альтернативы: сравнивать заказ не с чем, и порог обнуляется (отчёт 878).
+        // По умолчанию 1 — «альтернатива есть», чтобы старые входы не стали мягче.
+        val existingCount: Int = 1,
     )
 
     data class Result(
@@ -78,6 +82,9 @@ object ProfitabilityCalculator {
             outsideMinExtra = input.outsideMinExtra,
             marginalProfit = marginalProfit,
             blocksOutsideZone = input.blocksOutsideZone,
+            marginalHourly = marginalHourly,
+            minMarginalHourly = input.minMarginalHourly,
+            existingCount = input.existingCount,
         )
         val verdict = decisionToVerdict(decision)
         val score = profitabilityScore(decision, marginalHourly, input.minMarginalHourly)
@@ -114,6 +121,31 @@ object ProfitabilityCalculator {
      * Точный перенос make_decision. Строки решений совпадают с сервером посимвольно —
      * от них зависит и вердикт (decisionToVerdict ищет подстроки), и показ на экране.
      */
+    /**
+     * С какой ставкой сравнивается заказ. Точный перенос `decision_target_hourly`.
+     *
+     * Ноль при пустой ленте — не поблажка, а арифметика: сравнивать заказ можно только
+     * с тем, что получишь ВМЕСТО него, а вместо него при пустой ленте — ноль.
+     */
+    private fun decisionTargetHourly(
+        isBaseDistrict: Boolean,
+        existingCount: Int,
+        minMarginalHourly: Double,
+        outsideMinHourly: Double,
+    ): Double {
+        if (existingCount <= 0) return 0.0
+        if (isBaseDistrict) return minMarginalHourly
+        return maxOf(minMarginalHourly, outsideMinHourly)
+    }
+
+    /**
+     * Точный перенос make_decision (вариант А, отчёты 878/881).
+     *
+     * Судит СОБСТВЕННАЯ ставка заказа, а не средняя дня. Раньше вне базовой зоны планка
+     * бралась как max(средний ₽/час дня, порог) — храповик: чем удачнее шёл день, тем
+     * жёстче отказ. Средний ₽/час дня остался только оттенком (различает «однозначно да»
+     * и «можно брать») и больше ничего не блокирует.
+     */
     private fun makeDecision(
         beforeHourly: Double,
         afterHourly: Double,
@@ -124,20 +156,34 @@ object ProfitabilityCalculator {
         outsideMinExtra: Double,
         marginalProfit: Double,
         blocksOutsideZone: Boolean,
+        marginalHourly: Double,
+        minMarginalHourly: Double,
+        existingCount: Int,
     ): String {
+        val target = decisionTargetHourly(
+            isBaseDistrict = isBaseDistrict,
+            existingCount = existingCount,
+            minMarginalHourly = minMarginalHourly,
+            outsideMinHourly = outsideMinHourly,
+        )
+        // При НУЛЕВОМ пороге (пустая лента) «ставка не ниже ноля» ещё не значит «в плюсе»:
+        // заказ обязан хотя бы окупить дорогу до себя. При положительном пороге проверка
+        // избыточна: ставка выше порога уже означает положительную прибыль.
+        val passes = marginalHourly >= target && (target > 0 || marginalProfit > 0)
         if (!isBaseDistrict) {
             if (blocksOutsideZone) return "ТОЛЬКО СО СПЕЦТАРИФОМ"
-            val target = maxOf(beforeHourly, outsideMinHourly)
             // Надбавка вне зоны — доход-осознанно (отчёт 15): считается покрытой, если
             // маржинальная прибыль заказа её окупает; тогда вердикт идёт от прибыльности.
-            // Точный перенос серверного make_decision.
             val premiumCovered = outsideMinExtra <= 0 || marginalProfit >= outsideMinExtra
-            if (afterHourly >= target && premiumCovered) return "МОЖНО БРАТЬ"
-            if (afterHourly >= target) return "ТОЛЬКО С НАДБАВКОЙ"
+            if (passes && premiumCovered) return "МОЖНО БРАТЬ"
+            if (passes) return "ТОЛЬКО С НАДБАВКОЙ"
             return "ТОЛЬКО СО СПЕЦТАРИФОМ"
         }
-        if (afterHourly > beforeHourly) return "ОДНОЗНАЧНО ДА"
-        if (afterHourly >= minHourly) return "МОЖНО БРАТЬ"
+        if (passes) {
+            if (existingCount <= 0) return "ОДНОЗНАЧНО ДА"
+            if (afterHourly >= beforeHourly) return "ОДНОЗНАЧНО ДА"
+            return "МОЖНО БРАТЬ"
+        }
         return "НЕВЫГОДНО / ТОЛЬКО СО СПЕЦТАРИФОМ"
     }
 

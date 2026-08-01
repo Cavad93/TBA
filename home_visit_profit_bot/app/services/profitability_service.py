@@ -387,6 +387,9 @@ def calculate_candidate_impact(
         outside_min_extra=outside_min_extra,
         marginal_profit=marginal_profit,
         blocks_outside_zone=pricing.blocks_outside_zone,
+        marginal_hourly=marginal_hourly,
+        min_marginal_hourly=min_marginal_hourly,
+        existing_count=len(existing_visits),
     )
     tariff = calculate_required_tariff(
         day=day,
@@ -510,6 +513,27 @@ def profitability_score(
     return int(round(low + position * (high - low)))
 
 
+def decision_target_hourly(
+    *,
+    is_base_district: bool,
+    existing_count: int,
+    min_marginal_hourly: float,
+    outside_min_hourly: float,
+) -> float:
+    """С какой ставкой сравнивается заказ. ОДНО место, чтобы вердикт и подсказка тарифа
+    не разошлись: подсказка обязана просить ровно столько, сколько требует вердикт.
+
+    Ноль при пустой ленте — это не поблажка, а арифметика: сравнивать заказ можно
+    только с тем, что получишь ВМЕСТО него. Нет ни одного принятого заказа — вместо
+    него ты получаешь ноль, и любой заказ, покрывающий бензин и износ, выгоднее отказа.
+    """
+    if existing_count <= 0:
+        return 0.0
+    if is_base_district:
+        return min_marginal_hourly
+    return max(min_marginal_hourly, outside_min_hourly)
+
+
 def make_decision(
     before_hourly: float,
     after_hourly: float,
@@ -520,8 +544,49 @@ def make_decision(
     outside_min_extra: float = 0.0,
     marginal_profit: float = 0.0,
     blocks_outside_zone: bool = False,
+    *,
+    marginal_hourly: float,
+    min_marginal_hourly: float,
+    existing_count: int,
 ) -> tuple[str, str]:
+    """Вердикт по заказу: судит СОБСТВЕННАЯ ставка заказа, а не средняя дня (вариант А).
+
+    Что было и почему это ломалось (отчёты 878/881). Решение принималось по дневному
+    ₽/час «после» против ₽/час «до», а для заказов вне базовой зоны планка бралась как
+    `max(средний ₽/час дня, порог)`. Это храповик: чем удачнее идёт день, тем жёстче
+    отказ. Свойство медианты делает правило «после ≥ до» тождественным требованию
+    «маржинальная ставка заказа не ниже сегодняшней средней» — то есть заказ на 2000 ₽
+    за час чистыми получал красный, если день шёл по 2100 ₽/час. Взять его — это плюс
+    2000 ₽ в карман; отказаться ради среднего — минус 2000 ₽ и ничего взамен.
+
+    Внутри такого сравнения спрятано молчаливое допущение: что на место этого заказа
+    придёт заказ ЛУЧШЕ. Проверка по источникам (модель Макколла; боевой алгоритм Lyft,
+    где вес заказа считается против ожидаемой ценности времени и места, а простой явной
+    строкой даёт ноль; bid-price в revenue management) даёт один и тот же ответ:
+    сравнивать надо не со средним, а с тем, что реально получишь при отказе.
+
+    Что теперь. Заказ проходит, если ЕГО СОБСТВЕННАЯ маржинальная ставка (прибыль за
+    фактически потраченное на него время) не ниже порога. Средний ₽/час дня остаётся —
+    но только как оттенок: он различает «однозначно да» и «можно брать», и НЕ блокирует.
+
+    Порог не зависит от того, как идёт день, — только от настроек и от того, есть ли
+    вообще альтернатива (см. `decision_target_hourly`). Насколько плотна лента прямо
+    сейчас, вариант А не знает; это следующий шаг (вариант В).
+    """
     outside_min_hourly = min_hourly if outside_min_hourly is None else outside_min_hourly
+    target = decision_target_hourly(
+        is_base_district=candidate.is_base_district,
+        existing_count=existing_count,
+        min_marginal_hourly=min_marginal_hourly,
+        outside_min_hourly=outside_min_hourly,
+    )
+    # При НУЛЕВОМ пороге (пустая лента) «ставка не ниже ноля» ещё не значит «в плюсе»:
+    # заказ обязан хотя бы окупить дорогу до себя. При положительном пороге эта проверка
+    # избыточна — ставка выше порога уже означает положительную прибыль, — и требовать
+    # её было бы ошибкой: marginal_profit не у всех вызовов заполнен.
+    passes = marginal_hourly >= target and (target > 0 or marginal_profit > 0)
+    empty_feed = existing_count <= 0
+
     if not candidate.is_base_district:
         if blocks_outside_zone:
             # Дальняя дорога на исходе ресурса — это уже не вопрос денег: сколько ни
@@ -530,7 +595,6 @@ def make_decision(
                 "ТОЛЬКО СО СПЕЦТАРИФОМ",
                 "Высокий долг восстановления. Заказы вне базовой зоны сегодня брать не стоит.",
             )
-        target = max(before_hourly, outside_min_hourly)
         # Надбавка вне зоны — доход-осознанно, а не слепым флагом (отчёт 15 из TG).
         # Раньше любая настроенная надбавка (>0) гасила ЛЮБОЙ внезонный заказ в янтарь,
         # даже сверхприбыльный: сравнения с доходом не было. Теперь надбавка считается
@@ -538,38 +602,56 @@ def make_decision(
         # идёт от прибыльности. Дешёвый внезонный заказ, что надбавку не окупает, остаётся
         # янтарным «только с надбавкой» — фича защиты сохранена.
         premium_covered = outside_min_extra <= 0 or marginal_profit >= outside_min_extra
-        if after_hourly >= target and premium_covered:
+        if passes and premium_covered:
+            if empty_feed:
+                return (
+                    "МОЖНО БРАТЬ",
+                    "Адрес вне базовой зоны, но принятых заказов сегодня ещё нет — взять его выгоднее, чем стоять.",
+                )
             if existing_base_count < 5:
                 return (
                     "МОЖНО БРАТЬ",
-                    "Адрес вне базовой зоны, но он не снижает чистую доходность за час. Базовых адресов пока меньше 5 — проверьте маршрут внимательно.",
+                    "Адрес вне базовой зоны, но сам заказ окупает потраченное на него время. Базовых адресов пока меньше 5 — проверьте маршрут внимательно.",
                 )
             return (
                 "МОЖНО БРАТЬ",
-                "Адрес вне базовой зоны, но чистая доходность за час не снижается.",
+                "Адрес вне базовой зоны, но сам заказ окупает потраченное на него время.",
             )
-        if after_hourly >= target:
+        if passes:
             return (
                 "ТОЛЬКО С НАДБАВКОЙ",
-                "Адрес вне базовой зоны проходит по часу, но его прибыль не покрывает заданную минимальную надбавку вне зоны.",
+                "Адрес вне базовой зоны окупает своё время, но его прибыль не покрывает заданную минимальную надбавку вне зоны.",
             )
         return (
             "ТОЛЬКО СО СПЕЦТАРИФОМ",
-            "Адрес вне базовой зоны снижает чистую доходность за час.",
+            "Заказ вне базовой зоны не окупает время, которое на него уйдёт.",
         )
-    if after_hourly > before_hourly:
-        return (
-            "ОДНОЗНАЧНО ДА",
-            "Добавление адреса повышает среднюю доходность за час.",
-        )
-    if after_hourly >= min_hourly:
+    if passes:
+        # Средний ₽/час дня больше не судит — он только различает оттенок. Заказ выше
+        # порога, но ниже сегодняшнего темпа, остаётся выгодным: он добавляет деньги,
+        # которых иначе не будет. Раньше ровно здесь загорался красный.
+        if empty_feed:
+            return (
+                "ОДНОЗНАЧНО ДА",
+                "Принятых заказов сегодня ещё нет — этот приносит деньги, отказ не приносит ничего.",
+            )
+        if after_hourly >= before_hourly:
+            return (
+                "ОДНОЗНАЧНО ДА",
+                "Заказ окупает своё время и не тянет средний ₽/час дня вниз.",
+            )
         return (
             "МОЖНО БРАТЬ",
-            "Доходность дня остаётся выше минимального порога.",
+            "Заказ окупает своё время, хотя средний ₽/час дня немного просядет — в сумме за смену это плюс.",
+        )
+    if marginal_profit <= 0:
+        return (
+            "НЕВЫГОДНО / ТОЛЬКО СО СПЕЦТАРИФОМ",
+            "Дорога до заказа стоит дороже, чем он приносит.",
         )
     return (
         "НЕВЫГОДНО / ТОЛЬКО СО СПЕЦТАРИФОМ",
-        "Расчётная доходность ниже минимального порога.",
+        "Заказ окупает дорогу, но время на него стоит дешевле вашего порога.",
     )
 
 
@@ -600,27 +682,32 @@ def calculate_required_tariff(
         known_expenses=known_expenses,
         income_without_candidate=income_without_candidate,
     )
-    keep_hourly_income = 0.0
-    if not candidate.is_base_district:
-        keep_hourly_income = _required_income_for_day_hourly(
-            target_hourly=max(before_hourly, outside_min_hourly),
-            after_minutes=after_minutes,
-            known_expenses=known_expenses,
-            income_without_candidate=income_without_candidate,
-        )
-    marginal_income = max(0.0, min_marginal_hourly * (extra_total_minutes / 60) + extra_car_cost)
+    # Храповика больше нет: вердикт не требует «не опускать сегодняшний средний»,
+    # значит и просить за это доплату нельзя. Поле остаётся в ответе (его читает
+    # разбор оценки), но всегда ноль — иначе подсказка требовала бы денег за условие,
+    # которого вердикт уже не проверяет.
+    required_extra_for_keep_hourly = 0.0
+    # Ровно та планка, по которой судит make_decision — одна функция на оба места.
+    target_hourly = decision_target_hourly(
+        is_base_district=candidate.is_base_district,
+        existing_count=len(existing_visits),
+        min_marginal_hourly=min_marginal_hourly,
+        outside_min_hourly=outside_min_hourly,
+    )
+    marginal_income = max(0.0, target_hourly * (extra_total_minutes / 60) + extra_car_cost)
     outside_extra = outside_min_extra if not candidate.is_base_district else 0.0
 
     required_extra_for_min_hourly = max(0.0, min_hourly_income - candidate.income)
-    required_extra_for_keep_hourly = max(0.0, keep_hourly_income - candidate.income)
     required_extra_for_marginal_hourly = max(0.0, marginal_income - candidate.income)
     # Доход-осознанно (отчёт 15): надбавку вне зоны считаем уже покрытой на столько,
     # сколько заказ приносит маржинальной прибыли. Просить доплату надо лишь на разницу,
     # а не на всю надбавку — иначе подсказка тарифа противоречила бы зелёному вердикту.
     required_extra_for_outside_zone = max(0.0, outside_extra - marginal_profit)
+    # В доплату входит ТОЛЬКО то, что проверяет вердикт: собственная ставка заказа и
+    # надбавка вне зоны. Дневной порог `min_hourly` остаётся в разборе справочно —
+    # он отвечает на вопрос «сколько нужно, чтобы день вышел на цель», но требовать
+    # за него доплату значило бы просить деньги у заказа, который вердикт уже одобрил.
     required_extra_payment = max(
-        required_extra_for_min_hourly,
-        required_extra_for_keep_hourly,
         required_extra_for_marginal_hourly,
         required_extra_for_outside_zone,
     )

@@ -13,6 +13,8 @@ import com.homevisit.location.data.local.VisitEntity
 import com.homevisit.location.data.local.WorkDayEntity
 import com.homevisit.location.domain.AnchorUpdate
 import com.homevisit.location.domain.AddressCandidate
+import com.homevisit.location.domain.BasketItem
+import com.homevisit.location.domain.BasketPreview
 import com.homevisit.location.domain.BatchOrder
 import com.homevisit.location.domain.AddressSuggestResult
 import com.homevisit.location.domain.AppSettingsSnapshot
@@ -832,6 +834,87 @@ class HomeVisitRepository private constructor(
         val response = postJson(normalizeApiUrl(serverUrl, "/api/orders/batch-parse"), apiKey, payload)
             ?: return@withContext emptyList()
         parseBatchOrders(response)
+    }
+
+    /**
+     * Вердикт на ПАЧКУ заказов целиком: один маршрут, один вердикт (вариант Б, отчёт 878).
+     *
+     * Раньше пачка оценивалась поштучно, и общий подъезд куста доставался первому заказу —
+     * он и объявлялся невыгодным, хотя открывал выгодную связку. Сервер считает пачку
+     * одним маршрутом и отдельно называет неделимый общий подъезд.
+     *
+     * null — сервер не ответил: это надо отличать от «пачка невыгодна», иначе проблема
+     * со связью читалась бы как экономический вердикт.
+     */
+    suspend fun basketPreview(
+        serverUrl: String,
+        apiKey: String,
+        orders: List<BatchOrder>,
+    ): BasketPreview? = withContext(Dispatchers.IO) {
+        val array = JSONArray()
+        orders.forEach { order ->
+            val point = order.resolved ?: return@forEach
+            array.put(
+                JSONObject()
+                    .put("address", point.address.ifBlank { order.address })
+                    .put("lat", point.lat)
+                    .put("lon", point.lon)
+                    .put("income", order.income ?: 0.0)
+            )
+        }
+        if (array.length() == 0) return@withContext null
+        val response = postJson(
+            normalizeApiUrl(serverUrl, "/api/visits/basket/preview"),
+            apiKey,
+            JSONObject().put("orders", array),
+        ) ?: return@withContext null
+        parseBasketPreview(response)
+    }
+
+    private fun parseBasketPreview(response: JSONObject): BasketPreview? {
+        if (!response.optBoolean("ok", false)) return null
+        val basket = response.optJSONObject("basket") ?: return null
+        val items = ArrayList<BasketItem>()
+        val rawItems = basket.optJSONArray("items")
+        if (rawItems != null) {
+            for (i in 0 until rawItems.length()) {
+                val raw = rawItems.optJSONObject(i) ?: continue
+                items.add(
+                    BasketItem(
+                        address = raw.optString("address"),
+                        income = raw.optDouble("income", 0.0),
+                        extraKm = raw.optDouble("extra_km", 0.0),
+                        extraMinutes = raw.optDouble("extra_minutes", 0.0),
+                        marginalProfit = raw.optDouble("marginal_profit", 0.0),
+                        marginalHourly = raw.optDouble("marginal_hourly", 0.0),
+                    )
+                )
+            }
+        }
+        val skipped = ArrayList<String>()
+        val rawSkipped = response.optJSONArray("skipped")
+        if (rawSkipped != null) {
+            for (i in 0 until rawSkipped.length()) {
+                rawSkipped.optJSONObject(i)?.optString("address")?.takeIf { it.isNotBlank() }
+                    ?.let { skipped.add(it) }
+            }
+        }
+        return BasketPreview(
+            count = basket.optInt("count", items.size),
+            income = basket.optDouble("income", 0.0),
+            extraKm = basket.optDouble("extra_km", 0.0),
+            extraMinutes = basket.optDouble("extra_minutes", 0.0),
+            marginalProfit = basket.optDouble("marginal_profit", 0.0),
+            marginalHourly = basket.optDouble("marginal_hourly", 0.0),
+            decision = basket.optString("decision"),
+            verdict = basket.optString("verdict", "edge"),
+            score = basket.optInt("score", 0),
+            reason = basket.optString("reason"),
+            sharedKm = basket.optDouble("shared_km", 0.0),
+            sharedMinutes = basket.optDouble("shared_minutes", 0.0),
+            items = items,
+            skipped = skipped,
+        )
     }
 
     /**

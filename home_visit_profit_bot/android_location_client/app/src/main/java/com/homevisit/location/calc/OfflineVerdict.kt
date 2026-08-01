@@ -93,6 +93,8 @@ object OfflineVerdict {
                 outsideMinExtra = input.outsideMinExtra,
                 blocksOutsideZone = input.blocksOutsideZone,
                 responseCost = input.candidateResponseCost,
+                // Пустая лента — отсутствие альтернативы: порог обнуляется (отчёт 878).
+                existingCount = input.existingCount,
             )
         )
     }

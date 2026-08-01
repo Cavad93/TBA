@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.deps import ApiError, Authed, authed, parse_json, raw_body
 from app.api.responses import LegacyJSONResponse
+from app.services.basket_api_service import BasketApiService
 from app.services.mobile_visit_service import MobileVisitService, candidate_result_payload
 
 router = APIRouter()
@@ -23,6 +24,22 @@ def visit_candidate(body: bytes = Depends(raw_body), auth: Authed = Depends(auth
     if result.reason in {"needs_coordinates", "needs_manual_route", "no_active_day"}:
         status = 200
     return LegacyJSONResponse(candidate_result_payload(result), status_code=status)
+
+
+@router.post("/api/visits/basket/preview")
+def visit_basket_preview(body: bytes = Depends(raw_body), auth: Authed = Depends(authed)):
+    """Предпросмотр ПАЧКИ заказов: один маршрут, один вердикт, вклад каждого заказа.
+
+    Ничего не создаёт и не принимает — человек сначала видит вердикт на корзину целиком,
+    и только потом решает. Поштучная оценка тут структурно врёт: у связки общий подъезд,
+    и он весь доставался первому заказу (отчёты 878/881).
+    """
+    payload = parse_json(body, {"error": "bad_request"}, with_detail=True)
+    try:
+        result = BasketApiService(auth.db).preview(payload)
+    except (ValueError, TypeError) as error:
+        raise ApiError(400, {"error": "bad_request", "detail": str(error)})
+    return LegacyJSONResponse(result, status_code=200 if result.get("ok") else 400)
 
 
 @router.post("/api/visits/onsite")

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -25,11 +26,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.text.KeyboardOptions
 import com.homevisit.location.domain.AddressCandidate
+import com.homevisit.location.domain.BasketPreview
 import com.homevisit.location.domain.BatchOrder
 
 /**
@@ -51,6 +53,9 @@ internal fun BatchOrdersScreen(
     orders: List<BatchOrder>,
     onAddGreen: (List<BatchOrder>) -> Unit,
     onClose: () -> Unit,
+    basket: BasketPreview? = null,
+    basketLoading: Boolean = false,
+    onCountBasket: (List<BatchOrder>) -> Unit = {},
 ) {
     // Правки живут по индексу строки: сам список приходит из ViewModel и не меняется.
     val incomes = remember(orders) { mutableStateMapOf<Int, String>() }
@@ -104,6 +109,17 @@ internal fun BatchOrdersScreen(
                     onPick = { picked[index] = it },
                 )
             }
+            // Вердикт на пачку ЦЕЛИКОМ. Раньше экран не показывал ни рубля: человек
+            // добавлял вслепую, а заказы прогонялись по одному, и общий подъезд куста
+            // доставался первому — он и объявлялся невыгодным (отчёты 878/881).
+            if (prepared.isNotEmpty()) {
+                BasketSummary(
+                    basket = basket,
+                    loading = basketLoading,
+                    count = prepared.size,
+                    onCount = { onCountBasket(prepared) },
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
                     modifier = Modifier.weight(1f),
@@ -114,7 +130,128 @@ internal fun BatchOrdersScreen(
                 }
                 TextButton(onClick = onClose) { Text("Закрыть") }
             }
+            if (basket != null && basket.verdict == "skip") {
+                // Не запрещаем — решает человек. Но и не молчим: раньше кнопка добавляла
+                // пачку независимо от экономики, а зелёный на строках означал всего лишь
+                // «адрес распознан», и это читалось как одобрение.
+                Text(
+                    "Пачка не окупает время, которое на неё уйдёт. Добавить можно, но это осознанный минус.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = VerdictColors.skip,
+                )
+            }
         }
+    }
+}
+
+/**
+ * Итог по пачке: доход, общий крюк, ставка и вердикт — одним блоком.
+ *
+ * Отдельной строкой назван ОБЩИЙ ПОДЪЕЗД: километры, которые платишь, пока едешь хоть за
+ * одним заказом куста. Приписать их одному заказу нельзя, и именно из-за такой попытки
+ * первый заказ дальней связки всегда выглядел убыточным.
+ */
+@Composable
+private fun BasketSummary(
+    basket: BasketPreview?,
+    loading: Boolean,
+    count: Int,
+    onCount: () -> Unit,
+) {
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                "Пачка целиком",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            when {
+                loading -> Text(
+                    "Считаем один маршрут по всем $count адресам…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                basket == null -> {
+                    Text(
+                        "Заказы связкой почти всегда выгоднее, чем поодиночке: дорога до куста " +
+                            "одна на всех. Посчитайте пачку целиком, прежде чем решать.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = onCount) { Text("Посчитать пачку") }
+                }
+
+                else -> {
+                    val accent = when (basket.verdict) {
+                        "go" -> VerdictColors.go
+                        "skip" -> VerdictColors.skip
+                        else -> VerdictColors.edge
+                    }
+                    Text(
+                        basket.decision,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = accent,
+                    )
+                    Text(
+                        basket.reason,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    BasketLine("Доход пачки", money(basket.income))
+                    BasketLine(
+                        "Общий крюк",
+                        oneDecimal(basket.extraKm) + " км · " + minutesText(basket.extraMinutes),
+                    )
+                    BasketLine("Чистыми", money(basket.marginalProfit))
+                    BasketLine("Ставка пачки", money(basket.marginalHourly) + "/час")
+                    if (basket.sharedKm >= 1) {
+                        BasketLine(
+                            "Из них общий подъезд",
+                            oneDecimal(basket.sharedKm) + " км на всю пачку",
+                        )
+                    }
+                    if (basket.skipped.isNotEmpty()) {
+                        Text(
+                            "Не попали в расчёт: " + basket.skipped.joinToString(", "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = onCount) { Text("Пересчитать") }
+                }
+            }
+        }
+    }
+}
+
+/** Числа ведут макет: моноширинный, чтобы столбцы значений стояли ровно. */
+@Composable
+private fun BasketLine(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 
@@ -136,10 +273,13 @@ private fun BatchOrderRow(
         order.candidates.isNotEmpty() -> BatchOrder.Status.YELLOW
         else -> BatchOrder.Status.RED
     }
+    // Цвета качества адреса, а НЕ вердикта: здесь речь про «адрес понят», а не про
+    // «стоит ехать». Раньше строка красилась зелёным из VerdictColors, и пачка выглядела
+    // одобренной, хотя про деньги система в этот момент ничего не сказала (отчёт 878).
     val accent = when (effective) {
-        BatchOrder.Status.GREEN -> VerdictColors.go
-        BatchOrder.Status.YELLOW -> VerdictColors.edge
-        BatchOrder.Status.RED -> VerdictColors.skip
+        BatchOrder.Status.GREEN -> AddressQualityColors.resolved
+        BatchOrder.Status.YELLOW -> AddressQualityColors.ambiguous
+        BatchOrder.Status.RED -> AddressQualityColors.unknown
     }
     Card(
         shape = RoundedCornerShape(14.dp),

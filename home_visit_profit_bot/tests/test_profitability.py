@@ -51,10 +51,13 @@ def test_outside_base_can_be_accepted_when_hourly_does_not_drop() -> None:
         candidate=candidate,
         existing_base_count=2,
         min_hourly=600,
+        marginal_hourly=1200,
+        min_marginal_hourly=600,
+        existing_count=2,
     )
 
     assert decision == "МОЖНО БРАТЬ"
-    assert "не снижает" in reason
+    assert "окупает потраченное на него время" in reason
 
 
 def test_after_hourly_growth_is_clear_yes_for_base_candidate() -> None:
@@ -80,6 +83,9 @@ def test_after_hourly_growth_is_clear_yes_for_base_candidate() -> None:
         candidate=candidate,
         existing_base_count=3,
         min_hourly=600,
+        marginal_hourly=1500,
+        min_marginal_hourly=600,
+        existing_count=3,
     )
 
     assert decision == "ОДНОЗНАЧНО ДА"
@@ -255,11 +261,16 @@ def test_outside_base_requires_extra_to_keep_current_hourly() -> None:
     )
 
     assert tariff["required_extra_for_min_hourly"] == 0
-    assert tariff["required_extra_for_keep_hourly"] == 1200
+    # Храповика больше нет: вердикт не требует «не опускать сегодняшний средний»,
+    # значит и просить за это доплату нельзя (вариант А, отчёты 878/881). Поле
+    # осталось в ответе ради разбора оценки, но всегда ноль.
+    assert tariff["required_extra_for_keep_hourly"] == 0
     assert tariff["required_extra_for_marginal_hourly"] == 0
     assert tariff["required_extra_for_outside_zone"] == 500
-    assert tariff["required_extra_payment"] == 1200
-    assert tariff["required_candidate_income"] == 2200
+    # Просить теперь можно только за то, что проверяет вердикт: собственная ставка
+    # заказа (тут она уже проходит) и непокрытая надбавка вне зоны.
+    assert tariff["required_extra_payment"] == 500
+    assert tariff["required_candidate_income"] == 1500
 
 
 def test_outside_zone_markup_covered_by_margin_needs_no_extra() -> None:

@@ -59,6 +59,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.homevisit.location.domain.BasketPreview
 import com.homevisit.location.domain.BatchOrder
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
@@ -94,6 +95,13 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
     // напрямую и показывает экран подтверждения; в общий uiState не мешаем.
     private val batchOrdersState = MutableStateFlow<List<BatchOrder>>(emptyList())
     val batchOrders: StateFlow<List<BatchOrder>> = batchOrdersState.asStateFlow()
+
+    // Вердикт на пачку целиком. null — ещё не считали или сервер не ответил; это НЕ то же
+    // самое, что «пачка невыгодна», и на экране это разные состояния (отчёт 878).
+    private val basketPreviewState = MutableStateFlow<BasketPreview?>(null)
+    val basketPreview: StateFlow<BasketPreview?> = basketPreviewState.asStateFlow()
+    private val basketLoadingState = MutableStateFlow(false)
+    val basketLoading: StateFlow<Boolean> = basketLoadingState.asStateFlow()
 
     // Фото из «Поделиться» (Ф15.4): принято, разбирается, не нашлось адресов. Пустой
     // список заказов — не состояние: по нему не отличить «ещё считаем» от «не нашли».
@@ -999,6 +1007,7 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
         if (text.isBlank()) return
         viewModelScope.launch {
             batchOrdersState.value = repository.batchParse(serverUrl, apiKey, text)
+            basketPreviewState.value = null
         }
     }
 
@@ -1047,6 +1056,25 @@ class HomeVisitViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun clearBatch() {
         batchOrdersState.value = emptyList()
+        basketPreviewState.value = null
+    }
+
+    /**
+     * Посчитать пачку ЦЕЛИКОМ: один маршрут, один вердикт (вариант Б, отчёты 878/881).
+     *
+     * Раньше экран пакета не показывал ни рубля: человек нажимал «Добавить (N)» вслепую,
+     * а заказы прогонялись по одному, и общий подъезд куста доставался первому — он и
+     * объявлялся невыгодным. Теперь сначала видно вердикт на связку.
+     */
+    fun previewBasket(serverUrl: String, apiKey: String, orders: List<BatchOrder>) {
+        viewModelScope.launch {
+            basketLoadingState.value = true
+            try {
+                basketPreviewState.value = repository.basketPreview(serverUrl, apiKey, orders)
+            } finally {
+                basketLoadingState.value = false
+            }
+        }
     }
 
     /** «Добавить все зелёные» (Ф15.2): распознанные заказы — сразу в работу, по одному calc+accept. */
