@@ -803,22 +803,18 @@ internal fun EvaluateForm(
             // — компактным рядом, а не двумя кнопками во всю ширину. Раньше они весили
             // столько же, сколько адрес и доход, и экран читался как список одинаковых
             // блоков без главного.
+            // Кнопка «Фото списка» УБРАНА по решению владельца (01.08.2026): распознавание
+            // со скриншотов агрегаторов давало слишком много красных «не понято», и
+            // разбирать их дольше, чем вписать адрес руками. Сам механизм не удалён —
+            // сервис распознавания, разбор списка и экран пакета на месте, вернуть
+            // кнопку = раскомментировать этот блок. Текстовый список (поделиться текстом)
+            // работает как прежде.
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                CompactAction(
-                    icon = Icons.Filled.AddAPhoto,
-                    label = "Фото списка",
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        orderPhotoPicker.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                        )
-                    },
-                )
                 // Быстро задать старт/финиш смены: от старта считается дорога до заказа.
                 // Без него оценка честно предупреждает, что расчёт неполный.
                 CompactAction(
                     icon = Icons.Filled.PlayArrow,
-                    label = "Старт и финиш",
+                    label = "Задать старт и финиш смены",
                     modifier = Modifier.weight(1f),
                     onClick = onEditRoute,
                 )

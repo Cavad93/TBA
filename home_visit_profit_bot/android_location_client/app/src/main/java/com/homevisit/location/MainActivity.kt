@@ -265,15 +265,17 @@ class MainActivity : ComponentActivity() {
                 }
                 LaunchedEffect(sharedImageUri) {
                     if (sharedImageUri != null) {
-                        val bytes = runCatching {
-                            contentResolver.openInputStream(sharedImageUri)?.use { it.readBytes() }
-                        }.getOrNull()
-                        if (bytes != null && bytes.isNotEmpty()) {
-                            // Сначала миниатюра, потом разбор: человек должен увидеть, что
-                            // фото принято, ещё до того, как ответит OCR.
-                            sharedImagePreview = decodeThumbnail(bytes)
-                            viewModel.parseSharedImage(DEFAULT_SERVER_URL, sessionToken, bytes)
-                        }
+                        // Распознавание фото ОТКЛЮЧЕНО (01.08.2026, решение владельца):
+                        // со скриншотов агрегаторов оно давало слишком много «не понято».
+                        // Молча ничего не делать нельзя — человек прислал картинку и ждёт
+                        // ответа, поэтому честно говорим, что делать вместо этого. Разбор
+                        // текстового списка работает и остаётся.
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Распознавание фото пока отключено — пришлите список текстом " +
+                                "или внесите адрес вручную",
+                            Toast.LENGTH_LONG,
+                        ).show()
                     }
                 }
                 if (batchOrders.isNotEmpty()) {
