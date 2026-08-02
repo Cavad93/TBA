@@ -1,6 +1,7 @@
 package com.homevisit.location.calc
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -212,30 +213,82 @@ class OfflineVerdictTest {
     }
 
     /**
-     * Готовое «до» с сервера вытесняет самосборку (отчёт 913).
+     * Готовое «до» с сервера вытесняет самосборку — видно по ОТТЕНКУ вердикта (отчёт 913).
      *
-     * В кеше телефона только принятые заказы. Завершённый визит, телемедицина, работа в
-     * офисе, расходы дня и компенсации туда не попадают, и собранное на телефоне «до»
-     * выходило завышенным — офлайн говорил «бери» там, где сервер говорил «невыгодно».
+     * В кеше телефона только принятые заказы: завершённый визит схлопнут в точку старта,
+     * телемедицина, работа в офисе, расходы дня и компенсации не едут вовсе. Сервер знает
+     * день целиком, телефон — нет.
+     *
+     * Богатый день выбран не случайно. После варианта А дневной ₽/час различает ровно одно:
+     * «ОДНОЗНАЧНО ДА» (заказ поднимает средний ₽/час) против «МОЖНО БРАТЬ» (опускает).
+     * На самосборном дне тот же заказ средний ₽/час поднимает, а на дне по 20 000 ₽/час —
+     * опускает. Возьми я день ПРОВАЛЬНЫЙ, оттенок совпал бы с самосборным (там заказ тоже
+     * поднимает ставку), и тест не поймал бы ничего — ровно на этом он и упал в CI.
      */
     @Test
-    fun authoritativeDayBeforeWins() {
+    fun authoritativeDayBeforeChangesTheShade() {
         val homemade = OfflineVerdict.evaluate(baseInput(candidateIncome = 800.0))
-        // Тот же день, но сервер сказал: чистыми пока МИНУС 2000 ₽ за 300 минут.
+        // Тот же день, но сервер знает: чистыми 20 000 ₽ за час — заказ такую планку снижает.
         val fromServer = OfflineVerdict.evaluate(
             baseInput(candidateIncome = 800.0).copy(
-                dayBeforeNet = -2000.0,
-                dayBeforeMinutes = 300.0,
+                dayBeforeNet = 20000.0,
+                dayBeforeMinutes = 60.0,
             ),
         )
         // Маржа самого заказа от этого не меняется — она про заказ, а не про день.
         assertEquals(homemade.marginalProfit, fromServer.marginalProfit, 1e-9)
         assertEquals(homemade.marginalHourly, fromServer.marginalHourly, 1e-9)
-        // А вот оттенок вердикта обязан отличаться: день-то другой.
-        assertTrue(
-            "готовое «до» не доехало до расчёта: вердикты совпали при разных днях",
-            homemade.decision != fromServer.decision || homemade.score != fromServer.score,
+        assertEquals("ОДНОЗНАЧНО ДА", homemade.decision)
+        assertEquals("МОЖНО БРАТЬ", fromServer.decision)
+    }
+
+    /**
+     * Дневное «до» НЕ переворачивает вердикт — и это честная граница этапа 69.
+     *
+     * После варианта А заказ судит его собственная ставка: планка берётся из настроек и
+     * ожидаемой ставки часа, а средний ₽/час дня в неё не входит. Значит и полный день с
+     * сервера не может превратить «бери» в «невыгодно». Ставлю это тестом, чтобы не
+     * приписывать этапу 69 силы, которой у него нет: он чинит оттенок вердикта и число в
+     * плитке «чистыми/ч», а не пропуск заказа.
+     */
+    @Test
+    fun authoritativeDayNeverFlipsTheVerdict() {
+        val homemade = OfflineVerdict.evaluate(baseInput(candidateIncome = 800.0))
+        val ruinedDay = OfflineVerdict.evaluate(
+            baseInput(candidateIncome = 800.0).copy(
+                dayBeforeNet = -100000.0,
+                dayBeforeMinutes = 60.0,
+            ),
         )
+        assertEquals(homemade.verdict, ruinedDay.verdict)
+        assertEquals(homemade.score, ruinedDay.score)
+    }
+
+    /**
+     * Дневные ₽/час выдаются наружу только когда день пришёл с сервера.
+     *
+     * Их показывает плитка «чистыми/ч» на экране оценки. Отдать туда самосборное число
+     * значит вернуть ровно ту ошибку, ради которой затевался этап 69, — поэтому на старом
+     * кеше здесь null, а не «примерно посчитали сами».
+     */
+    @Test
+    fun dayHourlyIsExposedOnlyWhenTheServerSentTheDay() {
+        val homemade = OfflineVerdict.evaluateFull(baseInput(candidateIncome = 800.0))
+        assertNull(homemade.dayBeforeHourly)
+        assertNull(homemade.dayAfterHourly)
+
+        val fromServer = OfflineVerdict.evaluateFull(
+            baseInput(candidateIncome = 800.0).copy(
+                dayBeforeNet = 5000.0,
+                dayBeforeMinutes = 100.0,
+            ),
+        )
+        // 5000 ₽ за 100 минут — ровно 3000 ₽/час, без арифметики телефона.
+        assertEquals(3000.0, fromServer.dayBeforeHourly!!, 1e-9)
+        // Заказ на 800 ₽ добавляет минут больше, чем денег: ставка дня падает, но остаётся
+        // положительной — то самое число, что человек увидит в плитке.
+        assertTrue("ставка после заказа должна быть ниже", fromServer.dayAfterHourly!! < 3000.0)
+        assertTrue("ставка после заказа должна остаться положительной", fromServer.dayAfterHourly!! > 0)
     }
 
     /** Старый кеш без готового «до» считается ровно как раньше — до последней копейки. */

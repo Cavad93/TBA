@@ -121,6 +121,38 @@ class OfflineEstimateMapperTest {
         assertTrue("балл 1..100", est!!.score in 1..100)
     }
 
+    /**
+     * Плитка «чистыми/ч» перестаёт показывать ноль (отчёт 913).
+     *
+     * Экран оценки рисует afterHourly. Пока телефон собирал день сам, честного числа взять
+     * было неоткуда и маппер отдавал ноль — офлайн человек видел «0 ₽» там, где онлайн
+     * стоит ставка дня. Сервер теперь присылает «до» целиком.
+     */
+    @Test
+    fun authoritativeDayFillsTheHourlyGauge() {
+        val est = OfflineEstimateMapper.fromDayMatrix(
+            dayCache().put("day_before_net", 5000.0).put("day_before_minutes", 100.0),
+            candidateLat = 59.945, candidateLon = 30.340,
+            income = 1500.0, address = "Новый адрес", clinic = "",
+        )
+        assertNotNull(est)
+        // 5000 ₽ за 100 минут — ровно 3000 ₽/час.
+        assertEquals(3000.0, est!!.beforeHourly, 1e-9)
+        assertTrue("плитка «чистыми/ч» больше не ноль", est.afterHourly > 0.0)
+    }
+
+    /** Старый кеш без готового «до» — прежнее поведение: нули, а не самосборное число. */
+    @Test
+    fun oldCacheLeavesTheHourlyGaugeEmpty() {
+        val est = OfflineEstimateMapper.fromDayMatrix(
+            dayCache(), candidateLat = 59.945, candidateLon = 30.340,
+            income = 1500.0, address = "Новый адрес", clinic = "",
+        )
+        assertNotNull(est)
+        assertEquals(0.0, est!!.beforeHourly, 0.0)
+        assertEquals(0.0, est.afterHourly, 0.0)
+    }
+
     private fun verdictOf(decision: String): String {
         val text = decision.uppercase()
         return when {

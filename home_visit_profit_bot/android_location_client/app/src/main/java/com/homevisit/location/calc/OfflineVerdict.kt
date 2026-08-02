@@ -70,8 +70,26 @@ object OfflineVerdict {
         val dayOrdersCount: Int? = null,
     )
 
+    /**
+     * Итог офлайн-оценки: вердикт заказа плюс ₽/час дня ДО и ПОСЛЕ заказа.
+     *
+     * Дневные ставки нуллябельны намеренно. Пока телефон собирал день сам, показывать их
+     * было нельзя — они не сходились с серверными, и экран оценки рисовал в плитке
+     * «чистыми/ч» ноль. Сервер теперь присылает «до» целиком, и число становится честным,
+     * но ТОЛЬКО когда оно пришло: на старом кеше здесь null, и экран остаётся при прежнем
+     * поведении, а не подставляет самосборную цифру под видом серверной.
+     */
+    data class Outcome(
+        val result: ProfitabilityCalculator.Result,
+        val dayBeforeHourly: Double?,
+        val dayAfterHourly: Double?,
+    )
+
     /** Мгновенный офлайн-вердикт заказа. Возвращает тот же Result, что ProfitabilityCalculator. */
-    fun evaluate(input: Input): ProfitabilityCalculator.Result {
+    fun evaluate(input: Input): ProfitabilityCalculator.Result = evaluateFull(input).result
+
+    /** Вердикт и дневные ₽/час ОДНИМ расчётом: второй проход по той же арифметике развёл бы числа. */
+    fun evaluateFull(input: Input): Outcome {
         val extra = RouteOptimizer.candidateExtra(
             input.distances, input.durations, input.existingCount, input.anchors,
             respectFeedOrder = !input.autoOptimize,
@@ -105,7 +123,7 @@ object OfflineVerdict {
         val beforeHourly = safeHourly(beforeNet, beforeMinutes)
         val afterHourly = safeHourly(afterNet, afterMinutes)
 
-        return ProfitabilityCalculator.evaluate(
+        val result = ProfitabilityCalculator.evaluate(
             ProfitabilityCalculator.Input(
                 income = input.candidateIncome,
                 extraKm = extra.extraKm,
@@ -129,6 +147,11 @@ object OfflineVerdict {
                 existingCount = input.dayOrdersCount ?: input.existingCount,
                 expectedHourly = input.expectedHourly,
             )
+        )
+        return Outcome(
+            result = result,
+            dayBeforeHourly = if (serverKnowsTheDay) beforeHourly else null,
+            dayAfterHourly = if (serverKnowsTheDay) afterHourly else null,
         )
     }
 

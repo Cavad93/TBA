@@ -13,9 +13,10 @@ import org.json.JSONObject
  * маппинг результата в модель экрана. Тестируется JVM-тестом без эмулятора.
  *
  * Числа маржи (marginalHourly/perKm, extraCarCost) паритетны серверу — их и сверяет
- * лог расхождений Ф3.6 при возврате сети. Поля, которых у офлайн-ядра нет
- * (before/after hourly, надбавки), оставляем нулями: это мгновенная оценка, сервер
- * уточнит при связи.
+ * лог расхождений Ф3.6 при возврате сети. Дневные before/after hourly берутся из готового
+ * «до» с сервера (отчёт 913); на старом кеше их нет и они остаются нулями, как раньше.
+ * Прочие поля, которых у офлайн-ядра нет (надбавки), — нули: это мгновенная оценка,
+ * сервер уточнит при связи.
  */
 object OfflineEstimateMapper {
 
@@ -79,7 +80,7 @@ object OfflineEstimateMapper {
             autoOptimize = c.optBoolean("auto_optimize", true),
         )
 
-        val result = OfflineCandidateEstimator.estimate(
+        val outcome = OfflineCandidateEstimator.estimate(
             cachedPoints = points,
             cachedDistances = distances,
             cachedDurations = durations,
@@ -98,6 +99,7 @@ object OfflineEstimateMapper {
             dayBeforeMinutes = beforeMinutes,
         )
 
+        val result = outcome.result
         val costPerKm = coeff.fuelPerKm + coeff.maintenancePerKm + coeff.extraPerKm
         val extraKm = if (costPerKm > 0) result.extraCarCost / costPerKm else 0.0
         val extraDrive = (result.extraTotalMinutes - coeff.serviceMinutes).coerceAtLeast(0.0)
@@ -112,8 +114,13 @@ object OfflineEstimateMapper {
             score = result.score,
             requiredExtraPayment = 0.0,
             requiredCandidateIncome = 0.0,
-            beforeHourly = 0.0,
-            afterHourly = 0.0,
+            // Экран оценки рисует afterHourly в плитке «чистыми/ч». Пока телефон
+            // собирал день сам, честного числа взять было неоткуда и здесь стоял ноль —
+            // человек офлайн видел «0 ₽». Сервер теперь присылает «до» дня целиком, и
+            // ставка становится настоящей. Старый кеш «до» не содержит — там по-прежнему
+            // ноль, лучше прежнее поведение, чем самосборное число под видом серверного.
+            beforeHourly = outcome.dayBeforeHourly ?: 0.0,
+            afterHourly = outcome.dayAfterHourly ?: 0.0,
             marginalHourly = result.marginalHourly,
             marginalPerKm = result.marginalPerKm,
             costPerKm = costPerKm,

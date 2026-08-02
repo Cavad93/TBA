@@ -65,7 +65,7 @@ object OfflineCandidateEstimator {
         dayOrdersCount: Int? = null,
         dayBeforeNet: Double? = null,
         dayBeforeMinutes: Double? = null,
-    ): ProfitabilityCalculator.Result {
+    ): OfflineVerdict.Outcome {
         val n = cachedPoints.size
         require(n >= 2) { "кеш-матрица должна содержать хотя бы старт и финиш" }
         require(cachedDistances.size == n && cachedDurations.size == n) {
@@ -106,7 +106,7 @@ object OfflineCandidateEstimator {
             }
         }
 
-        return OfflineVerdict.evaluate(
+        return OfflineVerdict.evaluateFull(
             OfflineVerdict.Input(
                 distances = dist.map { it.toList() },
                 durations = dur.map { it.toList() },

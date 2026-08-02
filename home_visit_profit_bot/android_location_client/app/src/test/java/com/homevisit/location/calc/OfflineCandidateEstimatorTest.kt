@@ -44,7 +44,7 @@ class OfflineCandidateEstimatorTest {
             candidateIncome = income,
             existingIncomes = listOf(1000.0),
             coeff = coeff,
-        )
+        ).result
 
     @Test
     fun fartherCandidateCostsMore() {
