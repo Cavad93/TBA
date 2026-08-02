@@ -640,6 +640,11 @@ public class LocationUploadService extends Service implements LocationListener, 
                 .setStyle(new Notification.BigTextStyle().bigText(alert.optString("text", "")))
                 .setSmallIcon(android.R.drawable.ic_menu_mylocation)
                 .setAutoCancel(true)
+                // Звук и всплытие — только на ПЕРВОМ показе (отчёт 919). Уведомление
+                // висит под одним и тем же id, и без этого флага каждый повторный
+                // notify() звенит заново, даже если текст тот же. Причина спама была
+                // на сервере, но и здесь телефон усиливал её на ровном месте.
+                .setOnlyAlertOnce(true)
                 .setContentIntent(openPending);
         manager.notify(PARKING_NOTIFICATION_ID, builder.build());
     }

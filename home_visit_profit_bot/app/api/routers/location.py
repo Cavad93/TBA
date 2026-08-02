@@ -100,7 +100,8 @@ def _process_one(payload: dict, db, repos: dict) -> dict:
             db, work_day_id=active_day.id, lat=lat, lon=lon,
             speed_kmh=result.avg_speed_kmh, now=captured_at,
         ) or parking_entry_check(
-            db, work_day_id=active_day.id, lat=lat, lon=lon, now=captured_at,
+            db, work_day_id=active_day.id, lat=lat, lon=lon,
+            speed_kmh=result.avg_speed_kmh, now=captured_at,
         )
         parking_alert = alert.payload() if alert else None
 

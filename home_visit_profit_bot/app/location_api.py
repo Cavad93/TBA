@@ -276,6 +276,7 @@ def _handler_factory(config: AppConfig):
                         work_day_id=active_day.id,
                         lat=lat,
                         lon=lon,
+                        speed_kmh=result.avg_speed_kmh,
                         now=captured_at,
                     )
                     parking_alert = alert.payload() if alert else None

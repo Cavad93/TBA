@@ -11,6 +11,23 @@
      человек не увидит и настоящее.
 
 Повторно про ту же зону молчим час: человек уже знает, он там же и стоит.
+
+Отчёт 919 («телефон спамит, что машина в платной зоне») вскрыл три дыры в этих
+правилах, и все три были здесь, а не на телефоне — телефон только показывает то,
+что решил сервер:
+
+  * заметка о въезде не имела гейта по скорости. Улицы лежат в базе отдельными
+    зонами (kind="street", попадание — 25 м от оси), поэтому проезд по центру на
+    60 км/ч давал уведомление на каждой улице. Теперь заметка требует той же
+    медленной скорости, что и «встал»: она про приехал-паркуюсь, а не про проехал;
+  * карантин въезда помнил РОВНО ОДНУ зону, и соседняя его затирала: A → B → A
+    давало три уведомления за минуты. Теперь карантин по ВРЕМЕНИ и без привязки к
+    зоне — заметка необязательная, а главное «вы встали» живёт отдельно и по-прежнему
+    различает зоны;
+  * карантин «встал» стирался любой точкой быстрее 5 км/ч вместе со счётчиком
+    стояния. Переставил машину на пятьдесят метров — и через пять минут то же
+    уведомление снова. Теперь движение обнуляет только счётчик стояния, а память о
+    том, что про эту зону уже сказали, живёт свой час, как и обещано выше.
 """
 
 from __future__ import annotations
@@ -19,7 +36,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from app.database import Database
-from app.services.parking_service import ParkingHit
+from app.services.parking_service import ParkingHit, is_municipal
 from app.services.visit_parking import zone_at
 
 # Медленнее этого — уже не едем.
@@ -116,29 +133,42 @@ def check_entry(
     work_day_id: int,
     lat: float,
     lon: float,
+    speed_kmh: float,
     now: datetime,
 ) -> ParkingAlert | None:
-    """Въехал в платную зону — сказать один раз и тихо.
+    """Приехал в платную зону и притормозил — сказать один раз и тихо.
 
     Модуль сознательно построен вокруг «вы ВСТАЛИ» (см. docstring файла): пугать
     человека на каждом проезде через центр — верный способ добиться, чтобы
     уведомления выключили насовсем. Поэтому у въезда:
       * своя пара колонок состояния (entered_*), а не общая с «встал» — иначе
         заметка о въезде съедала бы главное уведомление «пора платить»;
-      * тот же часовой карантин на ту же зону, что и у «встал»;
-      * условие `paid_now` — ночью парковка бесплатная, молчим.
+      * гейт по скорости, тот же SLOW_SPEED_KMH, что у «встал» (отчёт 919). Второго
+        порога намеренно не завожу: «медленно» в этом модуле должно значить одно и то
+        же, иначе через полгода никто не вспомнит, почему их два;
+      * карантин по ВРЕМЕНИ, без привязки к зоне (отчёт 919). Заметка необязательная,
+        а зон в центре по одной на квартал — привязка к зоне превращала карантин в
+        фикцию. Различать зоны продолжает главное уведомление «вы встали»;
+      * условие `paid_now` — ночью парковка бесплатная, молчим;
+      * условие «зона городская» (отчёт 922) — про коммерческую стоянку молчим: там
+        шлагбаум или касса, и платят не в приложении города.
+
+    `speed_kmh` — серверная средняя, не присланная телефоном: телефон мог бы прислать
+    что угодно, а по этому числу человек получает уведомление.
     """
+    if speed_kmh >= SLOW_SPEED_KMH:
+        # Едет насквозь. Платить пока не за что, и говорить не о чем.
+        return None
+
     hit = zone_at(connection, lat, lon, moment=now)
-    if hit is None or not hit.paid_now:
+    if hit is None or not hit.paid_now or not is_municipal(hit.zone):
         return None
 
     repository = ParkingStateRepository(connection)
     row = repository.get(work_day_id)
-    entered_zone = row["entered_zone_id"] if row else None
     entered_at = _parse(row["entered_at"]) if row and row["entered_at"] else None
-    if entered_zone == hit.zone.id and entered_at is not None:
-        if (now - entered_at) < timedelta(minutes=REPEAT_COOLDOWN_MINUTES):
-            return None
+    if entered_at is not None and (now - entered_at) < timedelta(minutes=REPEAT_COOLDOWN_MINUTES):
+        return None
 
     repository.save_entry(work_day_id, zone_id=hit.zone.id, entered_at=now.isoformat())
     return ParkingAlert(hit=hit, reason="entered")
@@ -158,10 +188,17 @@ def check(
     row = repository.get(work_day_id)
 
     if speed_kmh >= SLOW_SPEED_KMH:
-        # Поехали — счётчик стояния обнуляем, и о прошлой зоне забываем: в следующую
-        # он въедет заново, и предупредить о ней надо будет снова.
-        if row is not None and (row["slow_since"] or row["notified_zone_id"]):
-            repository.save(work_day_id, slow_since=None, notified_zone_id=None, notified_at=None)
+        # Поехали — обнуляем ТОЛЬКО счётчик стояния. Память о том, что про эту зону уже
+        # сказали, движение не стирает: иначе обещанный час тишины кончался на первой же
+        # перестановке машины, и человек получал то же уведомление снова (отчёт 919).
+        # В другой зоне он всё равно услышит: карантин «встал» смотрит на id зоны.
+        if row is not None and row["slow_since"]:
+            repository.save(
+                work_day_id,
+                slow_since=None,
+                notified_zone_id=row["notified_zone_id"],
+                notified_at=row["notified_at"],
+            )
         return None
 
     slow_since = _parse(row["slow_since"]) if row and row["slow_since"] else None
@@ -178,8 +215,11 @@ def check(
         return None
 
     hit = zone_at(connection, lat, lon, moment=now)
-    if hit is None or not hit.paid_now:
-        # Либо не в зоне, либо сейчас бесплатно. Молчим.
+    if hit is None or not hit.paid_now or not is_municipal(hit.zone):
+        # Не в зоне, сейчас бесплатно или это коммерческая стоянка (отчёт 922) — молчим.
+        # У стоянки шлагбаум и касса: уведомление там ничего не даёт, а совет «оплатите
+        # в приложении парковки» неверен. Городской тариф ей приписывался только из-за
+        # грубой рамки города в parking_artifact_service.
         return None
 
     already = row["notified_zone_id"] if row else None
